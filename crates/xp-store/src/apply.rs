@@ -72,11 +72,7 @@ impl Store {
             };
             (rd(META_NEXT_BOX_GIDX)?, rd(META_NEXT_TX_GIDX)?)
         };
-        let partial = {
-            let meta = txn.open_table(META)?;
-            let flag = meta.get(META_PARTIAL_FROM)?.is_some();
-            flag
-        };
+        let partial = txn.open_table(META)?.get(META_PARTIAL_FROM)?.is_some();
 
         for b in blocks {
             if b.header.height != height + 1 {
@@ -192,7 +188,12 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             rent_matures
                 .remove(k_rent(maturity_height(row.creation_height), row.gidx).as_slice())?;
 
-            let bal = load_balance(&tree_balance, &mut touched_balances, &row.tree_hash)?;
+            let bal = load_balance(
+                &tree_balance,
+                &mut touched_balances,
+                &row.tree_hash,
+                ctx.height,
+            )?;
             debit_balance(bal, row.value, ctx.partial)?;
             sub_tokens(&mut bal.tokens, &row.tokens, ctx.partial)?;
             bal.last_seen = ctx.height;
@@ -222,13 +223,15 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
                 o,
             )?;
 
-            let bal = load_balance(&tree_balance, &mut touched_balances, &o.tree_hash.0)?;
+            let bal = load_balance(
+                &tree_balance,
+                &mut touched_balances,
+                &o.tree_hash.0,
+                ctx.height,
+            )?;
             bal.nano += o.value;
             bal.box_count += 1;
             add_tokens(&mut bal.tokens, &o.tokens);
-            if bal.first_seen == 0 {
-                bal.first_seen = ctx.height;
-            }
             bal.last_seen = ctx.height;
 
             trees_in_tx.push(o.tree_hash.0);
@@ -452,10 +455,18 @@ pub(crate) fn upsert_tree(
     Ok(true)
 }
 
+/// Loads (or creates) the cached [`BalanceRow`] for `tree`.
+///
+/// `first_seen` is set to `height` only when the row is created here, i.e. when the store
+/// held no balance for this tree yet. It is deliberately *not* re-derived from a
+/// `first_seen == 0` test: 0 is a legitimate stored value, meaning "genesis" — `seed_genesis`
+/// writes it for the three chain-spec trees, which belong to no block. Treating 0 as "unset"
+/// would silently overwrite those with the first post-genesis height that touched them.
 fn load_balance<'a>(
     tree_balance: &Table<'_, &'static [u8], &'static [u8]>,
     cache: &'a mut HashMap<Hash32, BalanceRow>,
     tree: &Hash32,
+    height: u32,
 ) -> Result<&'a mut BalanceRow, StoreError> {
     if !cache.contains_key(tree) {
         let row = tree_balance
@@ -466,8 +477,8 @@ fn load_balance<'a>(
                 nano: 0,
                 tokens: vec![],
                 box_count: 0,
-                first_seen: 0,
-                last_seen: 0,
+                first_seen: height,
+                last_seen: height,
             });
         cache.insert(*tree, row);
     }

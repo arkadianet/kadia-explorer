@@ -240,8 +240,8 @@ impl Reader {
     }
 
     /// Derives the tree hash for `address` (mainnet) and looks it up in `ERGO_TREES`. An
-    /// unparseable address or one whose tree was never indexed both return `Ok(None)` — the
-    /// API layer distinguishes "bad input" (400) from "not found" (404).
+    /// unparseable address and one whose tree was never indexed both return `Ok(None)`: the
+    /// two cases are not distinguishable through this API.
     pub fn tree_by_address(&self, address: &str) -> Result<Option<Hash32>, StoreError> {
         let Ok(addr) = AddressEncoder::new(NetworkPrefix::Mainnet).parse_address_from_str(address)
         else {
@@ -318,7 +318,7 @@ impl Reader {
                         break;
                     }
                     let (k, _) = item?;
-                    let gidx = crate::keys::gidx_of_composite(k.value());
+                    let gidx = crate::keys::gidx_of_composite(k.value())?;
                     items.push(resolve(self, gidx)?);
                     last_gidx = Some(gidx);
                 }
@@ -339,7 +339,7 @@ impl Reader {
                         break;
                     }
                     let (k, _) = item?;
-                    let gidx = crate::keys::gidx_of_composite(k.value());
+                    let gidx = crate::keys::gidx_of_composite(k.value())?;
                     items.push(resolve(self, gidx)?);
                     last_gidx = Some(gidx);
                 }
@@ -445,7 +445,7 @@ impl Reader {
             }
             let (k, v) = item?;
             let key = k.value();
-            let height = crate::meta_u32(&key[..4])?;
+            let height = rent_key_height(key)?;
             let id = as_hash32(v.value())?;
             out.push((height, id));
         }
@@ -477,8 +477,8 @@ impl Reader {
             }
             let (k, v) = item?;
             let key = k.value();
-            let mature = crate::meta_u32(&key[..4])?;
-            let gidx = crate::keys::gidx_of_composite(key);
+            let mature = rent_key_height(key)?;
+            let gidx = crate::keys::gidx_of_composite(key)?;
             let id = as_hash32(v.value())?;
             items.push((mature, id));
             last = Some((mature, gidx));
@@ -486,6 +486,15 @@ impl Reader {
         let next_cursor = if items.len() == limit { last } else { None };
         Ok((items, next_cursor))
     }
+}
+
+/// Leading big-endian maturity height of a `RENT_MATURES` key (see `keys::k_rent`), failing
+/// with [`StoreError::Corrupt`] rather than panicking on a short key.
+fn rent_key_height(key: &[u8]) -> Result<u32, StoreError> {
+    let head = key
+        .get(..4)
+        .ok_or(StoreError::Corrupt("rent key shorter than 4 bytes"))?;
+    crate::meta_u32(head)
 }
 
 fn box_by_gidx_lookup(

@@ -30,11 +30,18 @@ pub fn k_rent(mature: u32, g: Gidx) -> [u8; 12] {
 }
 
 /// Extracts the trailing 8-byte big-endian gidx from a composite key (e.g. `k_hash_gidx` or
-/// `k_rent` output).
-pub fn gidx_of_composite(k: &[u8]) -> Gidx {
+/// `k_rent` output). A key shorter than 8 bytes cannot have been written by this module, so
+/// it is [`StoreError::Corrupt`] rather than a panic.
+pub fn gidx_of_composite(k: &[u8]) -> Result<Gidx, crate::StoreError> {
+    let tail = k
+        .get(k.len().saturating_sub(8)..)
+        .filter(|t| t.len() == 8)
+        .ok_or(crate::StoreError::Corrupt(
+            "composite key shorter than 8 bytes",
+        ))?;
     let mut b = [0u8; 8];
-    b.copy_from_slice(&k[k.len() - 8..]);
-    u64::from_be_bytes(b)
+    b.copy_from_slice(tail);
+    Ok(u64::from_be_bytes(b))
 }
 
 /// Half-open range `[prefix.., prefix+1..)` covering every key that starts with `prefix`.
@@ -65,6 +72,18 @@ mod tests {
         let h = [7u8; 32];
         assert!(k_hash_gidx(&h, 1) < k_hash_gidx(&h, 2));
         assert!(k_hash_gidx(&[6u8; 32], u64::MAX) < k_hash_gidx(&h, 0));
+    }
+
+    #[test]
+    fn gidx_of_composite_rejects_a_short_key() {
+        assert_eq!(gidx_of_composite(&k_hash_gidx(&[3u8; 32], 42)).unwrap(), 42);
+        assert_eq!(gidx_of_composite(&k_rent(7, 42)).unwrap(), 42);
+        assert!(matches!(
+            gidx_of_composite(&[0u8; 7]),
+            Err(crate::StoreError::Corrupt(
+                "composite key shorter than 8 bytes"
+            ))
+        ));
     }
 
     #[test]

@@ -48,6 +48,13 @@ impl Store {
     /// Opens (creating if absent) the redb database at `path`, ensuring every table in
     /// [`tables::ALL`] exists. On a fresh database the current [`tables::SCHEMA_VERSION`] is
     /// recorded; on an existing one a mismatched version is refused.
+    ///
+    /// Also refuses a store written before chain-spec genesis seeding existed. Such a store
+    /// has the same schema version (nothing about the table layout changed) but was built on
+    /// the old tolerance for a missing input at height 1, so its genesis-tree balances are
+    /// wrong and no amount of further indexing repairs them. It is identified by having
+    /// indexed at least one block while being neither genesis-seeded nor explicitly partial —
+    /// a combination the current code cannot produce.
     pub fn open(path: &Path) -> Result<Store, StoreError> {
         let db = Database::create(path)?;
         let txn = db.begin_write()?;
@@ -66,6 +73,14 @@ impl Store {
                 }
                 Some(v) if v == SCHEMA_VERSION => {}
                 Some(_) => return Err(StoreError::Corrupt("schema version mismatch")),
+            }
+            if meta.get(META_INDEXED_HEIGHT)?.is_some()
+                && meta.get(META_GENESIS_SEEDED)?.is_none()
+                && meta.get(META_PARTIAL_FROM)?.is_none()
+            {
+                return Err(StoreError::Corrupt(
+                    "store predates genesis seeding; delete explorer.redb and resync",
+                ));
             }
         }
         txn.commit()?;

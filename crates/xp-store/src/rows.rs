@@ -352,6 +352,12 @@ impl TreeRow {
     }
 }
 
+/// A tree's aggregate balance and activity window.
+///
+/// `first_seen` is the height at which this row was created — the first height that credited
+/// or debited the tree — and `0` specifically means genesis: the three chain-spec trees
+/// seeded by `Store::seed_genesis` belong to no block. `0` is therefore a real value, not a
+/// sentinel for "unset"; `apply_block` sets `first_seen` only when it creates the row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BalanceRow {
     pub nano: u64,

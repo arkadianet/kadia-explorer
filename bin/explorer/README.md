@@ -92,4 +92,12 @@ The store now seeds Ergo's three chain-spec genesis boxes (from the node's `/utx
 before applying height 1, and no longer tolerates a missing input at height 1. An
 `explorer.redb` written before that change was built on the old tolerance and holds wrong
 balances for the genesis trees, so **delete any existing `data/explorer.redb` and re-sync**.
-The schema version is unchanged (nothing is deployed), so this is not detected automatically.
+
+The schema version is unchanged — the table layout never changed, only what gets written
+into it — so this is not a schema mismatch. It is instead detected at startup: a store that
+has indexed blocks while being neither genesis-seeded nor explicitly partial can only have
+been written by the old code, and the explorer refuses to open it with
+
+```text
+corrupt row: store predates genesis seeding; delete explorer.redb and resync
+```
