@@ -1,0 +1,73 @@
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--fg);
+	font: 14px/1.45 var(--font-sans);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+.mono {
+	font: 12px var(--font-mono);
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+a {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+button {
+	font: inherit;
+	color: inherit;
+}
+
+table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+table tr {
+	height: 36px;
+}
+
+th,
+td {
+	border-bottom: 1px solid var(--border);
+	padding: 0 var(--space-3);
+	text-align: left;
+}
+
+ul,
+ol {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+	margin: 0;
+}
