@@ -1,6 +1,104 @@
+pub mod apply;
 pub mod keys;
+pub mod read;
 pub mod rows;
 pub mod tables;
+
+pub use read::Reader;
+
+use redb::{Database, ReadableTable};
+use std::path::Path;
+use tables::*;
+use xp_types::Hash32;
+
+/// Number of trailing block heights for which an [`rows::UndoRow`] is retained, bounding how
+/// deep a chain fork can be rolled back before a full reindex is required.
+pub const ROLLBACK_WINDOW: u32 = 1_000;
+
+pub struct Store {
+    db: Database,
+}
+
+impl Store {
+    /// Opens (creating if absent) the redb database at `path`, ensuring every table in
+    /// [`tables::ALL`] exists. On a fresh database the current [`tables::SCHEMA_VERSION`] is
+    /// recorded; on an existing one a mismatched version is refused.
+    pub fn open(path: &Path) -> Result<Store, StoreError> {
+        let db = Database::create(path)?;
+        let txn = db.begin_write()?;
+        for t in ALL {
+            txn.open_table(t)?;
+        }
+        {
+            let mut meta = txn.open_table(META)?;
+            let existing = meta
+                .get(META_SCHEMA)?
+                .map(|v| u32::from_be_bytes(v.value().try_into().unwrap()));
+            match existing {
+                None => {
+                    meta.insert(META_SCHEMA, keys::k_u32(SCHEMA_VERSION).as_slice())?;
+                }
+                Some(v) if v == SCHEMA_VERSION => {}
+                Some(_) => return Err(StoreError::Corrupt("schema version mismatch")),
+            }
+        }
+        txn.commit()?;
+        Ok(Store { db })
+    }
+
+    /// Height of the last block applied, or `None` for an empty store.
+    pub fn indexed_height(&self) -> Result<Option<u32>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let meta = txn.open_table(META)?;
+        Ok(meta
+            .get(META_INDEXED_HEIGHT)?
+            .map(|v| u32::from_be_bytes(v.value().try_into().unwrap())))
+    }
+
+    pub fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, StoreError> {
+        let txn = self.db.begin_read()?;
+        let headers = txn.open_table(HEADERS)?;
+        match headers.get(keys::k_u32(height).as_slice())? {
+            Some(v) => Ok(Some(rows::HeaderRow::decode(v.value())?.id)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn begin_read(&self) -> Result<redb::ReadTransaction, StoreError> {
+        Ok(self.db.begin_read()?)
+    }
+
+    /// Seeds an empty store with a synthetic tip header at `height` whose id is `id`, so tests
+    /// can exercise `apply_batch`'s contiguous-height / parent-id checks against a chosen
+    /// starting point without replaying real history.
+    #[doc(hidden)]
+    pub fn seed_for_tests(&self, height: u32, id: Hash32) -> Result<(), StoreError> {
+        let txn = self.db.begin_write()?;
+        {
+            let hrow = rows::HeaderRow {
+                id,
+                parent_id: [0; 32],
+                timestamp: 0,
+                difficulty: 0,
+                miner_pk: [0; 33],
+                tx_count: 0,
+                size: 0,
+                fees: 0,
+                reward: 0,
+                version: 0,
+                raw_json: String::new(),
+            };
+            txn.open_table(HEADERS)?
+                .insert(keys::k_u32(height).as_slice(), hrow.encode().as_slice())?;
+            txn.open_table(HEADER_BY_ID)?
+                .insert(id.as_slice(), keys::k_u32(height).as_slice())?;
+            txn.open_table(META)?
+                .insert(META_INDEXED_HEIGHT, keys::k_u32(height).as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
