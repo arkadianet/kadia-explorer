@@ -2,7 +2,8 @@
 	import Hash from './Hash.svelte';
 	import Amount from './Amount.svelte';
 	import RentBadge from './RentBadge.svelte';
-	import { decodeRegister } from '$lib/registers/decode';
+	import RegistersTable from './RegistersTable.svelte';
+	import { hasDisplayableRegisters } from '$lib/registers/decode';
 	import { formatNano } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
 	import type { BoxDto } from '$lib/api/types';
@@ -15,32 +16,7 @@
 
 	let { box, tip, role }: Props = $props();
 
-	const REGISTER_KEYS = ['R4', 'R5', 'R6', 'R7', 'R8', 'R9'] as const;
-
-	interface RegisterRow {
-		key: string;
-		raw: string;
-		type: string;
-		value: string;
-	}
-
-	const registers = $derived.by((): RegisterRow[] => {
-		const regs = box.registers;
-		if (!regs) return [];
-		const rows: RegisterRow[] = [];
-		for (const key of REGISTER_KEYS) {
-			const raw = regs[key];
-			if (typeof raw !== 'string' || raw === '') continue;
-			const decoded = decodeRegister(raw);
-			rows.push({
-				key,
-				raw,
-				type: decoded?.type ?? 'raw',
-				value: decoded?.value ?? raw
-			});
-		}
-		return rows;
-	});
+	const hasRegisters = $derived(hasDisplayableRegisters(box.registers));
 </script>
 
 <article class="box">
@@ -83,7 +59,7 @@
 		<div class="section">
 			<span class="section-title">Tokens</span>
 			<ul class="tokens">
-				{#each box.tokens as token (token.id)}
+				{#each box.tokens as token, i (i)}
 					<li>
 						<span class="mono" title={token.id}>{truncateMiddle(token.id)}</span>
 						<span class="mono qty">{formatNano(token.amount)}</span>
@@ -93,20 +69,10 @@
 		</div>
 	{/if}
 
-	{#if registers.length > 0}
+	{#if hasRegisters}
 		<div class="section">
 			<span class="section-title">Registers</span>
-			<table class="regs">
-				<tbody>
-					{#each registers as reg (reg.key)}
-						<tr title={reg.raw}>
-							<td class="reg-key">{reg.key}</td>
-							<td class="reg-type">{reg.type}</td>
-							<td class="mono reg-value">{reg.value}</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
+			<RegistersTable registers={box.registers} />
 		</div>
 	{/if}
 </article>
@@ -166,26 +132,5 @@
 	}
 	.qty {
 		color: var(--fg-muted);
-	}
-	.regs {
-		width: 100%;
-		border-collapse: collapse;
-		margin-top: var(--space-1);
-	}
-	.reg-key {
-		color: var(--fg-muted);
-		width: 1%;
-		padding-right: var(--space-2);
-		white-space: nowrap;
-	}
-	.reg-type {
-		color: var(--fg-muted);
-		width: 1%;
-		padding-right: var(--space-2);
-		white-space: nowrap;
-		font-size: 11px;
-	}
-	.reg-value {
-		overflow-wrap: anywhere;
 	}
 </style>

@@ -9,6 +9,15 @@ export interface DecodedRegister {
 	value: string;
 }
 
+/** The additional registers a box may carry, in display order. */
+export const REGISTER_KEYS = ['R4', 'R5', 'R6', 'R7', 'R8', 'R9'] as const;
+
+/** True when a box's `registers` map has at least one non-empty R4–R9 entry to show. */
+export function hasDisplayableRegisters(registers: Record<string, unknown> | null): boolean {
+	if (!registers) return false;
+	return REGISTER_KEYS.some((key) => typeof registers[key] === 'string' && registers[key] !== '');
+}
+
 /** Type codes we recognise; see sigmastate `SType`/`ConstantSerializer`. */
 const TYPE_BOOLEAN = 0x01;
 const TYPE_INT = 0x04;
