@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { circulatingAt } from '$lib/format/supply';
+import { circulatingAt, EMISSION_END_HEIGHT, TOTAL_SUPPLY_NANO } from '$lib/format/supply';
 import { NANO } from '$lib/format/amount';
 
 describe('circulatingAt', () => {
@@ -23,9 +23,25 @@ describe('circulatingAt', () => {
 		expect(circulatingAt(590_400)).toBe(circulatingAt(525_600) + 72n * 64_800n * NANO);
 	});
 
+	it('ends emission at height 2,080,800 with the full 97,740,000 ERG', () => {
+		expect(EMISSION_END_HEIGHT).toBe(2_080_800);
+		expect(TOTAL_SUPPLY_NANO).toBe(97_740_000n * NANO);
+		expect(circulatingAt(2_080_800)).toBe(97_740_000n * NANO);
+	});
+
+	it('pays the 3 ERG floor for the last emitting block and nothing after', () => {
+		expect(circulatingAt(2_080_800) - circulatingAt(2_080_799)).toBe(3n * NANO);
+		expect(circulatingAt(2_080_801)).toBe(circulatingAt(2_080_800));
+		expect(circulatingAt(5_000_000)).toBe(circulatingAt(2_080_800));
+		expect(circulatingAt(5_000_000)).toBe(97_740_000n * NANO);
+	});
+
 	it('is monotonically non-decreasing', () => {
 		let prev = circulatingAt(0);
-		for (const h of [1, 2, 525_600, 525_601, 590_400, 590_401, 1_000_000, 5_000_000]) {
+		for (const h of [
+			1, 2, 525_600, 525_601, 590_400, 590_401, 1_000_000, 2_080_799, 2_080_800, 2_080_801,
+			5_000_000
+		]) {
 			const cur = circulatingAt(h);
 			expect(cur >= prev).toBe(true);
 			prev = cur;
