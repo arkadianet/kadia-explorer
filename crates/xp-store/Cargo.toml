@@ -11,6 +11,7 @@ redb.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 hex.workspace = true
+blake2.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

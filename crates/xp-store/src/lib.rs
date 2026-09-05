@@ -1,15 +1,20 @@
 pub mod apply;
 pub mod keys;
 pub mod read;
+pub mod rollback;
 pub mod rows;
 pub mod tables;
 
 pub use read::Reader;
 
-use redb::{Database, ReadableTable};
+use blake2::digest::{consts::U32, Digest};
+use blake2::Blake2b;
+use redb::{Database, ReadableTable, TableHandle};
 use std::path::Path;
 use tables::*;
 use xp_types::Hash32;
+
+type Blake2b256 = Blake2b<U32>;
 
 /// Number of trailing block heights for which an [`rows::UndoRow`] is retained, bounding how
 /// deep a chain fork can be rolled back before a full reindex is required.
@@ -86,6 +91,29 @@ impl Store {
 
     pub fn begin_read(&self) -> Result<redb::ReadTransaction, StoreError> {
         Ok(self.db.begin_read()?)
+    }
+
+    /// Hashes every `(table name, key, value)` triple across every table in [`tables::ALL`]
+    /// except [`tables::UNDO`] (whose contents are rollback bookkeeping, not indexed state),
+    /// in table order and key order within each table, using blake2b256. Two stores with an
+    /// identical fingerprint hold identical indexed state; used by tests to verify that
+    /// applying and then rolling back a block is a true identity on the store's content.
+    pub fn fingerprint(&self) -> Result<Hash32, StoreError> {
+        let txn = self.db.begin_read()?;
+        let mut hasher = Blake2b256::new();
+        for t in ALL {
+            if t.name() == UNDO.name() {
+                continue;
+            }
+            let table = txn.open_table(t)?;
+            hasher.update(t.name().as_bytes());
+            for entry in table.range::<&[u8]>(..)? {
+                let (k, v) = entry?;
+                hasher.update(k.value());
+                hasher.update(v.value());
+            }
+        }
+        Ok(hasher.finalize().into())
     }
 
     /// Seeds an empty store with a synthetic tip header at `height` whose id is `id`, so tests
