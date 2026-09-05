@@ -311,24 +311,15 @@ async fn compare_address(
         }),
     }
 
-    // --- unspent box-id set ---
+    // --- unspent box-id set --- (never early-returns: a failure here must still let the
+    // tx_count section below run)
     match node_unspent_ids(client, node, addr).await {
         Ok(None) => skipped.push(Skipped {
             address: addr.to_string(),
             reason: "unspent_ids: node returned exactly the cap; set may be truncated".to_string(),
         }),
-        Ok(Some(node_ids)) => {
-            let explorer_ids = match explorer_unspent_ids(client, explorer, addr).await {
-                Ok(ids) => ids,
-                Err(e) => {
-                    skipped.push(Skipped {
-                        address: addr.to_string(),
-                        reason: format!("unspent_ids: explorer query failed: {e}"),
-                    });
-                    return;
-                }
-            };
-            if explorer_ids != node_ids {
+        Ok(Some(node_ids)) => match explorer_unspent_ids(client, explorer, addr).await {
+            Ok(explorer_ids) if explorer_ids != node_ids => {
                 // Possibly explained by a mempool spend racing the two queries — re-check
                 // once after a delay before treating it as a real mismatch.
                 tokio::time::sleep(Duration::from_secs(30)).await;
@@ -368,7 +359,12 @@ async fn compare_address(
                     }),
                 }
             }
-        }
+            Ok(_) => {}
+            Err(e) => skipped.push(Skipped {
+                address: addr.to_string(),
+                reason: format!("unspent_ids: explorer query failed: {e}"),
+            }),
+        },
         Err(e) => skipped.push(Skipped {
             address: addr.to_string(),
             reason: format!("unspent_ids: node query failed: {e}"),
