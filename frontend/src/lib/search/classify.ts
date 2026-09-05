@@ -17,3 +17,20 @@ export function classify(q: string): Classified {
 
 	return { kind: 'unknown', value: trimmed };
 }
+
+/**
+ * Pure routing decision for a classified query. Returns the destination path when the
+ * kind alone determines it (height, address); returns null when resolution needs the
+ * API (hex32 — could be a block, tx, or box id) or the query didn't classify (unknown).
+ */
+export function routeFor(c: Classified): string | null {
+	switch (c.kind) {
+		case 'height':
+			return `/blocks/${c.value}`;
+		case 'address':
+			return `/address/${c.value}`;
+		case 'hex32':
+		case 'unknown':
+			return null;
+	}
+}

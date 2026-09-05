@@ -4,6 +4,7 @@
 	import { theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import SearchBox from '$lib/components/SearchBox.svelte';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -27,7 +28,7 @@
 	<header class="topbar">
 		<a class="brand" href="/">Ergo Explorer</a>
 		<div class="search-slot" data-testid="search-slot">
-			<!-- Task 10: SearchBox mounts here -->
+			<SearchBox />
 		</div>
 		<div class="status-slot" data-testid="status-slot">
 			<StatusBadge />
