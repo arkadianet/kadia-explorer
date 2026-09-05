@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Panel from '$lib/components/Panel.svelte';
 	import InfiniteList from '$lib/components/InfiniteList.svelte';
-	import Hash from '$lib/components/Hash.svelte';
+	import MinerChip from '$lib/components/MinerChip.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import Age from '$lib/components/Age.svelte';
 	import { api } from '$lib/api/endpoints';
@@ -26,22 +26,22 @@
 			<tr>
 				<th>Height</th>
 				<th>Age</th>
-				<th>Txs</th>
-				<th>Size</th>
-				<th>Fees</th>
-				<th>Reward</th>
+				<th class="num">Txs</th>
+				<th class="num">Size</th>
+				<th class="num">Fees</th>
+				<th class="num">Reward</th>
 				<th>Miner</th>
 			</tr>
 		{/snippet}
 		{#snippet children(block: BlockDto)}
 			<tr>
-				<td><a href={`/blocks/${block.height}`}>{block.height}</a></td>
+				<td class="mono"><a href={`/blocks/${block.height}`}>{block.height}</a></td>
 				<td><Age ms={block.timestamp} /></td>
-				<td>{block.tx_count}</td>
-				<td>{formatKb(block.size)}</td>
-				<td><Amount nano={block.fees} maxFrac={3} /></td>
-				<td><Amount nano={block.reward} maxFrac={3} /></td>
-				<td><Hash value={block.miner_pk} copy={false} /></td>
+				<td class="num mono">{block.tx_count}</td>
+				<td class="num mono">{formatKb(block.size)}</td>
+				<td class="num"><Amount nano={block.fees} maxFrac={3} /></td>
+				<td class="num"><Amount nano={block.reward} maxFrac={3} /></td>
+				<td><MinerChip minerPk={block.miner_pk} /></td>
 			</tr>
 		{/snippet}
 	</InfiniteList>

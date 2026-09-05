@@ -47,6 +47,10 @@
 		color: var(--fg);
 	}
 
+	.panel-body {
+		min-width: 0;
+	}
+
 	.panel-actions {
 		display: flex;
 		align-items: center;

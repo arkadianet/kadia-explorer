@@ -115,7 +115,7 @@
 <style>
 	.shell {
 		display: grid;
-		grid-template-columns: 1fr;
+		grid-template-columns: minmax(0, 1fr);
 		grid-template-rows: auto auto 1fr auto;
 		grid-template-areas:
 			'topbar'
@@ -213,6 +213,7 @@
 	.rail {
 		grid-area: rail;
 		align-self: start;
+		min-width: 0;
 		border-top: var(--rule);
 		background: var(--bg);
 	}
@@ -244,15 +245,22 @@
 		max-width: 1280px;
 		margin: 0 auto;
 		width: 100%;
+		/* Grid children default to min-width:auto; without this a wide table or the block strip
+		   would push the whole shell into a horizontal scroll. */
+		min-width: 0;
 		padding: var(--space-6) var(--space-4);
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-8);
 	}
 
+	.content > :global(*) {
+		min-width: 0;
+	}
+
 	@media (min-width: 1024px) {
 		.shell {
-			grid-template-columns: 200px 1fr;
+			grid-template-columns: 200px minmax(0, 1fr);
 			grid-template-rows: auto auto 1fr;
 			grid-template-areas:
 				'topbar topbar'

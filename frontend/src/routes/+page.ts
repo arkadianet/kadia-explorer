@@ -24,7 +24,7 @@ export const load: PageLoad = async ({ fetch }) => {
 	// Each call is wrapped so one panel's failure can't reject the whole `Promise.all` and
 	// take down the page — every panel gets its own success/error result to render from.
 	const [blocks, txs, rent, status] = await Promise.all([
-		safe<PageDto<BlockDto>>(api.blocks(undefined, 10, undefined, fetch)),
+		safe<PageDto<BlockDto>>(api.blocks(undefined, 12, undefined, fetch)),
 		safe<PageDto<TxDto>>(api.txs(undefined, 10, undefined, fetch)),
 		safe<RentItemDto[]>(upcomingRentItems(fetch)),
 		safe<StatusDto>(api.status(fetch))
