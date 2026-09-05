@@ -41,3 +41,10 @@ pub const META_NEXT_BOX_GIDX: &[u8] = b"next_box_gidx";
 pub const META_NEXT_TX_GIDX: &[u8] = b"next_tx_gidx";
 pub const META_SCHEMA: &[u8] = b"schema_version";
 pub const SCHEMA_VERSION: u32 = 1;
+
+/// Present only on a store that began indexing later than chain genesis (written by
+/// `Store::seed_for_tests` in tests; a real full sync from height 1 never sets it). Its
+/// value is the height the store was seeded at. When set, `apply_batch` additionally
+/// tolerates missing input boxes for the first block applied after the seed point, the
+/// same way height 1 tolerates the chain-spec genesis boxes.
+pub const META_PARTIAL_FROM: &[u8] = b"partial_from";

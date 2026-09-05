@@ -70,9 +70,25 @@ impl Store {
 
     /// Seeds an empty store with a synthetic tip header at `height` whose id is `id`, so tests
     /// can exercise `apply_batch`'s contiguous-height / parent-id checks against a chosen
-    /// starting point without replaying real history.
+    /// starting point without replaying real history. Also marks the store as partial (see
+    /// [`tables::META_PARTIAL_FROM`]), so `apply_batch` tolerates the first applied block's
+    /// inputs being boxes older than the seed point — exactly the tests' situation, since no
+    /// box data is seeded. Use [`Store::seed_header_only_for_tests`] to seed without that
+    /// tolerance.
     #[doc(hidden)]
     pub fn seed_for_tests(&self, height: u32, id: Hash32) -> Result<(), StoreError> {
+        self.seed_impl(height, id, true)
+    }
+
+    /// Like [`Store::seed_for_tests`] but does NOT mark the store partial, so a missing input
+    /// at the next applied height is treated as real corruption. For tests that need to
+    /// exercise that corruption check without replaying from genesis.
+    #[doc(hidden)]
+    pub fn seed_header_only_for_tests(&self, height: u32, id: Hash32) -> Result<(), StoreError> {
+        self.seed_impl(height, id, false)
+    }
+
+    fn seed_impl(&self, height: u32, id: Hash32, partial: bool) -> Result<(), StoreError> {
         let txn = self.db.begin_write()?;
         {
             let hrow = rows::HeaderRow {
@@ -92,8 +108,11 @@ impl Store {
                 .insert(keys::k_u32(height).as_slice(), hrow.encode().as_slice())?;
             txn.open_table(HEADER_BY_ID)?
                 .insert(id.as_slice(), keys::k_u32(height).as_slice())?;
-            txn.open_table(META)?
-                .insert(META_INDEXED_HEIGHT, keys::k_u32(height).as_slice())?;
+            let mut meta = txn.open_table(META)?;
+            meta.insert(META_INDEXED_HEIGHT, keys::k_u32(height).as_slice())?;
+            if partial {
+                meta.insert(META_PARTIAL_FROM, keys::k_u32(height).as_slice())?;
+            }
         }
         txn.commit()?;
         Ok(())

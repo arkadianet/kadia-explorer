@@ -15,6 +15,9 @@ struct Ctx<'t> {
     undo: UndoRow,
     height: u32,
     timestamp: u64,
+    /// Whether this store began indexing later than chain genesis (see
+    /// `tables::META_PARTIAL_FROM`), read once per `apply_batch` call.
+    partial: bool,
 }
 
 impl Store {
@@ -22,7 +25,11 @@ impl Store {
     ///
     /// `blocks[0].header.height` must equal `indexed_height() + 1` (or `1` on an empty store);
     /// each block's `parent_id` must match the previous block's (or stored tip's) id, else
-    /// [`StoreError::ParentMismatch`] is returned and nothing is committed.
+    /// [`StoreError::ParentMismatch`] is returned and nothing is committed. A missing input box
+    /// is tolerated only at height 1 (chain-spec genesis boxes) or when the store is marked
+    /// partial (`tables::META_PARTIAL_FROM`, set by `seed_for_tests`) — anywhere else it is
+    /// [`StoreError::Corrupt`]; fees for a tx with a tolerated unknown input are computed from
+    /// its known inputs only.
     pub fn apply_batch(&self, blocks: &[DecodedBlock], durable: bool) -> Result<(), StoreError> {
         if blocks.is_empty() {
             return Ok(());
@@ -63,6 +70,11 @@ impl Store {
             };
             (rd(META_NEXT_BOX_GIDX)?, rd(META_NEXT_TX_GIDX)?)
         };
+        let partial = {
+            let meta = txn.open_table(META)?;
+            let flag = meta.get(META_PARTIAL_FROM)?.is_some();
+            flag
+        };
 
         for b in blocks {
             if b.header.height != height + 1 {
@@ -87,6 +99,7 @@ impl Store {
                 next_tx,
                 height: b.header.height,
                 timestamp: b.header.timestamp,
+                partial,
                 undo: UndoRow {
                     created_boxes: vec![],
                     spent_boxes: vec![],
@@ -138,6 +151,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
 
     let mut fees = 0u64;
     let mut touched_balances: HashMap<Hash32, BalanceRow> = HashMap::new();
+    let mut skipped_inputs = 0u32;
 
     for (ti, tx) in b.txs.iter().enumerate() {
         let tx_gidx = ctx.next_tx;
@@ -150,14 +164,18 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
                 .get(inp.0.as_slice())?
                 .map(|v| BoxRow::decode(v.value()))
                 .transpose()?;
-            // A missing input means this box predates whatever height the store started
-            // tracking from (block 1's inputs are the chain-spec genesis boxes; a store
-            // seeded or bootstrapped at a later height has the same gap for its first
-            // applied block). Treat it as external: skip, contributing nothing to balances,
-            // rather than treating an out-of-view box as corruption.
+            // A missing input is tolerated only where the store is known to have a real gap
+            // in its view of history: height 1 (whose inputs are the chain-spec genesis
+            // boxes, never indexed by anyone) or a store explicitly seeded as partial. Any
+            // other missing input means the store's own bookkeeping is wrong, so it is
+            // treated as corruption rather than silently producing wrong balances.
             let mut row = match existing {
                 Some(r) => r,
-                None => continue,
+                None if ctx.height == 1 || ctx.partial => {
+                    skipped_inputs += 1;
+                    continue;
+                }
+                None => return Err(StoreError::Corrupt("input box missing")),
             };
             if row.spent.is_some() {
                 return Err(StoreError::Corrupt("double spend in block"));
@@ -269,6 +287,14 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         txs_table.insert(tx.id.0.as_slice(), txrow.encode().as_slice())?;
         tx_by_gidx.insert(k_u64(tx_gidx).as_slice(), tx.id.0.as_slice())?;
         ctx.undo.tx_ids.push(tx.id.0);
+    }
+
+    if skipped_inputs > 0 {
+        tracing::debug!(
+            height = ctx.height,
+            skipped_inputs,
+            "tolerated missing input box(es) (genesis or partial store)"
+        );
     }
 
     // Balances and the value-ordered "rich" index are flushed once per block.

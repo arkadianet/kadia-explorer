@@ -65,3 +65,21 @@ fn outputs_become_unspent_then_spent() {
         .unwrap();
     assert!(mats.iter().any(|(_, id)| *id == out.id.0));
 }
+
+#[test]
+fn missing_input_on_a_non_partial_store_is_corruption() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(&dir.path().join("x.redb")).unwrap();
+    let b0 = fixture(1866000);
+    // Seed only the tip header — unlike `seeded_store`, this does NOT mark the store partial,
+    // so it behaves like a store that fully synced from genesis and simply lost a box: any
+    // missing input past height 1 must be corruption, not silently tolerated.
+    s.seed_header_only_for_tests(1865999, b0.header.parent_id.0)
+        .unwrap();
+    let err = s.apply_batch(&[b0], true).unwrap_err();
+    assert!(matches!(
+        err,
+        xp_store::StoreError::Corrupt("input box missing")
+    ));
+    assert_eq!(s.indexed_height().unwrap(), Some(1865999)); // txn rolled back
+}
