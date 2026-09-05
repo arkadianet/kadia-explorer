@@ -14,6 +14,8 @@ pub enum WireError {
     Tree(String),
     #[error("serialize: {0}")]
     Ser(String),
+    #[error("missing or invalid field: {0}")]
+    MissingField(&'static str),
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +41,8 @@ pub struct DecodedBox {
     pub index: u16,
     pub tokens: Vec<(Hash32, u64)>,
     pub registers_json: String,
+    /// Consensus box size as used for storage rent (`ErgoBox.bytes`: candidate body with
+    /// full token ids + tx id + index), NOT the compacted in-block footprint.
     pub size: u32,
 }
 #[derive(Debug, Clone)]
@@ -68,12 +72,18 @@ pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
     let v: serde_json::Value = serde_json::from_str(json)?;
     let fb: FullBlock = serde_json::from_value(v.clone())?;
     let h = &fb.header;
-    let header_json = v.get("header").cloned().unwrap_or_default();
+    // `header` cannot be absent once `fb` has parsed successfully above, but we still need
+    // its raw JSON to read `difficulty` (not modeled on `ergo_chain_types::Header`), so fetch
+    // it with a real error instead of silently defaulting to an empty object.
+    let header_json = v
+        .get("header")
+        .cloned()
+        .ok_or(WireError::MissingField("header"))?;
     let difficulty: u128 = header_json
         .get("difficulty")
         .and_then(|d| d.as_str())
         .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+        .ok_or(WireError::MissingField("header.difficulty"))?;
     let miner_pk_hex = h.autolykos_solution.miner_pk.to_string();
     let miner_pk_bytes = hex::decode(&miner_pk_hex).map_err(|e| WireError::Ser(e.to_string()))?;
     let mut miner_pk = [0u8; 33];
@@ -100,6 +110,10 @@ pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
         let tx_id = TxId(tx.id().0 .0);
         let mut outputs = Vec::with_capacity(tx.outputs.len());
         for (i, o) in tx.outputs.iter().enumerate() {
+            // Consensus box size (storage rent basis): `ErgoBox.bytes` = candidate body
+            // serialized with full 32-byte token ids + tx id + index, per sigmastate's
+            // `ErgoBox.sigmaSerializer`. This is exactly `ErgoBox::sigma_serialize_bytes`,
+            // not the compacted in-block footprint.
             let bytes = o
                 .sigma_serialize_bytes()
                 .map_err(|e| WireError::Ser(e.to_string()))?;
@@ -153,6 +167,39 @@ pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
             size,
         });
     }
-    let size = v.get("size").and_then(|s| s.as_u64()).unwrap_or(0) as u32;
+    let size = v
+        .get("size")
+        .and_then(|s| s.as_u64())
+        .ok_or(WireError::MissingField("size"))? as u32;
     Ok(DecodedBlock { header, txs, size })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_value() -> serde_json::Value {
+        let raw = std::fs::read_to_string(format!(
+            "{}/../../tests/fixtures/blocks/1866000.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap();
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    #[test]
+    fn missing_top_level_size_is_an_error() {
+        let mut v = fixture_value();
+        v.as_object_mut().unwrap().remove("size");
+        let err = decode_block(&v.to_string()).unwrap_err();
+        assert!(matches!(err, WireError::MissingField("size")));
+    }
+
+    #[test]
+    fn non_numeric_difficulty_is_an_error() {
+        let mut v = fixture_value();
+        v["header"]["difficulty"] = serde_json::Value::String("not-a-number".to_string());
+        let err = decode_block(&v.to_string()).unwrap_err();
+        assert!(matches!(err, WireError::MissingField("header.difficulty")));
+    }
 }
