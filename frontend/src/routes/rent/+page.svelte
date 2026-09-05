@@ -173,7 +173,7 @@
 					{/each}
 				</Table>
 			{:else}
-				<EmptyState message="No boxes maturing in this window." />
+				<EmptyState message="No box matures within this many blocks. Try a longer horizon." />
 			{/if}
 		{:else}
 			{#if eligiblePager.items.length > 0}
@@ -187,7 +187,7 @@
 				columns={5}
 				dense
 				pager={eligiblePager}
-				empty="No claimable rent right now."
+				empty="No box has reached its storage-rent maturity yet."
 			>
 				{#snippet head()}
 					<tr>

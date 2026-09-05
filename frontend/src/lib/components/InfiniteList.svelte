@@ -54,6 +54,18 @@
 		io.observe(el);
 		return () => io.disconnect();
 	});
+
+	// Keep pulling while the sentinel is still on screen. A page of results can be shorter than
+	// the viewport, and an IntersectionObserver only reports *changes* — without this the list
+	// would stop after one page on a tall window and wait for a scroll that never comes.
+	$effect(() => {
+		const el = sentinel;
+		// Read the length so this re-runs each time a page lands.
+		void pager.items.length;
+		if (!el || pager.done || pager.loading || pager.error) return;
+		const box = el.getBoundingClientRect();
+		if (box.top < window.innerHeight && box.bottom > 0) void pager.loadMore();
+	});
 </script>
 
 {#snippet footer()}

@@ -31,18 +31,24 @@
 
 <Panel title="Rich list">
 	<p class="note">Supply estimate ignores EIP‑27 re-emission</p>
-	<InfiniteList table columns={4} dense {pager} empty="No addresses yet.">
+	<InfiniteList
+		table
+		columns={4}
+		dense
+		{pager}
+		empty="The rich list fills in as the indexer works through the chain."
+	>
 		{#snippet head()}
 			<tr>
-				<th>Rank</th>
+				<th class="num">Rank</th>
 				<th>Address</th>
-				<th>Balance</th>
-				<th>≈ % of supply</th>
+				<th class="num">Balance</th>
+				<th class="num">≈ % of supply</th>
 			</tr>
 		{/snippet}
 		{#snippet children(item: RichlistItemDto, i: number)}
 			<tr>
-				<td>{i + 1}</td>
+				<td class="num mono">{i + 1}</td>
 				<td>
 					{#if item.address}
 						<Hash value={item.address} href={`/address/${item.address}`} copy={false} />
@@ -52,8 +58,8 @@
 						</span>
 					{/if}
 				</td>
-				<td><Amount nano={item.nano} maxFrac={9} /></td>
-				<td>{pctOfSupply(item.nano)}</td>
+				<td class="num"><Amount nano={item.nano} maxFrac={9} /></td>
+				<td class="num mono">{pctOfSupply(item.nano)}</td>
 			</tr>
 		{/snippet}
 	</InfiniteList>

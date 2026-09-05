@@ -1,5 +1,8 @@
 <script lang="ts">
 	import Panel from '$lib/components/Panel.svelte';
+	import PageHead from '$lib/components/PageHead.svelte';
+	import Facts from '$lib/components/Facts.svelte';
+	import Fact from '$lib/components/Fact.svelte';
 	import Table from '$lib/components/Table.svelte';
 	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
@@ -34,18 +37,12 @@
 	<title>Box {box.id} — Ergo Explorer</title>
 </svelte:head>
 
-<Panel title="Box">
-	<div class="facts">
-		<div class="fact">
-			<span class="label">Id</span>
-			<Hash value={box.id} head={12} tail={10} />
-		</div>
-		<div class="fact">
-			<span class="label">Value</span>
-			<Amount nano={box.value} maxFrac={9} />
-		</div>
-		<div class="fact">
-			<span class="label">Address</span>
+<div class="head">
+	<PageHead title="Box" id={box.id} />
+
+	<Facts>
+		<Fact label="Value"><Amount nano={box.value} maxFrac={9} /></Fact>
+		<Fact label="Address">
 			{#if box.address}
 				<Hash value={box.address} href={`/address/${box.address}`} copy={false} head={12} />
 			{:else}
@@ -53,53 +50,47 @@
 					<Hash value={box.tree_hash} copy={false} head={12} />
 				</span>
 			{/if}
-		</div>
-		<div class="fact">
-			<span class="label">Created in tx</span>
-			<span>
-				<Hash value={box.tx_id} href={`/tx/${box.tx_id}`} copy={false} head={12} /> at output {box.index}
-			</span>
-		</div>
-		<div class="fact">
-			<span class="label">Creation height</span>
-			<a href={`/blocks/${box.creation_height}`}>{box.creation_height}</a>
-		</div>
-		<div class="fact">
-			<span class="label">Size</span>
-			<span>{box.size} bytes</span>
-		</div>
-		<div class="fact">
-			<span class="label">Status</span>
+		</Fact>
+		<Fact label="Created in tx">
+			<Hash value={box.tx_id} href={`/tx/${box.tx_id}`} copy={false} head={12} />
+			<span class="muted">at output {box.index}</span>
+		</Fact>
+		<Fact label="Creation height">
+			<a class="mono" href={`/blocks/${box.creation_height}`}>{box.creation_height}</a>
+		</Fact>
+		<Fact label="Size"><span class="mono">{box.size} bytes</span></Fact>
+		<Fact label="Status">
 			{#if box.spent_by}
 				<span>
 					<Badge tone="neutral">Spent</Badge>
 					by
-					<a href={`/tx/${box.spent_by}`}><Hash value={box.spent_by} copy={false} head={10} /></a>
+					<Hash value={box.spent_by} href={`/tx/${box.spent_by}`} copy={false} head={10} />
 					{#if box.spent_height !== null}
-						at <a href={`/blocks/${box.spent_height}`}>{box.spent_height}</a>
+						<span class="muted">at</span>
+						<a class="mono" href={`/blocks/${box.spent_height}`}>{box.spent_height}</a>
 					{/if}
 				</span>
 			{:else}
 				<Badge tone="ok">Unspent</Badge>
 			{/if}
-		</div>
-	</div>
+		</Fact>
+	</Facts>
 
 	{#if box.ergo_tree}
 		<details class="ergo-tree">
 			<summary>Ergo tree</summary>
 			<div class="ergo-tree-body">
 				{#if box.template_hash}
-					<div class="fact">
-						<span class="label">Template hash</span>
+					<p class="template">
+						<span class="muted">Template hash</span>
 						<Hash value={box.template_hash} copy={false} head={12} />
-					</div>
+					</p>
 				{/if}
 				<pre class="mono hex">{box.ergo_tree}</pre>
 			</div>
 		</details>
 	{/if}
-</Panel>
+</div>
 
 {#if box.tokens.length > 0}
 	<Panel title={`Tokens (${box.tokens.length})`}>
@@ -107,13 +98,13 @@
 			{#snippet head()}
 				<tr>
 					<th>Token id</th>
-					<th>Amount</th>
+					<th class="num">Amount</th>
 				</tr>
 			{/snippet}
 			{#each box.tokens as token, i (i)}
 				<tr>
 					<td><span class="mono" title={token.id}>{truncateMiddle(token.id)}</span></td>
-					<td class="mono">{formatNano(token.amount)}</td>
+					<td class="num mono">{formatNano(token.amount)}</td>
 				</tr>
 			{/each}
 		</Table>
@@ -122,70 +113,48 @@
 
 {#if hasRegisters}
 	<Panel title="Registers">
-		<div class="registers">
-			<RegistersTable registers={box.registers} />
-		</div>
+		<RegistersTable registers={box.registers} />
 	</Panel>
 {/if}
 
 <Panel title="Rent">
-	<div class="facts">
-		<div class="fact">
-			<span class="label">Maturity height</span>
+	<Facts>
+		<Fact label="Maturity height">
 			{#if maturityReached}
-				<a href={`/blocks/${box.rent.maturity_height}`}>{box.rent.maturity_height}</a>
+				<a class="mono" href={`/blocks/${box.rent.maturity_height}`}>{box.rent.maturity_height}</a>
 			{:else}
-				<span>{box.rent.maturity_height}</span>
+				<span class="mono">{box.rent.maturity_height}</span>
 			{/if}
-		</div>
-		<div class="fact">
-			<span class="label">Due rent</span>
-			<Amount nano={box.rent.due_nano} maxFrac={9} />
-		</div>
-	</div>
+		</Fact>
+		<Fact label="Due rent"><Amount nano={box.rent.due_nano} maxFrac={9} /></Fact>
+	</Facts>
 
-	<div class="rent-status">
+	<p class="rent-status">
 		{#if box.rent.claimable_at_tip}
 			<Badge tone="danger">Claimable now</Badge>
+			<span class="muted">A miner may take the rent from this box in the next block.</span>
 		{:else if box.spent_by}
-			<span class="muted">Rent no longer applies (box spent)</span>
+			<span class="muted">Rent no longer applies — the box is spent.</span>
 		{:else if blocksLeft !== null}
-			<span
-				>Matures in {blocksLeft} blocks (≈ {daysLeft} day{daysLeft === 1 ? '' : 's'} at {MINUTES_PER_BLOCK}
-				min/block)</span
+			<span class="muted"
+				>Matures in {blocksLeft} blocks, about {daysLeft} day{daysLeft === 1 ? '' : 's'} at {MINUTES_PER_BLOCK}
+				min/block.</span
 			>
 		{/if}
-	</div>
+	</p>
 </Panel>
 
 <style>
-	.facts {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: var(--space-2) var(--space-4);
-		padding: var(--space-2) var(--space-4);
-	}
-	@media (min-width: 768px) {
-		.facts {
-			grid-template-columns: repeat(2, 1fr);
-		}
-	}
-	.fact {
+	.head {
 		display: flex;
-		justify-content: space-between;
-		gap: var(--space-3);
-		border-bottom: 1px solid var(--border);
-		padding: var(--space-1) 0;
-	}
-	.label {
-		color: var(--fg-muted);
+		flex-direction: column;
+		gap: var(--space-4);
 	}
 	.muted {
 		color: var(--fg-muted);
 	}
 	.ergo-tree {
-		border-top: 1px solid var(--border);
-		padding: var(--space-2) var(--space-4);
+		font-size: var(--fs-data);
 	}
 	.ergo-tree summary {
 		cursor: pointer;
@@ -200,17 +169,13 @@
 	.hex {
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		padding: var(--space-2);
+		background: var(--bg-elev);
+		padding: var(--space-3);
 		margin: 0;
-	}
-	.registers {
-		padding: 0 var(--space-4);
+		border-radius: var(--radius);
 	}
 	.rent-status {
-		padding: var(--space-2) var(--space-4);
-		border-top: 1px solid var(--border);
+		margin-top: var(--space-3);
+		font-size: var(--fs-data);
 	}
 </style>

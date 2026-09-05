@@ -21,7 +21,13 @@
 </svelte:head>
 
 <Panel title="Blocks">
-	<InfiniteList table columns={7} dense {pager} empty="No blocks yet.">
+	<InfiniteList
+		table
+		columns={7}
+		dense
+		{pager}
+		empty="Blocks will appear here as the indexer catches up with the node."
+	>
 		{#snippet head()}
 			<tr>
 				<th>Height</th>

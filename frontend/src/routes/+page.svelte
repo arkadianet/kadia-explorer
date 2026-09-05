@@ -59,7 +59,10 @@
 			</div>
 			<div class="stat">
 				<dt>Behind the node</dt>
-				<dd><span class="mono">{status ? status.lag_blocks : '—'}</span> <span class="unit">blocks</span></dd>
+				<dd>
+					<span class="mono">{status ? status.lag_blocks : '—'}</span>
+					<span class="unit">blocks</span>
+				</dd>
 			</div>
 			<div class="stat">
 				<dt>Latest block</dt>

@@ -1,5 +1,8 @@
 <script lang="ts">
 	import Panel from '$lib/components/Panel.svelte';
+	import PageHead from '$lib/components/PageHead.svelte';
+	import Facts from '$lib/components/Facts.svelte';
+	import Fact from '$lib/components/Fact.svelte';
 	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import Age from '$lib/components/Age.svelte';
@@ -28,61 +31,33 @@
 	<title>Transaction {tx.id} — Ergo Explorer</title>
 </svelte:head>
 
-<Panel title="Transaction">
-	<div class="facts">
-		<div class="fact">
-			<span class="label">Id</span>
-			<Hash value={tx.id} head={12} tail={10} />
-		</div>
-		<div class="fact">
-			<span class="label">Block</span>
-			<a href={`/blocks/${tx.height}`}>{tx.height}</a>
-		</div>
-		<div class="fact">
-			<span class="label">Timestamp</span>
-			<span>{absTime(tx.timestamp)} (<Age ms={tx.timestamp} />)</span>
-		</div>
-		<div class="fact">
-			<span class="label">Index in block</span>
-			<span>{tx.index}</span>
-		</div>
-		<div class="fact">
-			<span class="label">Size</span>
-			<span>{formatKb(tx.size)}</span>
-		</div>
-		<div class="fact">
-			<span class="label">Fee</span>
-			<Amount nano={tx.fee} maxFrac={9} />
-		</div>
-	</div>
+<div class="head">
+	<PageHead title="Transaction" id={tx.id} />
 
-	{#if tx.data_inputs.length > 0}
-		<div class="data-inputs">
-			<span class="label">Data inputs</span>
-			<ul>
-				{#each tx.data_inputs as id, i (i)}
-					<li><Hash value={id} href={`/box/${id}`} copy={false} head={12} /></li>
-				{/each}
-			</ul>
-		</div>
-	{/if}
-
-	<div class="totals">
-		<div>
-			<span class="label">Total in{partialIn ? ' (known boxes)' : ''}</span>
+	<Facts>
+		<Fact label="Block"><a class="mono" href={`/blocks/${tx.height}`}>{tx.height}</a></Fact>
+		<Fact label="Mined"><span>{absTime(tx.timestamp)}, <Age ms={tx.timestamp} /></span></Fact>
+		<Fact label="Index in block"><span class="mono">{tx.index}</span></Fact>
+		<Fact label="Size"><span class="mono">{formatKb(tx.size)}</span></Fact>
+		<Fact label={partialIn ? 'Total in (known boxes)' : 'Total in'}>
 			<Amount nano={totalIn} maxFrac={9} />
-		</div>
-		<div>
-			<span class="label">Total out</span>
-			<Amount nano={totalOut} maxFrac={9} />
-		</div>
-		<div>
-			<span class="label">Fee</span>
-			<Amount nano={tx.fee} maxFrac={9} />
-		</div>
-	</div>
-</Panel>
+		</Fact>
+		<Fact label="Total out"><Amount nano={totalOut} maxFrac={9} /></Fact>
+		<Fact label="Fee"><Amount nano={tx.fee} maxFrac={9} /></Fact>
+		{#if tx.data_inputs.length > 0}
+			<Fact label="Data inputs">
+				<ul class="data-inputs">
+					{#each tx.data_inputs as id, i (i)}
+						<li><Hash value={id} href={`/box/${id}`} copy={false} head={12} /></li>
+					{/each}
+				</ul>
+			</Fact>
+		{/if}
+	</Facts>
+</div>
 
+<!-- Inputs on the left, outputs on the right, parted by a rule that the two column headings
+     label. No arrow glyph: the headings already say which side is which. -->
 <div class="flow">
 	<Panel title={`Inputs (${tx.inputs.length})`}>
 		<div class="cards">
@@ -91,7 +66,7 @@
 					<BoxCard box={input.box} {tip} role="input" />
 				{:else}
 					<article class="box unknown">
-						<span class="label">Unknown box</span>
+						<span>Spends a box created before the indexed range</span>
 						<Hash value={input.id} href={`/box/${input.id}`} copy={false} head={10} />
 					</article>
 				{/if}
@@ -109,73 +84,43 @@
 </div>
 
 <style>
-	.facts {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: var(--space-2) var(--space-4);
-		padding: var(--space-2) var(--space-4);
-	}
-	@media (min-width: 768px) {
-		.facts {
-			grid-template-columns: repeat(2, 1fr);
-		}
-	}
-	.fact {
-		display: flex;
-		justify-content: space-between;
-		gap: var(--space-3);
-		border-bottom: 1px solid var(--border);
-		padding: var(--space-1) 0;
-	}
-	.label {
-		color: var(--fg-muted);
-	}
-	.data-inputs {
-		padding: var(--space-2) var(--space-4);
-		border-top: 1px solid var(--border);
-	}
-	.data-inputs ul {
-		list-style: none;
-		margin: var(--space-1) 0 0;
-		padding: 0;
-	}
-	.totals {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2) var(--space-6);
-		padding: var(--space-3) var(--space-4);
-		border-top: 1px solid var(--border);
-	}
-	.totals div {
+	.head {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: var(--space-4);
+	}
+	.data-inputs li {
+		margin-top: 2px;
 	}
 	.flow {
 		display: grid;
-		grid-template-columns: 1fr;
-		gap: var(--space-4);
-		margin-top: var(--space-4);
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-6);
 	}
 	@media (min-width: 900px) {
 		.flow {
-			grid-template-columns: 1fr 1fr;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
 			align-items: start;
+			gap: var(--space-8);
+		}
+		.flow > :global(:last-child) {
+			border-left: var(--rule);
+			padding-left: calc(var(--space-8) / 2);
+			margin-left: calc(var(--space-8) / -2);
 		}
 	}
 	.cards {
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-2);
-		padding: 0 var(--space-3);
+		gap: var(--space-3);
 	}
 	.box.unknown {
-		border: 1px dashed var(--border);
-		border-radius: var(--radius);
-		padding: var(--space-2) var(--space-3);
+		border-left: 2px dashed var(--border);
+		padding: var(--space-2) 0 var(--space-2) var(--space-3);
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
 		color: var(--fg-muted);
+		font-size: var(--fs-data);
 	}
 </style>

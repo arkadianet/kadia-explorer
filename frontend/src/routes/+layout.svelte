@@ -33,8 +33,9 @@
 		return path === href || path.startsWith(`${href}/`);
 	}
 
-	// Detail routes have no rail entry of their own; they light up the section they belong to.
-	const SECTION_OF: Record<string, string> = { '/tx': '/txs', '/box': '/txs', '/address': '/txs' };
+	// A transaction detail page belongs to the Transactions section. Boxes and addresses have
+	// no section of their own, so they light nothing rather than claiming somebody else's row.
+	const SECTION_OF: Record<string, string> = { '/tx': '/txs' };
 
 	function isCurrent(href: string): boolean {
 		if (isActive(href)) return true;
@@ -68,16 +69,15 @@
 		>
 			{#if theme.current === 'dark'}
 				<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-					<path
-						fill="currentColor"
-						d="M13.3 9.9A5.6 5.6 0 0 1 6.1 2.7 5.7 5.7 0 1 0 13.3 9.9Z"
-					/>
+					<path fill="currentColor" d="M13.3 9.9A5.6 5.6 0 0 1 6.1 2.7 5.7 5.7 0 1 0 13.3 9.9Z" />
 				</svg>
 			{:else}
 				<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
 					<circle cx="8" cy="8" r="3.1" fill="currentColor" />
 					<g stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
-						<path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3.1 3.1l1.3 1.3M11.6 11.6l1.3 1.3M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3" />
+						<path
+							d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3.1 3.1l1.3 1.3M11.6 11.6l1.3 1.3M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3"
+						/>
 					</g>
 				</svg>
 			{/if}
@@ -99,7 +99,11 @@
 		<ul>
 			{#each navLinks as link (link.href)}
 				<li>
-					<a href={link.href} class:current={isCurrent(link.href)} aria-current={isActive(link.href) ? 'page' : undefined}>
+					<a
+						href={link.href}
+						class:current={isCurrent(link.href)}
+						aria-current={isActive(link.href) ? 'page' : undefined}
+					>
 						{link.label}
 					</a>
 				</li>

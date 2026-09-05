@@ -34,38 +34,40 @@
 	{#if !current}
 		<ErrorState error={loadError} />
 	{:else}
-		<Table>
-			{#snippet head()}
+		<div class="fields">
+			<Table>
+				{#snippet head()}
+					<tr>
+						<th>Field</th>
+						<th>Value</th>
+					</tr>
+				{/snippet}
 				<tr>
-					<th>Field</th>
-					<th>Value</th>
+					<td>Indexed</td>
+					<td class="mono">{current.indexed ?? '—'}</td>
 				</tr>
-			{/snippet}
-			<tr>
-				<td>Indexed</td>
-				<td>{current.indexed ?? '—'}</td>
-			</tr>
-			<tr>
-				<td>Best (node)</td>
-				<td>{current.best}</td>
-			</tr>
-			<tr>
-				<td>Lag</td>
-				<td><Badge {tone}>{current.lag_blocks} blocks</Badge></td>
-			</tr>
-			<tr>
-				<td>Mode</td>
-				<td>{current.mode}</td>
-			</tr>
-			<tr>
-				<td>Source</td>
-				<td>{current.source}</td>
-			</tr>
-			<tr>
-				<td>Halted</td>
-				<td>{current.halted ?? '—'}</td>
-			</tr>
-		</Table>
+				<tr>
+					<td>Best (node)</td>
+					<td class="mono">{current.best}</td>
+				</tr>
+				<tr>
+					<td>Lag</td>
+					<td><Badge {tone}>{current.lag_blocks} blocks</Badge></td>
+				</tr>
+				<tr>
+					<td>Mode</td>
+					<td class="mono">{current.mode}</td>
+				</tr>
+				<tr>
+					<td>Source</td>
+					<td class="mono">{current.source}</td>
+				</tr>
+				<tr>
+					<td>Halted</td>
+					<td class="mono">{current.halted ?? '—'}</td>
+				</tr>
+			</Table>
+		</div>
 
 		{#if current.stalled}
 			<div class="stalled" role="alert">
@@ -84,6 +86,10 @@
 </Panel>
 
 <style>
+	/* A six-row key/value list, not a data grid: it should not stretch to the page width. */
+	.fields {
+		max-width: 560px;
+	}
 	.stalled {
 		margin-top: var(--space-4);
 		padding-left: var(--space-3);
