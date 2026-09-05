@@ -10,6 +10,10 @@
 	--warn: #f0b429;
 	--danger: #f0616d;
 	--border: #232b36;
+	/* WCAG contrast on --bg #0e1116 (relative-luminance ratio, verified with a
+	   small node script computing sRGB relative luminance per WCAG 2.x):
+	   --accent #4f8cff = 5.88:1, --ok #3ecf8e = 9.47:1, --warn #f0b429 = 10.15:1,
+	   --danger #f0616d = 5.98:1. All >= 4.5:1. */
 	--radius: 6px;
 	--radius-lg: 10px;
 	--space-1: 4px;
@@ -30,9 +34,15 @@
 	--bg-hover: #eef1f5;
 	--fg: #151a21;
 	--fg-muted: #5b6675;
-	--accent: #2f6fe4;
-	--ok: #188a5b;
-	--warn: #a56f00;
+	/* WCAG contrast on --bg #f7f8fa (relative-luminance ratio, verified with a
+	   small node script computing sRGB relative luminance per WCAG 2.x):
+	   --accent #1f5fd0 = 5.48:1 (was #2f6fe4 = 4.38:1, failed),
+	   --ok #12744b = 5.45:1 (was #188a5b = 4.10:1, failed),
+	   --warn #8a5a00 = 5.58:1 (was #a56f00 = 4.05:1, failed),
+	   --danger #c0343f = 5.19:1 (unchanged, already passed). All >= 4.5:1. */
+	--accent: #1f5fd0;
+	--ok: #12744b;
+	--warn: #8a5a00;
 	--danger: #c0343f;
 	--border: #dde2e9;
 }

@@ -46,7 +46,7 @@
 		</ul>
 	</nav>
 
-	<main class="content" style="max-width:1280px">
+	<main class="content">
 		{@render children()}
 	</main>
 </div>
@@ -123,6 +123,7 @@
 
 	.content {
 		grid-area: content;
+		max-width: 1280px;
 		margin: 0 auto;
 		width: 100%;
 		padding: var(--space-4);
