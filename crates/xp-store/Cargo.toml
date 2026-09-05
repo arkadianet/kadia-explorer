@@ -1,0 +1,16 @@
+[package]
+name = "xp-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xp-types.workspace = true
+xp-wire.workspace = true
+redb.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
