@@ -1,6 +1,6 @@
 use crate::dto::{
-    box_dto_from_reader, parse_limit, parse_rent_cursor, parse_u32_param, ListParams, PageDto,
-    RentItemDto, RentUpcomingParams,
+    box_dto_from_reader, format_rent_cursor, parse_limit, parse_rent_cursor, parse_u32_param,
+    ListParams, PageDto, RentItemDto, RentUpcomingParams,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
@@ -65,7 +65,7 @@ pub async fn eligible(
         let (rows, next) = rd.rent_eligible(tip.unwrap_or(0), cursor, limit)?;
         Ok(PageDto {
             items: items_of(rd, rows, tip)?,
-            next_cursor: next.map(|(h, g)| format!("{h}:{g}")),
+            next_cursor: next.map(|(h, g)| format_rent_cursor(h, g)),
         })
     })
     .await?;

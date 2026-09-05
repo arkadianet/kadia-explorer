@@ -1,8 +1,8 @@
-use crate::dto::{box_dto_from_reader, parse_id, BoxDto, BoxRentDto};
+use crate::dto::{box_dto_from_reader, parse_id, rent_dto, BoxDto, BoxRentDto};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, State};
 use axum::Json;
-use xp_types::rent::{maturity_height, rent_due};
+use xp_types::hex32;
 
 pub async fn get_one(
     State(state): State<AppState>,
@@ -26,12 +26,10 @@ pub async fn rent(
         let id = parse_id(&raw)?;
         let row = rd.box_by_id(&id)?.ok_or(ApiError::NotFound)?;
         let tip = rd.indexed_height()?;
-        let maturity = maturity_height(row.creation_height);
         Ok(BoxRentDto {
-            box_id: raw,
-            maturity_height: maturity,
-            due_nano: rent_due(row.size, row.value).to_string(),
-            claimable_at_tip: row.spent.is_none() && tip.is_some_and(|t| t >= maturity),
+            // Echo the canonical lowercase-hex id, not the caller's path spelling.
+            box_id: hex32(&id),
+            rent: rent_dto(&row, tip),
         })
     })
     .await?;

@@ -101,6 +101,21 @@ async fn blocks_list_is_newest_first_and_pages_by_cursor() {
     assert_eq!(v2["items"][0]["height"], 1866000);
 }
 
+/// `/v1/blocks` is descending-only: `dir=asc` is a 400, not a silently ignored parameter.
+#[tokio::test]
+async fn blocks_list_rejects_ascending_and_bogus_dir() {
+    let (_d, app) = app();
+    let (st, v) = get(&app, "/v1/blocks?dir=asc").await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(v["status"], 400);
+
+    let (st, _) = get(&app, "/v1/blocks?dir=bogus").await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+
+    let (st, _) = get(&app, "/v1/blocks?dir=desc").await;
+    assert_eq!(st, StatusCode::OK);
+}
+
 #[tokio::test]
 async fn block_by_height_and_by_id() {
     let (_d, app) = app();
@@ -348,6 +363,64 @@ async fn richlist_is_sorted_descending_by_nano() {
     assert_eq!(st, StatusCode::BAD_REQUEST);
 }
 
+/// The richlist cursor is composite (`"<nano>:<tree hex>"`), so it is the one route cursor
+/// that can silently round-trip wrong. Walk it one item at a time and prove the walk
+/// recovers exactly the unpaginated set, in order, with no repeats.
+#[tokio::test]
+async fn richlist_cursor_round_trips_and_walks_the_whole_list() {
+    let (_d, app) = app();
+
+    let (st, full) = get(&app, "/v1/richlist?limit=500").await;
+    assert_eq!(st, StatusCode::OK);
+    let full_items = full["items"].as_array().unwrap().clone();
+    assert!(full_items.len() > 1, "need >1 tree to exercise the cursor");
+    let full_trees: Vec<String> = full_items
+        .iter()
+        .map(|i| i["tree_hash"].as_str().unwrap().to_string())
+        .collect();
+
+    // First page of one, then the same cursor handed straight back.
+    let (st, p1) = get(&app, "/v1/richlist?limit=1").await;
+    assert_eq!(st, StatusCode::OK);
+    let first = p1["items"][0].clone();
+    let cursor = p1["next_cursor"].as_str().unwrap().to_string();
+    let (st, p2) = get(&app, &format!("/v1/richlist?limit=1&cursor={cursor}")).await;
+    assert_eq!(st, StatusCode::OK);
+    let second = p2["items"][0].clone();
+    assert_ne!(second["tree_hash"], first["tree_hash"]);
+    let n1: u64 = first["nano"].as_str().unwrap().parse().unwrap();
+    let n2: u64 = second["nano"].as_str().unwrap().parse().unwrap();
+    assert!(n2 <= n1);
+
+    // Full walk with limit=1 must reproduce the unpaginated ordering exactly.
+    let mut walked: Vec<String> = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut guard = 0;
+    loop {
+        guard += 1;
+        assert!(guard < 1000, "richlist pagination did not terminate");
+        let path = match &cursor {
+            Some(c) => format!("/v1/richlist?limit=1&cursor={c}"),
+            None => "/v1/richlist?limit=1".to_string(),
+        };
+        let (st, v) = get(&app, &path).await;
+        assert_eq!(st, StatusCode::OK);
+        for it in v["items"].as_array().unwrap() {
+            walked.push(it["tree_hash"].as_str().unwrap().to_string());
+        }
+        match v["next_cursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(walked, full_trees);
+    let unique: HashSet<&String> = walked.iter().collect();
+    assert_eq!(unique.len(), walked.len(), "cursor walk repeated a tree");
+
+    let (st, _) = get(&app, "/v1/richlist?cursor=notacursor").await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn rent_upcoming_and_eligible() {
     let (_d, app) = app();
@@ -360,8 +433,15 @@ async fn rent_upcoming_and_eligible() {
 
     let (st, v) = get(&app, "/v1/rent/eligible?limit=5").await;
     assert_eq!(st, StatusCode::OK);
-    assert!(v["items"].is_array());
-    assert!(v["next_cursor"].is_string() || v["next_cursor"].is_null());
+    // Nothing in the fixture window is claimable at the indexed tip (every fixture output was
+    // created at ~1866000, so it matures ~1M blocks later), so the eligible set is empty and
+    // the page terminates immediately. The composite cursor itself is round-tripped by the
+    // `parse_rent_cursor`/`format_rent_cursor` unit tests in `dto.rs`.
+    assert!(v["items"].as_array().unwrap().is_empty());
+    assert!(v["next_cursor"].is_null());
+
+    let (st, _) = get(&app, "/v1/rent/eligible?cursor=notacursor").await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -398,12 +478,4 @@ async fn search_resolves_height_header_tx_box_and_address() {
     assert_eq!(st, StatusCode::NOT_FOUND);
     let (st, _) = get(&app, "/v1/search?q=%20").await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn limit_is_clamped_to_500() {
-    let (_d, app) = app();
-    let (st, v) = get(&app, "/v1/txs?limit=100000").await;
-    assert_eq!(st, StatusCode::OK);
-    assert!(v["items"].as_array().unwrap().len() <= 500);
 }

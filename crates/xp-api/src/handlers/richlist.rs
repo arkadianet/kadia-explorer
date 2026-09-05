@@ -1,4 +1,6 @@
-use crate::dto::{parse_limit, parse_rich_cursor, ListParams, PageDto, RichlistItemDto};
+use crate::dto::{
+    format_rich_cursor, parse_limit, parse_rich_cursor, ListParams, PageDto, RichlistItemDto,
+};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
 use axum::Json;
@@ -23,7 +25,7 @@ pub async fn list(
         }
         Ok(PageDto {
             items,
-            next_cursor: next.map(|(nano, tree)| format!("{nano}:{}", hex32(&tree))),
+            next_cursor: next.map(|(nano, tree)| format_rich_cursor(nano, &tree)),
         })
     })
     .await?;

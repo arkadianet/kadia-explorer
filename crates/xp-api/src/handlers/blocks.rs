@@ -1,9 +1,11 @@
 use crate::dto::{
-    block_dto, parse_limit, parse_u64_cursor, tx_dto, BlockDto, ListParams, PageDto, TxDto,
+    block_dto, parse_dir, parse_limit, parse_u64_cursor, tx_dto, BlockDto, ListParams, PageDto,
+    TxDto,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use xp_store::read::Dir;
 use xp_store::Reader;
 
 /// Resolves a `{height_or_id}` path segment: all-digits is a height, 64 hex chars is a
@@ -24,11 +26,20 @@ fn resolve_height(rd: &Reader, raw: &str) -> Result<u32, ApiError> {
 }
 
 /// Newest first. The cursor is the height of the last item returned; the next page starts
-/// strictly below it. `dir` is not honoured here — blocks are always descending.
+/// strictly below it.
+///
+/// This route is descending-only: the store's header index is walked backwards from the tip,
+/// and an ascending walk would need a different cursor meaning. `dir=asc` is therefore
+/// rejected outright rather than silently ignored.
 pub async fn list(
     State(state): State<AppState>,
     Query(p): Query<ListParams>,
 ) -> Result<Json<PageDto<BlockDto>>, ApiError> {
+    if let Dir::Asc = parse_dir(p.dir.as_deref())? {
+        return Err(ApiError::BadRequest(
+            "dir must be desc for /v1/blocks".into(),
+        ));
+    }
     let limit = parse_limit(p.limit.as_deref())?;
     let cursor = parse_u64_cursor(p.cursor.as_deref())?;
     let before = cursor

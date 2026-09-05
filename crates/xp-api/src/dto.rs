@@ -113,6 +113,18 @@ pub fn parse_id(raw: &str) -> Result<Hash32, ApiError> {
         .map_err(|_| ApiError::BadRequest(format!("expected 32-byte hex id, got {raw:?}")))
 }
 
+/// `"<nano>:<tree hex>"` — the richlist's composite cursor. Inverse of
+/// [`parse_rich_cursor`].
+pub fn format_rich_cursor(nano: u64, tree: &Hash32) -> String {
+    format!("{nano}:{}", hex32(tree))
+}
+
+/// `"<maturity height>:<gidx>"` — the rent-eligible cursor. Inverse of
+/// [`parse_rent_cursor`].
+pub fn format_rent_cursor(height: u32, gidx: Gidx) -> String {
+    format!("{height}:{gidx}")
+}
+
 /// `"<nano>:<tree hex>"` — the richlist's composite cursor.
 pub fn parse_rich_cursor(raw: Option<&str>) -> Result<Option<(u64, Hash32)>, ApiError> {
     let Some(s) = raw else { return Ok(None) };
@@ -355,12 +367,13 @@ pub fn address_dto(address: String, tree: &Hash32, bal: Option<&BalanceRow>) -> 
     }
 }
 
+/// `/v1/boxes/{id}/rent`: the box id plus the flattened [`RentDto`], so the JSON is
+/// `{ box_id, maturity_height, due_nano, claimable_at_tip }`.
 #[derive(Debug, Serialize)]
 pub struct BoxRentDto {
     pub box_id: String,
-    pub maturity_height: u32,
-    pub due_nano: String,
-    pub claimable_at_tip: bool,
+    #[serde(flatten)]
+    pub rent: RentDto,
 }
 
 /// `/v1/addresses/{addr}/rent`: not a cursor page — the whole unspent set is scanned (up to
@@ -391,4 +404,88 @@ pub struct RichlistItemDto {
 pub struct SearchDto {
     pub kind: &'static str,
     pub id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limit_defaults_clamps_and_rejects() {
+        assert_eq!(parse_limit(None).unwrap(), DEFAULT_LIMIT);
+        assert_eq!(parse_limit(Some("1")).unwrap(), 1);
+        assert_eq!(parse_limit(Some("500")).unwrap(), MAX_LIMIT);
+        // Anything above the cap is clamped, never rejected.
+        assert_eq!(parse_limit(Some("100000")).unwrap(), MAX_LIMIT);
+        assert!(matches!(
+            parse_limit(Some("0")),
+            Err(ApiError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_limit(Some("abc")),
+            Err(ApiError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_limit(Some("")),
+            Err(ApiError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_limit(Some("-1")),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn dir_defaults_to_desc_and_rejects_junk() {
+        assert!(matches!(parse_dir(None).unwrap(), Dir::Desc));
+        assert!(matches!(parse_dir(Some("desc")).unwrap(), Dir::Desc));
+        assert!(matches!(parse_dir(Some("asc")).unwrap(), Dir::Asc));
+        assert!(matches!(
+            parse_dir(Some("sideways")),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn rich_cursor_round_trips_including_extremes() {
+        for (nano, tree) in [(0u64, [0u8; 32]), (1, [0x11; 32]), (u64::MAX, [0xff; 32])] {
+            let s = format_rich_cursor(nano, &tree);
+            assert_eq!(parse_rich_cursor(Some(&s)).unwrap(), Some((nano, tree)));
+        }
+        assert_eq!(parse_rich_cursor(None).unwrap(), None);
+        // A well-formed pair with a bad hash, and a pair with no separator, are both 400s.
+        assert!(matches!(
+            parse_rich_cursor(Some("12:zz")),
+            Err(ApiError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_rich_cursor(Some("12")),
+            Err(ApiError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_rich_cursor(Some("x:00")),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn rent_cursor_round_trips_including_extremes() {
+        for (h, g) in [(0u32, 0u64), (1_866_002, 42), (u32::MAX, u64::MAX)] {
+            let s = format_rent_cursor(h, g);
+            assert_eq!(parse_rent_cursor(Some(&s)).unwrap(), Some((h, g)));
+        }
+        assert_eq!(parse_rent_cursor(None).unwrap(), None);
+        assert!(matches!(
+            parse_rent_cursor(Some("100")),
+            Err(ApiError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_rent_cursor(Some("100:nope")),
+            Err(ApiError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_rent_cursor(Some("nope:100")),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
 }
