@@ -2,6 +2,11 @@ import { api } from '$lib/api/endpoints';
 import type { BlockDto, PageDto, RentItemDto, StatusDto, TxDto } from '$lib/api/types';
 import type { PageLoad } from './$types';
 
+async function upcomingRentItems(fetch: typeof globalThis.fetch): Promise<RentItemDto[]> {
+	const page = await api.rentUpcoming(720, 5, fetch);
+	return page.items;
+}
+
 export interface Loaded<T> {
 	data: T | null;
 	error: unknown;
@@ -21,7 +26,7 @@ export const load: PageLoad = async ({ fetch }) => {
 	const [blocks, txs, rent, status] = await Promise.all([
 		safe<PageDto<BlockDto>>(api.blocks(undefined, 10, undefined, fetch)),
 		safe<PageDto<TxDto>>(api.txs(undefined, 10, undefined, fetch)),
-		safe<RentItemDto[]>(api.rentUpcoming(720, 5, fetch)),
+		safe<RentItemDto[]>(upcomingRentItems(fetch)),
 		safe<StatusDto>(api.status(fetch))
 	]);
 

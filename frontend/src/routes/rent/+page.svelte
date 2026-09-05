@@ -16,7 +16,6 @@
 	import { createPager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
 	import { formatErg, sumNano } from '$lib/format/amount';
-	import { normalizeUpcoming } from './upcoming';
 	import type { RentItemDto } from '$lib/api/types';
 	import type { PageData } from './$types';
 
@@ -47,15 +46,23 @@
 	let upcomingLoading = $state(false);
 	let upcomingError = $state<unknown>(null);
 
+	// Request generation counter: guards against a slower, earlier request (e.g. the user
+	// flips the N-selector twice in quick succession) overwriting the result of a later one.
+	let upcomingGen = 0;
+
 	async function loadUpcoming() {
+		const my = ++upcomingGen;
 		upcomingLoading = true;
 		upcomingError = null;
 		try {
-			upcomingItems = normalizeUpcoming(await api.rentUpcoming(upcomingBlocks, 100));
+			const page = await api.rentUpcoming(upcomingBlocks, 100);
+			if (my !== upcomingGen) return;
+			upcomingItems = page.items;
 		} catch (e) {
+			if (my !== upcomingGen) return;
 			upcomingError = e;
 		} finally {
-			upcomingLoading = false;
+			if (my === upcomingGen) upcomingLoading = false;
 		}
 	}
 
@@ -99,11 +106,19 @@
 		{#if active === 'upcoming'}
 			<div class="controls">
 				<label for="blocks">Horizon</label>
-				<select id="blocks" value={upcomingBlocks} onchange={onBlocksChange}>
+				<select
+					id="blocks"
+					value={upcomingBlocks}
+					disabled={upcomingLoading}
+					onchange={onBlocksChange}
+				>
 					{#each UPCOMING_OPTIONS as n (n)}
 						<option value={n}>{n} blocks</option>
 					{/each}
 				</select>
+				{#if upcomingLoading}
+					<span class="muted loading">Loading…</span>
+				{/if}
 			</div>
 
 			{#if upcomingLoading}

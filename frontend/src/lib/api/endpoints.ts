@@ -64,7 +64,7 @@ export const api = {
 		apiGet<PageDto<RichlistItemDto>>('/richlist', { cursor, limit }, f),
 
 	rentUpcoming: (blocks = 720, limit = 50, f?: Fetch) =>
-		apiGet<RentItemDto[]>('/rent/upcoming', { blocks, limit }, f),
+		apiGet<PageDto<RentItemDto>>('/rent/upcoming', { blocks, limit }, f),
 
 	rentEligible: (cursor?: string, limit = 50, f?: Fetch) =>
 		apiGet<PageDto<RentItemDto>>('/rent/eligible', { cursor, limit }, f),

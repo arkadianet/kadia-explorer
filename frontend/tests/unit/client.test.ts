@@ -57,3 +57,14 @@ describe('api path encoding', () => {
 		expect(calledUrl).toContain('a%2Fb%20c');
 	});
 });
+
+describe('api.rentUpcoming', () => {
+	it('requests /v1/rent/upcoming with blocks and limit, and returns the page unchanged', async () => {
+		const body = { items: [], next_cursor: null };
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body));
+		const result = await api.rentUpcoming(720, 50, fetchFn);
+		const calledUrl = fetchFn.mock.calls[0][0] as string;
+		expect(calledUrl).toBe('/v1/rent/upcoming?blocks=720&limit=50');
+		expect(result).toEqual(body);
+	});
+});
