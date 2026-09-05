@@ -29,6 +29,14 @@ const TYPE_COLL_BYTE = 0x0e;
 /** Compressed EC point / P2PK public key length. */
 const POINT_BYTES = 33;
 
+/** Inclusive bounds of the fixed-width numeric types, checked after zigzag decoding: a VLQ can
+ * carry more bits than the declared type holds, and an out-of-range value means the constant
+ * was not really an Int/Long. */
+const INT_MIN = -(2n ** 31n);
+const INT_MAX = 2n ** 31n - 1n;
+const LONG_MIN = -(2n ** 63n);
+const LONG_MAX = 2n ** 63n - 1n;
+
 function hexToBytes(hex: string): Uint8Array | null {
 	if (hex.length === 0 || hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) return null;
 	const out = new Uint8Array(hex.length / 2);
@@ -76,8 +84,10 @@ function isPrintableAscii(bytes: Uint8Array): boolean {
 /**
  * Decodes one serialized register constant.
  *
- * Returns `null` when the input is not hex or is truncated, and
- * `{ type: 'raw', value: hex }` for constants outside the recognised set.
+ * Returns `null` when the input is not hex, is truncated, carries a numeric value outside its
+ * declared type's range, or has bytes left over after the constant — a register holds exactly
+ * one constant, so trailing bytes mean we mis-read the shape and must not show a value we made
+ * up. Returns `{ type: 'raw', value: hex }` for constants outside the recognised set.
  */
 export function decodeRegister(hex: string): DecodedRegister | null {
 	const bytes = hexToBytes(hex);
@@ -85,35 +95,43 @@ export function decodeRegister(hex: string): DecodedRegister | null {
 
 	const code = bytes[0];
 
+	/** Every recognised constant must consume the whole input; see the doc comment. */
+	const exact = (end: number, decoded: DecodedRegister): DecodedRegister | null =>
+		end === bytes.length ? decoded : null;
+
 	switch (code) {
 		case TYPE_BOOLEAN: {
 			if (bytes.length < 2) return null;
 			const b = bytes[1];
 			if (b !== 0 && b !== 1) return null;
-			return { type: 'Boolean', value: b === 1 ? 'true' : 'false' };
+			return exact(2, { type: 'Boolean', value: b === 1 ? 'true' : 'false' });
 		}
 
 		case TYPE_INT:
 		case TYPE_LONG: {
 			const vlq = readVlq(bytes, 1);
 			if (vlq === null) return null;
-			return {
-				type: code === TYPE_INT ? 'Int' : 'Long',
-				value: zigzag(vlq.value).toString()
-			};
+			const isInt = code === TYPE_INT;
+			const value = zigzag(vlq.value);
+			const min = isInt ? INT_MIN : LONG_MIN;
+			const max = isInt ? INT_MAX : LONG_MAX;
+			if (value < min || value > max) return null;
+			return exact(vlq.next, { type: isInt ? 'Int' : 'Long', value: value.toString() });
 		}
 
 		case TYPE_GROUP_ELEMENT: {
-			if (bytes.length < 1 + POINT_BYTES) return null;
-			return { type: 'GroupElement', value: bytesToHex(bytes.slice(1, 1 + POINT_BYTES)) };
+			const end = 1 + POINT_BYTES;
+			if (bytes.length < end) return null;
+			return exact(end, { type: 'GroupElement', value: bytesToHex(bytes.slice(1, end)) });
 		}
 
 		case TYPE_SIGMA_PROP: {
 			// Only the P2PK sigma prop (`08cd` + compressed point) is decoded; other sigma
 			// propositions (AND/OR trees, DHTuple) fall through to raw.
 			if (bytes.length >= 2 && bytes[1] === 0xcd) {
-				if (bytes.length < 2 + POINT_BYTES) return null;
-				return { type: 'SigmaProp', value: bytesToHex(bytes.slice(2, 2 + POINT_BYTES)) };
+				const end = 2 + POINT_BYTES;
+				if (bytes.length < end) return null;
+				return exact(end, { type: 'SigmaProp', value: bytesToHex(bytes.slice(2, end)) });
 			}
 			break;
 		}
@@ -122,13 +140,15 @@ export function decodeRegister(hex: string): DecodedRegister | null {
 			const len = readVlq(bytes, 1);
 			if (len === null) return null;
 			const start = len.next;
+			// The declared length is a BigInt that can exceed Number's safe range, so it is
+			// bounds-checked as a BigInt *before* the Number() conversion below.
+			if (len.value > BigInt(bytes.length - start)) return null;
 			const end = start + Number(len.value);
-			if (len.value > BigInt(bytes.length) || end > bytes.length) return null;
 			const data = bytes.slice(start, end);
-			return {
+			return exact(end, {
 				type: 'Coll[Byte]',
 				value: isPrintableAscii(data) ? `"${new TextDecoder().decode(data)}"` : bytesToHex(data)
-			};
+			});
 		}
 	}
 

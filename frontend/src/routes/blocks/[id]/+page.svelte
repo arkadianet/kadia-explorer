@@ -6,6 +6,7 @@
 	import Age from '$lib/components/Age.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import { formatNano, sumNano } from '$lib/format/amount';
+	import { formatKb } from '$lib/format/size';
 	import { absTime } from '$lib/format/time';
 	import type { PageData } from './$types';
 
@@ -13,10 +14,6 @@
 
 	const block = $derived(data.block);
 	const txs = $derived(data.txs);
-
-	function kb(size: number): string {
-		return `${(size / 1024).toFixed(1)} KB`;
-	}
 </script>
 
 <svelte:head>
@@ -47,7 +44,7 @@
 		</div>
 		<div class="fact">
 			<span class="label">Size</span>
-			<span>{kb(block.size)}</span>
+			<span>{formatKb(block.size)}</span>
 		</div>
 		<div class="fact">
 			<span class="label">Version</span>

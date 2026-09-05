@@ -54,6 +54,24 @@ describe('decodeRegister', () => {
 		expect(decodeRegister('0e0')).toBeNull();
 	});
 
+	it('returns null for numbers outside their declared type range', () => {
+		// A 10-byte VLQ carries far more than 32 bits; an Int must reject it.
+		expect(decodeRegister('04ffffffffffffffffff7f')).toBeNull();
+		// zigzag(2^31) needs 33 bits — one past the Int range, and fine as a Long.
+		expect(decodeRegister('048080808010')).toBeNull();
+		expect(decodeRegister('058080808010')).toEqual({ type: 'Long', value: '2147483648' });
+		// The largest in-range Int, and the same VLQ read as a Long.
+		expect(decodeRegister('04feffffff0f')).toEqual({ type: 'Int', value: '2147483647' });
+	});
+
+	it('returns null when bytes are left over after the constant', () => {
+		expect(decodeRegister('0e0568656c6c6f00ff')).toBeNull();
+		expect(decodeRegister('040000')).toBeNull();
+		expect(decodeRegister('010000')).toBeNull();
+		expect(decodeRegister('07' + '02'.repeat(33) + 'ff')).toBeNull();
+		expect(decodeRegister('08cd' + '03'.repeat(33) + 'ff')).toBeNull();
+	});
+
 	it('returns null for truncated input', () => {
 		expect(decodeRegister('0e05ab')).toBeNull();
 		expect(decodeRegister('04')).toBeNull();

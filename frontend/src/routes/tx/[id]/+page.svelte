@@ -6,6 +6,7 @@
 	import BoxCard from '$lib/components/BoxCard.svelte';
 	import { status } from '$lib/status/status.svelte';
 	import { sumNano } from '$lib/format/amount';
+	import { formatKb } from '$lib/format/size';
 	import { absTime } from '$lib/format/time';
 	import type { PageData } from './$types';
 
@@ -21,10 +22,6 @@
 
 	const totalIn = $derived(sumNano(knownInputValues).toString());
 	const totalOut = $derived(sumNano(tx.outputs.map((o) => o.value)).toString());
-
-	function kb(size: number): string {
-		return `${(size / 1024).toFixed(2)} KB`;
-	}
 </script>
 
 <svelte:head>
@@ -51,7 +48,7 @@
 		</div>
 		<div class="fact">
 			<span class="label">Size</span>
-			<span>{kb(tx.size)}</span>
+			<span>{formatKb(tx.size)}</span>
 		</div>
 		<div class="fact">
 			<span class="label">Fee</span>
@@ -63,7 +60,7 @@
 		<div class="data-inputs">
 			<span class="label">Data inputs</span>
 			<ul>
-				{#each tx.data_inputs as id (id)}
+				{#each tx.data_inputs as id, i (i)}
 					<li><Hash value={id} href={`/box/${id}`} copy={false} head={12} /></li>
 				{/each}
 			</ul>
