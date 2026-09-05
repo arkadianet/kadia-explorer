@@ -154,6 +154,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
     let mut fees = 0u64;
     let mut touched_balances: HashMap<Hash32, BalanceRow> = HashMap::new();
     let mut skipped_inputs = 0u32;
+    let first_tx_gidx = ctx.next_tx;
 
     for (ti, tx) in b.txs.iter().enumerate() {
         let tx_gidx = ctx.next_tx;
@@ -338,6 +339,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         difficulty: b.header.difficulty,
         miner_pk: b.header.miner_pk,
         tx_count: b.txs.len() as u32,
+        first_tx_gidx,
         size: b.size,
         fees,
         reward,

@@ -152,6 +152,7 @@ impl Store {
                 difficulty: 0,
                 miner_pk: [0; 33],
                 tx_count: 0,
+                first_tx_gidx: 0,
                 size: 0,
                 fees: 0,
                 reward: 0,

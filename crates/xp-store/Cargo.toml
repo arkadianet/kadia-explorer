@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 xp-types.workspace = true
 xp-wire.workspace = true
+ergo-lib.workspace = true
 redb.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

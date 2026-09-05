@@ -164,6 +164,9 @@ pub struct HeaderRow {
     pub difficulty: u128,
     pub miner_pk: [u8; 33],
     pub tx_count: u32,
+    /// `TxRow.gidx` of this block's first tx, so `Reader::txs_in_block` can locate the
+    /// block's tx range without an O(chain) scan (see Task 6 interface amendment).
+    pub first_tx_gidx: Gidx,
     pub size: u32,
     pub fees: u64,
     pub reward: u64,
@@ -180,6 +183,7 @@ impl HeaderRow {
         w.u128(self.difficulty);
         w.raw(&self.miner_pk);
         w.u32(self.tx_count);
+        w.u64(self.first_tx_gidx);
         w.u32(self.size);
         w.u64(self.fees);
         w.u64(self.reward);
@@ -197,6 +201,7 @@ impl HeaderRow {
             difficulty: r.u128()?,
             miner_pk: r.take(33)?.try_into().unwrap(),
             tx_count: r.u32()?,
+            first_tx_gidx: r.u64()?,
             size: r.u32()?,
             fees: r.u64()?,
             reward: r.u64()?,
@@ -480,9 +485,9 @@ mod tests {
         }
         #[test]
         fn header_row_roundtrip(id in arb_hash(), parent_id in arb_hash(), timestamp in any::<u64>(), difficulty in any::<u128>(),
-                                miner_pk in any::<[u8; 33]>(), tx_count in any::<u32>(), size in any::<u32>(), fees in any::<u64>(),
+                                miner_pk in any::<[u8; 33]>(), tx_count in any::<u32>(), first_tx_gidx in any::<u64>(), size in any::<u32>(), fees in any::<u64>(),
                                 reward in any::<u64>(), version in any::<u8>(), raw_json in ".*") {
-            let r = HeaderRow { id, parent_id, timestamp, difficulty, miner_pk, tx_count, size, fees, reward, version, raw_json };
+            let r = HeaderRow { id, parent_id, timestamp, difficulty, miner_pk, tx_count, first_tx_gidx, size, fees, reward, version, raw_json };
             prop_assert_eq!(HeaderRow::decode(&r.encode()).unwrap(), r);
         }
         #[test]
@@ -536,9 +541,10 @@ mod tests {
             difficulty: 4,
             miner_pk: [5; 33],
             tx_count: 6,
-            size: 7,
-            fees: 8,
-            reward: 9,
+            first_tx_gidx: 7,
+            size: 8,
+            fees: 9,
+            reward: 10,
             version: 1,
             raw_json: "{}".into(),
         };
