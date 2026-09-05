@@ -21,20 +21,20 @@
 	const showLagBanner = $derived(
 		status !== null && status !== undefined && (status.lag_blocks > 100 || status.halted !== null)
 	);
-	const showStalledBanner = $derived(status?.stalled ?? null);
+	const stalledInfo = $derived(status?.stalled ?? null);
 </script>
 
 <svelte:head>
 	<title>Ergo Explorer</title>
 </svelte:head>
 
-{#if showStalledBanner}
+{#if stalledInfo}
 	<div class="banner danger" role="alert">
-		Indexer is waiting on block {showStalledBanner.height} from the node for {showStalledBanner.since_secs}
+		Indexer is waiting on block {stalledInfo.height} from the node for {stalledInfo.since_secs}
 		s.
 	</div>
 {:else if showLagBanner && status}
-	<div class="banner warn" role="alert">
+	<div class="banner warn" role="status">
 		Index is {status.lag_blocks} blocks behind the node.
 	</div>
 {:else if statusError}
@@ -90,7 +90,7 @@
 				{/snippet}
 				{#each data.txs.data.items as tx (tx.id)}
 					<tr>
-						<td><Hash value={tx.id} href={`/txs/${tx.id}`} copy={false} /></td>
+						<td><Hash value={tx.id} href={`/tx/${tx.id}`} copy={false} /></td>
 						<td><Age ms={tx.timestamp} /></td>
 						<td><Amount nano={tx.fee} maxFrac={3} /></td>
 						<td>{tx.outputs.length}</td>
