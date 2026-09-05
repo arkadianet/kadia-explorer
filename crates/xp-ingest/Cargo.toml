@@ -1,0 +1,22 @@
+[package]
+name = "xp-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xp-types.workspace = true
+xp-wire.workspace = true
+xp-source.workspace = true
+xp-store.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+tokio-util.workspace = true
+futures.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
