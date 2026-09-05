@@ -13,7 +13,7 @@
 //! that happens to run ignored tests without a node configured stays green).
 
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 const SAMPLE_TARGET: usize = 200;
@@ -25,6 +25,25 @@ const NODE_UNSPENT_CAP: usize = 16_384;
 /// Safety bound on cursor-walk pages, so a store bug that never returns `next_cursor: null`
 /// can't spin the test forever.
 const MAX_PAGES: usize = 200;
+/// Page size used by both explorer cursor walks; with [`MAX_PAGES`] it bounds how many
+/// txs/boxes a walk can see before it is truncated.
+const PAGE_LIMIT: usize = 500;
+/// Most items either explorer walk can observe. An address the node says has more than this
+/// is not comparable by walking, so it is skipped up front rather than compared against a
+/// silently truncated walk.
+const WALK_CAP: u64 = (MAX_PAGES * PAGE_LIMIT) as u64;
+/// Mainnet miner-fee contract address. Every tx that pays a fee creates an output here, so
+/// it appears in essentially every block and holds a huge, constantly churning box set: it
+/// is a guaranteed page-cap skip and a guaranteed mempool-race flake, and comparing it
+/// tells us nothing the ordinary addresses in the sample don't.
+const MINER_FEE_ADDRESS: &str = "2iHkR7CWvD1R4j1yZg5bkeDRQavjAaVPeTDFGGLZduHyfWMuYpmhHocX8GJoaieTx78FntzJbCBVL6rf96ocJoZdmWBL2fci7NqWgAirppPQmZ7fN9V6z13Ay6brPriBKYqLp1bT2Fk4FkFLCfdPpe";
+/// An address appearing as an output in more than this many of the [`BLOCKS_TO_SAMPLE`]
+/// sampled blocks is a pool, exchange or miner payout address rather than an ordinary user
+/// address. Those are exactly the addresses with box/tx counts past [`WALK_CAP`] and with
+/// mempool churn fast enough to make the unspent-set recheck flaky, so they are excluded
+/// from the sample: the gate is there to catch indexing bugs, and a sample made of ten
+/// unverifiable hot addresses catches none.
+const HOT_ADDRESS_BLOCK_THRESHOLD: usize = 5;
 
 /// A tiny deterministic PRNG (xorshift64) so the sample is reproducible across runs without
 /// pulling in a `rand` dependency.
@@ -106,23 +125,30 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<(u16, Value), S
 }
 
 /// Walks explorer `/v1/addresses/{addr}/boxes?unspent=true`, collecting every box id.
+///
+/// [`Capped::Truncated`] means the walk stopped at [`MAX_PAGES`] with a `next_cursor` still
+/// outstanding, so the returned set is a prefix of the address's boxes, not the whole set.
+/// The caller must treat that as unverifiable rather than compare the prefix against the
+/// node's full set and call the difference a mismatch.
 async fn explorer_unspent_ids(
     client: &reqwest::Client,
     explorer: &str,
     addr: &str,
-) -> Result<HashSet<String>, String> {
+) -> Result<(HashSet<String>, Capped), String> {
     let mut ids = HashSet::new();
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_PAGES {
         let url = match &cursor {
-            Some(c) => {
-                format!("{explorer}/v1/addresses/{addr}/boxes?unspent=true&limit=500&cursor={c}")
+            Some(c) => format!(
+                "{explorer}/v1/addresses/{addr}/boxes?unspent=true&limit={PAGE_LIMIT}&cursor={c}"
+            ),
+            None => {
+                format!("{explorer}/v1/addresses/{addr}/boxes?unspent=true&limit={PAGE_LIMIT}")
             }
-            None => format!("{explorer}/v1/addresses/{addr}/boxes?unspent=true&limit=500"),
         };
         let (status, json) = get_json(client, &url).await?;
         if status == 404 {
-            return Ok(ids);
+            return Ok((ids, Capped::Complete));
         }
         if status != 200 {
             return Err(format!("unexpected status {status} from {url}"));
@@ -135,28 +161,38 @@ async fn explorer_unspent_ids(
         }
         cursor = json["next_cursor"].as_str().map(|s| s.to_string());
         if cursor.is_none() {
-            break;
+            return Ok((ids, Capped::Complete));
         }
     }
-    Ok(ids)
+    Ok((ids, Capped::Truncated))
+}
+
+/// Whether a cursor walk saw the whole set or stopped at [`MAX_PAGES`] with more to come.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Capped {
+    Complete,
+    Truncated,
 }
 
 /// Walks explorer `/v1/addresses/{addr}/txs`, counting items across every page.
+///
+/// As with [`explorer_unspent_ids`], [`Capped::Truncated`] means the count is a lower bound
+/// (the walk hit [`MAX_PAGES`]), never a value to compare against the node's total.
 async fn explorer_tx_count(
     client: &reqwest::Client,
     explorer: &str,
     addr: &str,
-) -> Result<u64, String> {
+) -> Result<(u64, Capped), String> {
     let mut count = 0u64;
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_PAGES {
         let url = match &cursor {
-            Some(c) => format!("{explorer}/v1/addresses/{addr}/txs?limit=500&cursor={c}"),
-            None => format!("{explorer}/v1/addresses/{addr}/txs?limit=500"),
+            Some(c) => format!("{explorer}/v1/addresses/{addr}/txs?limit={PAGE_LIMIT}&cursor={c}"),
+            None => format!("{explorer}/v1/addresses/{addr}/txs?limit={PAGE_LIMIT}"),
         };
         let (status, json) = get_json(client, &url).await?;
         if status == 404 {
-            return Ok(0);
+            return Ok((0, Capped::Complete));
         }
         if status != 200 {
             return Err(format!("unexpected status {status} from {url}"));
@@ -165,10 +201,10 @@ async fn explorer_tx_count(
         count += items.len() as u64;
         cursor = json["next_cursor"].as_str().map(|s| s.to_string());
         if cursor.is_none() {
-            break;
+            return Ok((count, Capped::Complete));
         }
     }
-    Ok(count)
+    Ok((count, Capped::Truncated))
 }
 
 /// GET the node's unspent-by-address list; `None` means the node returned exactly its own
@@ -311,6 +347,22 @@ async fn compare_address(
         }),
     }
 
+    // --- page-cap pre-check ---
+    // Both walks below are bounded by MAX_PAGES * PAGE_LIMIT items. If the node already
+    // says this address has more txs than that, neither walk can produce a comparable
+    // answer, so skip both rather than spend ~200 requests each to reach a truncated result.
+    if let Ok(total) = node_tx_total_v {
+        if total > WALK_CAP {
+            skipped.push(Skipped {
+                address: addr.to_string(),
+                reason: format!(
+                    "unspent_ids + tx_count: node reports {total} txs > page cap {WALK_CAP}"
+                ),
+            });
+            return;
+        }
+    }
+
     // --- unspent box-id set --- (never early-returns: a failure here must still let the
     // tx_count section below run)
     match node_unspent_ids(client, node, addr).await {
@@ -319,14 +371,22 @@ async fn compare_address(
             reason: "unspent_ids: node returned exactly the cap; set may be truncated".to_string(),
         }),
         Ok(Some(node_ids)) => match explorer_unspent_ids(client, explorer, addr).await {
-            Ok(explorer_ids) if explorer_ids != node_ids => {
+            Ok((_, Capped::Truncated)) => skipped.push(Skipped {
+                address: addr.to_string(),
+                reason: "unspent_ids: explorer page cap reached".to_string(),
+            }),
+            Ok((explorer_ids, Capped::Complete)) if explorer_ids != node_ids => {
                 // Possibly explained by a mempool spend racing the two queries — re-check
                 // once after a delay before treating it as a real mismatch.
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 let node_retry = node_unspent_ids(client, node, addr).await;
                 let explorer_retry = explorer_unspent_ids(client, explorer, addr).await;
                 match (&node_retry, &explorer_retry) {
-                    (Ok(Some(n2)), Ok(e2)) => {
+                    (_, Ok((_, Capped::Truncated))) => skipped.push(Skipped {
+                        address: addr.to_string(),
+                        reason: "unspent_ids: explorer page cap reached on recheck".to_string(),
+                    }),
+                    (Ok(Some(n2)), Ok((e2, Capped::Complete))) => {
                         if n2 != e2 {
                             let (only_explorer, only_node): (Vec<_>, Vec<_>) = (
                                 e2.difference(n2).cloned().collect(),
@@ -374,7 +434,11 @@ async fn compare_address(
     // --- tx count ---
     let explorer_count = explorer_tx_count(client, explorer, addr).await;
     match (explorer_count, node_tx_total_v) {
-        (Ok(e), Ok(n)) if e != n => mismatches.push(Mismatch {
+        (Ok((_, Capped::Truncated)), _) => skipped.push(Skipped {
+            address: addr.to_string(),
+            reason: "tx_count: explorer page cap reached".to_string(),
+        }),
+        (Ok((e, Capped::Complete)), Ok(n)) if e != n => mismatches.push(Mismatch {
             address: addr.to_string(),
             field: "tx_count",
             detail: format!("explorer={e} node={n}"),
@@ -391,7 +455,29 @@ async fn compare_address(
     }
 }
 
-/// Fetches the last `BLOCKS_TO_SAMPLE` blocks' txs and collects distinct output addresses.
+/// Turns per-block sets of output addresses into the candidate sample, dropping addresses
+/// that are not usefully comparable (see [`MINER_FEE_ADDRESS`] and
+/// [`HOT_ADDRESS_BLOCK_THRESHOLD`] for why each exclusion exists).
+///
+/// Pure, so the exclusion rule is unit-tested without a live node.
+fn select_sample_addresses(per_block: &[HashSet<String>]) -> Vec<String> {
+    let mut blocks_seen_in: HashMap<&str, usize> = HashMap::new();
+    for block in per_block {
+        for addr in block {
+            *blocks_seen_in.entry(addr.as_str()).or_insert(0) += 1;
+        }
+    }
+    blocks_seen_in
+        .into_iter()
+        .filter(|(addr, blocks)| {
+            *addr != MINER_FEE_ADDRESS && *blocks <= HOT_ADDRESS_BLOCK_THRESHOLD
+        })
+        .map(|(addr, _)| addr.to_string())
+        .collect()
+}
+
+/// Fetches the last `BLOCKS_TO_SAMPLE` blocks' txs and collects distinct output addresses,
+/// then applies [`select_sample_addresses`]'s exclusions.
 async fn sample_addresses(client: &reqwest::Client, explorer: &str) -> Result<Vec<String>, String> {
     let (status, blocks) = get_json(
         client,
@@ -402,7 +488,7 @@ async fn sample_addresses(client: &reqwest::Client, explorer: &str) -> Result<Ve
         return Err(format!("unexpected status {status} from /v1/blocks"));
     }
     let items = blocks["items"].as_array().cloned().unwrap_or_default();
-    let mut addrs: HashSet<String> = HashSet::new();
+    let mut per_block: Vec<HashSet<String>> = Vec::new();
     for item in &items {
         let height = item["height"]
             .as_u64()
@@ -415,16 +501,18 @@ async fn sample_addresses(client: &reqwest::Client, explorer: &str) -> Result<Ve
             ));
         }
         let txs = txs.as_array().cloned().unwrap_or_default();
+        let mut in_this_block: HashSet<String> = HashSet::new();
         for tx in &txs {
             let outputs = tx["outputs"].as_array().cloned().unwrap_or_default();
             for out in &outputs {
                 if let Some(addr) = out["address"].as_str() {
-                    addrs.insert(addr.to_string());
+                    in_this_block.insert(addr.to_string());
                 }
             }
         }
+        per_block.push(in_this_block);
     }
-    Ok(addrs.into_iter().collect())
+    Ok(select_sample_addresses(&per_block))
 }
 
 #[tokio::test]
@@ -537,4 +625,27 @@ fn shuffle_is_deterministic_for_a_fixed_seed() {
     assert_eq!(a, b);
     // And it actually permutes (astronomically unlikely to be the identity by chance).
     assert_ne!(a, (0..50).collect::<Vec<u32>>());
+}
+
+#[test]
+fn sample_excludes_the_fee_contract_and_addresses_in_too_many_blocks() {
+    let mut per_block: Vec<HashSet<String>> = Vec::new();
+    for i in 0..BLOCKS_TO_SAMPLE {
+        let mut b = HashSet::new();
+        b.insert(MINER_FEE_ADDRESS.to_string()); // in every block
+        b.insert("hot".to_string()); // in every block
+        if i < HOT_ADDRESS_BLOCK_THRESHOLD as u32 {
+            b.insert("warm".to_string()); // in exactly the threshold many blocks
+        }
+        b.insert(format!("cold{i}")); // in one block each
+        per_block.push(b);
+    }
+    let mut got = select_sample_addresses(&per_block);
+    got.sort();
+
+    assert!(!got.contains(&MINER_FEE_ADDRESS.to_string()));
+    assert!(!got.contains(&"hot".to_string()));
+    // The threshold is inclusive: "more than N blocks" is excluded, exactly N is kept.
+    assert!(got.contains(&"warm".to_string()));
+    assert_eq!(got.len(), BLOCKS_TO_SAMPLE as usize + 1);
 }
