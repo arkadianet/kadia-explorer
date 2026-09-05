@@ -105,6 +105,17 @@ pub async fn run(
             halted,
         });
     };
+    // Every transient path is the same three steps — publish, sleep (racing shutdown), retry —
+    // so they share one macro rather than five hand-copied blocks that can drift apart.
+    macro_rules! retry {
+        ($indexed:expr) => {{
+            publish($indexed, best, mode, None);
+            if sleep_or_shutdown(poll, &shutdown).await {
+                return Ok(());
+            }
+            continue;
+        }};
+    }
     // Publishes `halted` and returns the typed store error, so the caller keeps the real
     // cause (and its source chain) rather than a re-worded string.
     macro_rules! halt_store {
@@ -132,23 +143,21 @@ pub async fn run(
             Ok(b) => b,
             Err(e) => {
                 warn!(source = %source_name, error = %e, "best_height failed; retrying");
-                let indexed = match store.indexed_height() {
+                let cur = match store.indexed_height() {
                     Ok(v) => v,
                     Err(se) => halt_store!(None, se),
                 };
-                publish(indexed, best, mode, None);
-                if sleep_or_shutdown(poll, &shutdown).await {
-                    return Ok(());
-                }
-                continue;
+                retry!(cur);
             }
         };
         let indexed_opt = match store.indexed_height() {
             Ok(v) => v,
             Err(e) => halt_store!(None, e),
         };
+        // `indexed` is the arithmetic height (0 on an empty store); `cur` is what gets
+        // published, and stays `None` for an empty store rather than claiming height 0. Both
+        // follow a rollback below.
         let mut indexed = indexed_opt.unwrap_or(0);
-        // `Some(indexed)` once anything is indexed, tracking rollbacks below.
         let mut cur = indexed_opt;
 
         // The fork check runs before the `indexed >= best` short-circuit: a reorg that swaps
@@ -161,31 +170,26 @@ pub async fn run(
                     height = indexed,
                     "source has no block at our tip height; waiting"
                 );
-                publish(indexed_opt, best, mode, None);
-                if sleep_or_shutdown(poll, &shutdown).await {
-                    return Ok(());
-                }
-                continue;
+                retry!(cur);
             }
             ForkCheck::TooDeep => halt!(
-                indexed_opt,
+                cur,
                 format!("reindex required: fork deeper than {ROLLBACK_WINDOW} blocks")
             ),
-            ForkCheck::StoreError(e) => halt_store!(indexed_opt, e),
+            ForkCheck::StoreError(e) => halt_store!(cur, e),
             ForkCheck::SourceError(e) => {
                 warn!(source = %source_name, error = %e, "fork check failed; retrying");
-                publish(indexed_opt, best, mode, None);
-                if sleep_or_shutdown(poll, &shutdown).await {
-                    return Ok(());
-                }
-                continue;
+                retry!(cur);
             }
             ForkCheck::RollbackTo(h) => {
                 info!(from = indexed, to = h, "fork detected; rolling back");
                 let s = store.clone();
-                let out = tokio::task::spawn_blocking(move || s.rollback_to(h)).await?;
+                let out = match tokio::task::spawn_blocking(move || s.rollback_to(h)).await {
+                    Ok(v) => v,
+                    Err(join) => halt!(cur, join.to_string()),
+                };
                 if let Err(e) = out {
-                    halt_store!(indexed_opt, e);
+                    halt_store!(cur, e);
                 }
                 indexed = h;
                 cur = Some(indexed);
@@ -216,20 +220,12 @@ pub async fn run(
             Ok(b) => b,
             Err(e) => {
                 warn!(source = %source_name, error = %e, "fetch failed; retrying");
-                publish(Some(indexed), best, mode, None);
-                if sleep_or_shutdown(poll, &shutdown).await {
-                    return Ok(());
-                }
-                continue;
+                retry!(cur);
             }
         };
         if bodies.is_empty() {
             // The source advertised a higher tip than it will serve bodies for; wait it out.
-            publish(Some(indexed), best, mode, None);
-            if sleep_or_shutdown(poll, &shutdown).await {
-                return Ok(());
-            }
-            continue;
+            retry!(cur);
         }
 
         // Decoding and applying are CPU/redb work: keep them off the async runtime's threads.
@@ -250,7 +246,11 @@ pub async fn run(
             s.apply_batch(&blocks, durable).map_err(ApplyErr::Store)?;
             Ok(tip)
         })
-        .await?;
+        .await;
+        let applied = match applied {
+            Ok(v) => v,
+            Err(join) => halt!(cur, join.to_string()),
+        };
 
         match applied {
             Ok(new_indexed) => {
@@ -266,9 +266,10 @@ pub async fn run(
             Err(ApplyErr::Store(StoreError::ParentMismatch { height, have, want })) => {
                 // The source's chain moved under us mid-batch; the next fork check resolves it.
                 debug!(height, %have, %want, "parent mismatch; re-checking fork");
+                retry!(cur);
             }
-            Err(ApplyErr::Store(e)) => halt_store!(Some(indexed), e),
-            Err(ApplyErr::Decode(e)) => halt!(Some(indexed), format!("undecodable block: {e}")),
+            Err(ApplyErr::Store(e)) => halt_store!(cur, e),
+            Err(ApplyErr::Decode(e)) => halt!(cur, format!("undecodable block: {e}")),
         }
     }
 }

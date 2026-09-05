@@ -2769,7 +2769,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
- "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",

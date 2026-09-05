@@ -131,6 +131,97 @@ impl BlockSource for FakeSource {
     }
 }
 
+/// A source that can never answer anything: every call is a transient failure. Used to observe
+/// the status ingest publishes before it has done any work.
+struct DeadSource;
+
+#[async_trait::async_trait]
+impl BlockSource for DeadSource {
+    fn name(&self) -> &str {
+        "dead"
+    }
+    async fn best_height(&self) -> Result<u32, SourceError> {
+        Err(SourceError::Unavailable)
+    }
+    async fn header_id_at(&self, _height: u32) -> Result<Option<Hash32>, SourceError> {
+        Err(SourceError::Unavailable)
+    }
+    async fn full_block_json(&self, _id: &Hash32) -> Result<Option<String>, SourceError> {
+        Err(SourceError::Unavailable)
+    }
+}
+
+/// A source that reports a tip but cannot serve anything else, so ingest gets as far as the
+/// fetch step — the path that used to publish `Some(0)` for an empty store — before failing.
+struct TipOnlySource;
+
+#[async_trait::async_trait]
+impl BlockSource for TipOnlySource {
+    fn name(&self) -> &str {
+        "dead"
+    }
+    async fn best_height(&self) -> Result<u32, SourceError> {
+        Ok(10)
+    }
+    async fn header_id_at(&self, _height: u32) -> Result<Option<Hash32>, SourceError> {
+        Err(SourceError::Unavailable)
+    }
+    async fn full_block_json(&self, _id: &Hash32) -> Result<Option<String>, SourceError> {
+        Err(SourceError::Unavailable)
+    }
+}
+
+/// Runs ingest against `source` just long enough to observe its first published status.
+async fn first_published_status(store: Arc<Store>, source: Arc<dyn BlockSource>) -> IngestStatus {
+    let (tx, mut rx) = watch::channel(initial_status());
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(run(store, source, test_cfg(), tx, shutdown.clone()));
+    // `initial_status()` uses an empty source name, so the first status carrying "dead" is the
+    // first one ingest itself published.
+    let status = timeout(Duration::from_secs(10), async {
+        loop {
+            {
+                let s = rx.borrow_and_update();
+                if s.source == "dead" {
+                    return s.clone();
+                }
+            }
+            rx.changed().await.expect("run dropped the status sender");
+        }
+    })
+    .await
+    .expect("no status published");
+    shutdown.cancel();
+    handle.await.unwrap().unwrap();
+    status
+}
+
+/// An empty store has indexed nothing, and must say so — `Some(0)` would claim it holds the
+/// genesis block.
+#[tokio::test]
+async fn empty_store_publishes_indexed_none() {
+    // Both a source that fails immediately and one that gets ingest as far as fetching:
+    // neither may turn "nothing indexed" into height 0.
+    let sources: Vec<Arc<dyn BlockSource>> = vec![Arc::new(DeadSource), Arc::new(TipOnlySource)];
+    for source in sources {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+        let status = first_published_status(store, source).await;
+        assert_eq!(status.indexed, None, "empty store must not report a height");
+        assert_eq!(status.halted, None);
+    }
+}
+
+#[tokio::test]
+async fn seeded_store_publishes_its_indexed_height() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+    store.seed_for_tests(1865999, [3u8; 32]).unwrap();
+    let status = first_published_status(store, Arc::new(DeadSource)).await;
+    assert_eq!(status.indexed, Some(1865999));
+    assert_eq!(status.halted, None);
+}
+
 fn test_cfg() -> IngestConfig {
     IngestConfig {
         poll_ms: 20,
