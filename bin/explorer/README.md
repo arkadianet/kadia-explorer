@@ -21,9 +21,23 @@ Logging is via `tracing`; set `RUST_LOG` to control verbosity (defaults to
 
 Shut down with `Ctrl+C` or `SIGTERM`: the HTTP server stops accepting new connections, the
 ingest task finishes applying its current batch (never leaves the store mid-block), then the
-process exits. Exit code is `0` on a signal-triggered shutdown, `1` if ingest halted on its
-own (a fork deeper than the rollback window, a corrupt store, or an undecodable block) — a
-halted explorer never keeps serving stale data silently, it exits so a supervisor notices.
+process exits. A halted explorer never keeps serving stale data silently — it exits so a
+supervisor notices.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Clean shutdown after `SIGTERM`/`Ctrl+C`. |
+| `1` | Ingest halted (a corrupt store, an undecodable block, ...). Restarting may help. |
+| `2` | Bad arguments, or the config/store/listener could not be set up at startup. |
+| `3` | Ingest halted needing a full reindex: a fork deeper than the rollback window. Restarting **cannot** help — the store must be deleted and re-synced. |
+
+Under systemd, exclude code 3 from the restart policy so the unit doesn't loop forever on a
+store that can only be fixed by hand:
+
+```ini
+Restart=on-failure
+RestartPreventExitStatus=3
+```
 
 ## Config
 

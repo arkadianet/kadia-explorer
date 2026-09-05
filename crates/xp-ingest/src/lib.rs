@@ -249,6 +249,16 @@ pub async fn run(
             }
         }
 
+        // Computed before the idle short-circuit below: an indexer that has caught up is in
+        // tip mode, and `/v1/status` must say so instead of repeating whatever mode the last
+        // block-applying iteration happened to use (which, right after a bulk catch-up,
+        // means reporting "bulk" forever while sitting idle at the tip).
+        mode = if best.saturating_sub(indexed) > cfg.tip_lag_for_bulk {
+            Mode::Bulk
+        } else {
+            Mode::Tip
+        };
+
         if indexed >= best {
             publish(cur, best, mode, None);
             if sleep_or_shutdown(poll, &shutdown).await {
@@ -257,11 +267,6 @@ pub async fn run(
             continue;
         }
 
-        mode = if best - indexed > cfg.tip_lag_for_bulk {
-            Mode::Bulk
-        } else {
-            Mode::Tip
-        };
         let (batch, concurrency) = match mode {
             Mode::Bulk => (cfg.bulk_batch.max(1), cfg.bulk_concurrency.max(1)),
             Mode::Tip => (1, 1),

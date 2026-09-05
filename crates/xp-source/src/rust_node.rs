@@ -80,6 +80,17 @@ impl BlockSource for RustNode {
             .json()
             .await
             .map_err(|e| SourceError::Decode(e.to_string()))?;
+        // More than one header at a height means the node is holding competing blocks. Its
+        // convention is to list the best-chain one first (see `BlockSource::header_id_at`),
+        // so we take the first — but say so, since which chain the index follows then
+        // depends on that convention rather than on anything we verify.
+        if ids.len() > 1 {
+            tracing::warn!(
+                height,
+                ids = ?ids,
+                "multiple headers at height; taking the first (node best-chain convention)"
+            );
+        }
         match ids.into_iter().next() {
             None => Ok(None),
             Some(id) => xp_types::parse_hex32(&id)

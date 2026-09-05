@@ -136,3 +136,27 @@ async fn unreachable_base_yields_unavailable_or_http_error() {
         other => panic!("unexpected error variant: {other:?}"),
     }
 }
+
+/// A node holding competing blocks lists several ids at one height. The source takes the
+/// first — the node's best-chain convention — rather than failing or picking arbitrarily.
+#[tokio::test]
+async fn header_id_at_takes_the_first_of_several_ids() {
+    let first = [0x11u8; 32];
+    let second = [0x22u8; 32];
+    let ids = vec![xp_types::hex32(&first), xp_types::hex32(&second)];
+    let app = Router::new().route(
+        "/blocks/at/{height}",
+        get(move || {
+            let ids = ids.clone();
+            async move { Json(ids) }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let node = RustNode::new(&format!("http://{addr}"));
+    assert_eq!(node.header_id_at(1866000).await.unwrap(), Some(first));
+}

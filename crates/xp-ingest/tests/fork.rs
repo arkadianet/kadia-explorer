@@ -349,3 +349,45 @@ async fn fork_deeper_than_rollback_window_halts() {
     );
     assert!(rx.borrow().halted.is_some(), "halted status not published");
 }
+
+/// Once ingest has caught up, `/v1/status` must report `tip` — not whatever mode the last
+/// block-applying iteration used. `mode` is therefore recomputed before the idle
+/// short-circuit, so a run that bulk-caught-up and then sat at the tip stops claiming "bulk".
+#[tokio::test]
+async fn mode_becomes_tip_once_caught_up_and_idle() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+    let mut a = chain_a();
+    let seed_id = decode_block(&a[0].2).unwrap().header.parent_id.0;
+    store.seed_for_tests(1865999, seed_id).unwrap();
+    // The source must know the seeded ancestor too (see `reorg_rolls_back_and_reapplies_...`).
+    a.insert(0, (1865999, seed_id, String::new()));
+    // `tip_lag_for_bulk = 1` with three blocks to fetch guarantees the catch-up runs in bulk
+    // mode, so an unchanged `mode` would still read "bulk" at the end.
+    let source: Arc<dyn BlockSource> = Arc::new(FakeSource::new(a));
+
+    let (tx, mut rx) = watch::channel(initial_status());
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(run(store.clone(), source, test_cfg(), tx, shutdown.clone()));
+
+    // With `mode` left where the catch-up iteration put it, this wait never completes: the
+    // idle publishes keep saying "bulk". (The intermediate bulk status itself is not asserted
+    // — `watch` keeps only the latest value, so a fast catch-up can coalesce it away.)
+    timeout(Duration::from_secs(10), async {
+        loop {
+            {
+                let s = rx.borrow_and_update();
+                if s.indexed == Some(1866002) && s.mode == Mode::Tip {
+                    return;
+                }
+            }
+            rx.changed().await.expect("run dropped the status sender");
+        }
+    })
+    .await
+    .expect("never reported tip mode after catching up");
+
+    shutdown.cancel();
+    handle.await.unwrap().unwrap();
+    assert_eq!(store.indexed_height().unwrap(), Some(1866002));
+}

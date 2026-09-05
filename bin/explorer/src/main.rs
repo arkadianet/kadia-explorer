@@ -74,8 +74,15 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
+/// Exit code for an ingest halt caused by [`xp_store::StoreError::ReindexRequired`]: the
+/// store cannot go forward without a full reindex, so restarting the process is pointless.
+/// Operators running under `Restart=on-failure` exclude it with
+/// `RestartPreventExitStatus=3` rather than looping the unit forever.
+const EXIT_REINDEX_REQUIRED: i32 = 3;
+
 /// Runs the explorer to completion and returns the process exit code: `0` on a clean
-/// signal-triggered shutdown, `1` if ingest halted.
+/// signal-triggered shutdown, [`EXIT_REINDEX_REQUIRED`] if ingest halted because the store
+/// needs a reindex, `1` for any other halt.
 async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
     let text = std::fs::read_to_string(&config_path)
         .with_context(|| format!("reading config file {}", config_path.display()))?;
@@ -183,10 +190,23 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
 
     let exit_code = match ingest_outcome {
         Ok(Ok(())) => 0,
+        Ok(Err(e)) if needs_reindex(&e) => EXIT_REINDEX_REQUIRED,
         Ok(Err(_)) => 1,
         Err(_) => 1,
     };
     Ok(exit_code)
+}
+
+/// Whether an ingest error chain bottoms out in [`xp_store::StoreError::ReindexRequired`].
+/// Checked through the chain rather than on the top-level error because `xp_ingest` wraps
+/// the store error in its own context before returning it.
+fn needs_reindex(err: &anyhow::Error) -> bool {
+    err.chain().any(|c| {
+        matches!(
+            c.downcast_ref::<xp_store::StoreError>(),
+            Some(xp_store::StoreError::ReindexRequired(_))
+        )
+    })
 }
 
 #[tokio::main]
@@ -208,5 +228,39 @@ async fn main() {
             error!("fatal: {e:#}");
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_args_defaults_and_flag() {
+        assert_eq!(
+            parse_args(std::iter::empty()).unwrap(),
+            PathBuf::from("explorer.toml")
+        );
+        assert_eq!(
+            parse_args(["--config".to_string(), "a.toml".to_string()].into_iter()).unwrap(),
+            PathBuf::from("a.toml")
+        );
+        assert!(parse_args(["--config".to_string()].into_iter()).is_err());
+        assert!(parse_args(["oops".to_string()].into_iter()).is_err());
+    }
+
+    /// `xp_ingest` wraps the store error before returning it, so the check has to walk the
+    /// chain rather than look only at the outermost error.
+    #[test]
+    fn needs_reindex_finds_the_error_through_the_chain() {
+        let deep = anyhow::Error::from(xp_store::StoreError::ReindexRequired(5_000))
+            .context("applying batch")
+            .context("ingest loop");
+        assert!(needs_reindex(&deep));
+
+        let other = anyhow::Error::from(xp_store::StoreError::Corrupt("input box missing"))
+            .context("applying batch");
+        assert!(!needs_reindex(&other));
+        assert!(!needs_reindex(&anyhow::anyhow!("plain string error")));
     }
 }

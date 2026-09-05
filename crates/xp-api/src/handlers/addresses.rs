@@ -26,8 +26,15 @@ pub async fn get_one(
 ) -> Result<Json<AddressDto>, ApiError> {
     let dto = blocking(&state, move |rd| {
         let tree = tree_of(rd, &addr)?;
+        // Echo the canonical address the store derived from the ergo tree, not the string
+        // from the request path: the two agree for a well-formed request, but a client that
+        // reaches the same tree by any other encoding gets back the one canonical form.
+        let canonical = rd
+            .tree_row(&tree)?
+            .map(|row| row.address)
+            .unwrap_or_else(|| addr.clone());
         let bal = rd.balance(&tree)?;
-        Ok(address_dto(addr, &tree, bal.as_ref()))
+        Ok(address_dto(canonical, &tree, bal.as_ref()))
     })
     .await?;
     Ok(Json(dto))
