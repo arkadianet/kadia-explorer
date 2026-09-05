@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { apiGet, ApiError } from '$lib/api/client';
+import { api } from '$lib/api/endpoints';
 
 function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 	return new Response(JSON.stringify(body), {
@@ -45,5 +46,14 @@ describe('apiGet', () => {
 		expect(calledUrl).toContain('cursor=5');
 		expect(calledUrl).toContain('limit=50');
 		expect(calledUrl).not.toContain('dir=');
+	});
+});
+
+describe('api path encoding', () => {
+	it('encodes caller-supplied path segments', async () => {
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({}));
+		await api.address('a/b c', fetchFn);
+		const calledUrl = fetchFn.mock.calls[0][0] as string;
+		expect(calledUrl).toContain('a%2Fb%20c');
 	});
 });

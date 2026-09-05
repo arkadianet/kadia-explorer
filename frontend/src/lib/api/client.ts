@@ -52,10 +52,11 @@ export async function apiGet<T>(
 			} catch {
 				// Body wasn't JSON (or empty) — fall back to the status line below.
 			}
+			const fallback = `HTTP ${res.status}`;
 			throw new ApiError(
 				res.status,
-				problem.title ?? res.statusText,
-				problem.detail ?? res.statusText
+				problem.title || res.statusText || fallback,
+				problem.detail || res.statusText || fallback
 			);
 		}
 		return (await res.json()) as T;

@@ -89,6 +89,11 @@ export interface AddressDto {
 	last_seen: number;
 }
 
+export interface BoxRentDto {
+	box_id: string;
+	rent: RentDto;
+}
+
 export interface AddressRentDto {
 	items: BoxDto[];
 	truncated: boolean;
