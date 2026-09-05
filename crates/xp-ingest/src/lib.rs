@@ -75,6 +75,8 @@ enum ForkCheck {
     TooDeep,
     /// A transient source error; wait and retry.
     SourceError(SourceError),
+    /// The store itself failed to answer. Never a chain disagreement: hard failure.
+    StoreError(StoreError),
 }
 
 /// Drives `store` towards `source`'s best chain until `shutdown` is cancelled.
@@ -103,6 +105,15 @@ pub async fn run(
             halted,
         });
     };
+    // Publishes `halted` and returns the typed store error, so the caller keeps the real
+    // cause (and its source chain) rather than a re-worded string.
+    macro_rules! halt_store {
+        ($indexed:expr, $err:expr) => {{
+            let err: StoreError = $err;
+            publish($indexed, best, mode, Some(err.to_string()));
+            return Err(err.into());
+        }};
+    }
     // Publishes `halted` and turns the reason into the error `run` returns.
     macro_rules! halt {
         ($indexed:expr, $reason:expr) => {{
@@ -121,14 +132,21 @@ pub async fn run(
             Ok(b) => b,
             Err(e) => {
                 warn!(source = %source_name, error = %e, "best_height failed; retrying");
-                publish(store.indexed_height().ok().flatten(), best, mode, None);
+                let indexed = match store.indexed_height() {
+                    Ok(v) => v,
+                    Err(se) => halt_store!(None, se),
+                };
+                publish(indexed, best, mode, None);
                 if sleep_or_shutdown(poll, &shutdown).await {
                     return Ok(());
                 }
                 continue;
             }
         };
-        let indexed_opt = store.indexed_height()?;
+        let indexed_opt = match store.indexed_height() {
+            Ok(v) => v,
+            Err(e) => halt_store!(None, e),
+        };
         let mut indexed = indexed_opt.unwrap_or(0);
         // `Some(indexed)` once anything is indexed, tracking rollbacks below.
         let mut cur = indexed_opt;
@@ -153,6 +171,7 @@ pub async fn run(
                 indexed_opt,
                 format!("reindex required: fork deeper than {ROLLBACK_WINDOW} blocks")
             ),
+            ForkCheck::StoreError(e) => halt_store!(indexed_opt, e),
             ForkCheck::SourceError(e) => {
                 warn!(source = %source_name, error = %e, "fork check failed; retrying");
                 publish(indexed_opt, best, mode, None);
@@ -166,7 +185,7 @@ pub async fn run(
                 let s = store.clone();
                 let out = tokio::task::spawn_blocking(move || s.rollback_to(h)).await?;
                 if let Err(e) = out {
-                    halt!(indexed_opt, format!("rollback to {h} failed: {e}"));
+                    halt_store!(indexed_opt, e);
                 }
                 indexed = h;
                 cur = Some(indexed);
@@ -248,13 +267,7 @@ pub async fn run(
                 // The source's chain moved under us mid-batch; the next fork check resolves it.
                 debug!(height, %have, %want, "parent mismatch; re-checking fork");
             }
-            Err(ApplyErr::Store(StoreError::ReindexRequired(n))) => {
-                halt!(
-                    Some(indexed),
-                    format!("reindex required: fork deeper than {n} blocks")
-                );
-            }
-            Err(ApplyErr::Store(e)) => halt!(Some(indexed), format!("store error: {e}")),
+            Err(ApplyErr::Store(e)) => halt_store!(Some(indexed), e),
             Err(ApplyErr::Decode(e)) => halt!(Some(indexed), format!("undecodable block: {e}")),
         }
     }
@@ -266,17 +279,20 @@ enum ApplyErr {
 }
 
 /// Compares the store's tip id with the source's id at the same height, walking backwards
-/// until they agree. A height the store has no header for counts as a disagreement: we cannot
-/// confirm a common ancestor we do not hold.
+/// until they agree. A height the store simply has no header for counts as a disagreement: we
+/// cannot confirm a common ancestor we do not hold. A store *error*, by contrast, is never a
+/// disagreement — it is reported as [`ForkCheck::StoreError`] so the caller halts on the real
+/// cause instead of walking the window and blaming a fork.
 async fn fork_check(store: &Arc<Store>, source: &Arc<dyn BlockSource>, indexed: u32) -> ForkCheck {
     if indexed == 0 {
         return ForkCheck::Agreed;
     }
     let mut h = indexed;
     loop {
-        // A read failure is treated as "we don't have it", i.e. a disagreement: the walk
-        // continues and, if nothing ever agrees, halts with a reindex request.
-        let ours: Option<Hash32> = store.header_id_at(h).unwrap_or_default();
+        let ours: Option<Hash32> = match store.header_id_at(h) {
+            Ok(v) => v,
+            Err(e) => return ForkCheck::StoreError(e),
+        };
         let theirs = match source.header_id_at(h).await {
             Ok(v) => v,
             Err(e) => return ForkCheck::SourceError(e),
