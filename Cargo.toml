@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+xp-types  = { path = "crates/xp-types" }
+xp-wire   = { path = "crates/xp-wire" }
+xp-source = { path = "crates/xp-source" }
+xp-store  = { path = "crates/xp-store" }
+xp-ingest = { path = "crates/xp-ingest" }
+xp-api    = { path = "crates/xp-api" }
+tokio       = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+axum        = "0.8"
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+redb        = "2.6"
+ergo-lib    = { version = "0.28", features = ["json"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+blake2      = "0.10"
+hex         = "0.4"
+thiserror   = "2"
+anyhow      = "1"
+tracing     = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait = "0.1"
+toml        = "0.8"
+proptest    = "1"
+tempfile    = "3"
