@@ -14,7 +14,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use xp_ingest::{IngestConfig, IngestStatus, Mode};
-use xp_source::{BlockSource, RustNode};
+use xp_source::{BlockSource, Fallback, RustNode};
 use xp_store::Store;
 
 fn print_usage() {
@@ -103,7 +103,16 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
     // Store is held here for the whole run and dropped last, after the server and the ingest
     // task have both stopped touching it.
     let store = Arc::new(Store::open(&db_path).context("opening store")?);
-    let source: Arc<dyn BlockSource> = Arc::new(RustNode::new(&cfg.source.url));
+    let primary: Arc<dyn BlockSource> = Arc::new(RustNode::new(&cfg.source.url));
+    // A fallback only ever supplies block *bodies* the primary announces but won't serve; the
+    // chain being followed still comes from the primary alone (see `xp_source::Fallback`).
+    let source: Arc<dyn BlockSource> = match cfg.source.fallback_url.as_deref() {
+        None => primary,
+        Some(url) => {
+            info!(fallback_url = %url, "block-body fallback source enabled");
+            Arc::new(Fallback::new(primary, RustNode::new(url)))
+        }
+    };
 
     // Bind before spawning ingest: a bad `bind` address must fail fast without the ingest
     // task ever having touched the store, so there is nothing running yet to cancel or wait
@@ -120,6 +129,7 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         mode: Mode::Bulk,
         source: source.name().to_string(),
         halted: None,
+        stalled: None,
     });
 
     let ingest_cfg: IngestConfig = (&cfg.ingest).into();

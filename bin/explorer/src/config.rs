@@ -32,6 +32,10 @@ pub struct Config {
 pub struct SourceConfig {
     pub kind: String,
     pub url: String,
+    /// Optional second node, used *only* to fetch block bodies `url` announces but will not
+    /// serve. Unset (the default) means no fallback and no behaviour change.
+    #[serde(default)]
+    pub fallback_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +103,10 @@ mod tests {
         assert_eq!(cfg.bind, "127.0.0.1:8090");
         assert_eq!(cfg.source.kind, "rust_node");
         assert_eq!(cfg.source.url, "http://127.0.0.1:9063");
+        assert_eq!(
+            cfg.source.fallback_url, None,
+            "the example's fallback_url is commented out: no fallback by default"
+        );
         assert_eq!(cfg.ingest.poll_ms, 500);
         assert_eq!(cfg.ingest.bulk_batch, 64);
         assert_eq!(cfg.ingest.bulk_concurrency, 8);
@@ -122,6 +130,23 @@ mod tests {
         assert_eq!(cfg.ingest.bulk_concurrency, default.bulk_concurrency);
         assert_eq!(cfg.ingest.durable_every, default.durable_every);
         assert_eq!(cfg.ingest.tip_lag_for_bulk, default.tip_lag_for_bulk);
+    }
+
+    #[test]
+    fn fallback_url_is_optional_and_parsed_when_present() {
+        let text = r#"
+            data_dir = "./data"
+            bind = "127.0.0.1:8090"
+            [source]
+            kind = "rust_node"
+            url = "http://127.0.0.1:9063"
+            fallback_url = "https://node.ergo.watch"
+        "#;
+        let cfg = Config::parse(text).expect("config with fallback_url should parse");
+        assert_eq!(
+            cfg.source.fallback_url.as_deref(),
+            Some("https://node.ergo.watch")
+        );
     }
 
     #[test]

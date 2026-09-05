@@ -246,6 +246,7 @@ fn initial_status() -> IngestStatus {
         mode: Mode::Tip,
         source: String::new(),
         halted: None,
+        stalled: None,
     }
 }
 

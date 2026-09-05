@@ -166,6 +166,25 @@ pub struct StatusDto {
     pub source: String,
     pub halted: Option<String>,
     pub lag_blocks: u32,
+    /// `null` while ingest is progressing (or merely idle at the tip). Non-null means
+    /// `indexed` is frozen on a source-side hole that ingest is still retrying — a stall, not
+    /// a halt: the process is alive and `halted` stays `null`.
+    pub stalled: Option<StalledDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StalledDto {
+    pub height: u32,
+    pub since_secs: u64,
+    pub reason: String,
+}
+
+pub fn stalled_dto(s: &xp_ingest::StalledInfo) -> StalledDto {
+    StalledDto {
+        height: s.height,
+        since_secs: s.since_secs,
+        reason: s.reason.clone(),
+    }
 }
 
 #[derive(Debug, Serialize)]

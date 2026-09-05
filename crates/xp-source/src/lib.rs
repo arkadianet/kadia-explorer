@@ -1,5 +1,7 @@
+mod fallback;
 mod rust_node;
 
+pub use fallback::Fallback;
 pub use rust_node::RustNode;
 
 use xp_types::Hash32;

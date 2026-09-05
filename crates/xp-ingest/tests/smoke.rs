@@ -64,6 +64,7 @@ async fn smoke_local_node() {
         mode: Mode::Tip,
         source: String::new(),
         halted: None,
+        stalled: None,
     });
     let shutdown = CancellationToken::new();
     let cfg = IngestConfig {

@@ -49,6 +49,7 @@ bind = "127.0.0.1:8090"
 [source]
 kind = "rust_node"
 url = "http://127.0.0.1:9063"
+# fallback_url = "https://node.ergo.watch"
 [ingest]
 poll_ms = 500
 bulk_batch = 64
@@ -63,6 +64,7 @@ tip_lag_for_bulk = 64
 | `bind` | HTTP listen address for the API. | — (required) |
 | `source.kind` | Block source backend. Only `"rust_node"` is supported today. | — (required) |
 | `source.url` | Base URL of the node's REST API. | — (required) |
+| `source.fallback_url` | Optional second node, used **only** for block bodies the primary announces but will not serve. See [Stalls and the fallback source](#stalls-and-the-fallback-source). | unset (no fallback) |
 | `ingest` | Optional section; each key below defaults independently if the section or key is omitted. | |
 | `ingest.poll_ms` | Wait between polls when idle or after a transient source error. | 500 |
 | `ingest.bulk_batch` | Blocks fetched/applied per transaction while catching up. | 64 |
@@ -76,11 +78,58 @@ An unrecognized `source.kind` is rejected at startup with a clear error naming t
 
 See `xp-api` for the full `/v1` route tree (`/v1/status`, `/v1/blocks`, `/v1/txs`,
 `/v1/boxes`, `/v1/addresses`, ...). `/v1/status` reports `{ indexed, best, mode, source,
-halted, lag_blocks }` and is the quickest way to watch progress:
+halted, lag_blocks, stalled }` and is the quickest way to watch progress:
 
 ```bash
 curl -s 127.0.0.1:8090/v1/status
 ```
+
+```json
+{
+  "indexed": 545683,
+  "best": 1866002,
+  "mode": "bulk",
+  "source": "http://127.0.0.1:9063",
+  "halted": null,
+  "lag_blocks": 1320319,
+  "stalled": {
+    "height": 545684,
+    "since_secs": 912,
+    "reason": "source http://127.0.0.1:9063 announced a header at height 545684 but serves no block body"
+  }
+}
+```
+
+`stalled` is `null` whenever ingest is progressing or merely idle at the tip.
+
+## Stalls and the fallback source
+
+A node can announce a header at a height (`/blocks/at/{height}`) and then 404 its body
+(`/blocks/{id}`) — the Rust node does exactly this for some blocks, e.g. height 545684. Ingest
+cannot skip the hole (the store needs a contiguous run of blocks), so it retries forever.
+
+Two things make that survivable:
+
+- **Visibility.** The freeze is published as `stalled` on `/v1/status` (`height`, `since_secs`,
+  `reason`), logged as a `warn!` when it starts and at most once a minute after that, and the
+  retry interval backs off to `max(poll_ms, 5s)` so the node is not polled twice a second for
+  hours. A stall is *not* a halt: `halted` stays `null`, the process stays up, and it clears by
+  itself the moment a batch applies. A `stalled` that never clears is the signal to act.
+- **A fallback body source.** Set `source.fallback_url` to a second node. Block *bodies* the
+  primary cannot serve are then fetched from it; `/info`, `/blocks/at/{height}` and
+  `/utxo/genesis` still come from the primary alone, so the chain being indexed is entirely the
+  primary's. The fallback is asked by *header id* — the id the primary announced — so it cannot
+  substitute a different block. `source` in `/v1/status` reads `"<primary> (+fallback)"` when
+  one is configured, and every fallback hit is logged at `info!`.
+
+```toml
+[source]
+kind = "rust_node"
+url = "http://127.0.0.1:9063"
+fallback_url = "https://node.ergo.watch"
+```
+
+Leave `fallback_url` unset (the default) to talk to one node only.
 
 ## Benchmarks
 

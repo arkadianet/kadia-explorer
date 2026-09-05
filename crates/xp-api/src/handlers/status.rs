@@ -1,4 +1,4 @@
-use crate::dto::StatusDto;
+use crate::dto::{stalled_dto, StatusDto};
 use crate::{ApiError, AppState};
 use axum::extract::State;
 use axum::Json;
@@ -19,5 +19,6 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusDto>, Ap
         source: s.source,
         halted: s.halted,
         lag_blocks,
+        stalled: s.stalled.as_ref().map(stalled_dto),
     }))
 }

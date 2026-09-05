@@ -3,6 +3,9 @@ bind = "127.0.0.1:8090"
 [source]
 kind = "rust_node"
 url = "http://127.0.0.1:9063"
+# Optional: a second node, used only for block bodies the primary announces but will not
+# serve (some node builds 404 on /blocks/{id} for blocks whose header they do serve).
+# fallback_url = "https://node.ergo.watch"
 [ingest]
 poll_ms = 500
 bulk_batch = 64

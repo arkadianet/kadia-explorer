@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tower::ServiceExt;
-use xp_ingest::{IngestStatus, Mode};
+use xp_ingest::{IngestStatus, Mode, StalledInfo};
 use xp_store::Store;
 
 fn fixture(h: u32) -> xp_wire::DecodedBlock {
@@ -27,6 +27,11 @@ fn fixture(h: u32) -> xp_wire::DecodedBlock {
 /// A store with the three fixture blocks applied, plus the router over it. The `TempDir` is
 /// returned so the caller keeps the database alive for the duration of the test.
 fn app() -> (tempfile::TempDir, Router) {
+    app_with_stall(None)
+}
+
+/// Same store and router, but with `stalled` on the published ingest status set to `stall`.
+fn app_with_stall(stall: Option<StalledInfo>) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("x.redb")).unwrap();
     let b0 = fixture(1866000);
@@ -47,6 +52,7 @@ fn app() -> (tempfile::TempDir, Router) {
         mode: Mode::Tip,
         source: "test".into(),
         halted: None,
+        stalled: stall,
     });
     let state = xp_api::AppState {
         store: Arc::new(store),
@@ -85,6 +91,30 @@ async fn status_reflects_the_stubbed_ingest_status() {
     assert_eq!(v["source"], "test");
     assert!(v["halted"].is_null());
     assert_eq!(v["lag_blocks"], 0);
+    assert!(
+        v["stalled"].is_null(),
+        "a healthy indexer reports stalled: null, not a missing key"
+    );
+}
+
+/// A stall is a first-class, machine-readable part of the status: a client watching a frozen
+/// `indexed` must be able to see *why* without reading the server's logs.
+#[tokio::test]
+async fn status_serialises_a_stall() {
+    let (_d, app) = app_with_stall(Some(StalledInfo {
+        height: 545_684,
+        since_secs: 900,
+        reason: "source announced a header at 545684 but serves no block body".into(),
+    }));
+    let (st, v) = get(&app, "/v1/status").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["stalled"]["height"], 545_684);
+    assert_eq!(v["stalled"]["since_secs"], 900);
+    assert_eq!(
+        v["stalled"]["reason"],
+        "source announced a header at 545684 but serves no block body"
+    );
+    assert!(v["halted"].is_null(), "a stall is not a halt");
 }
 
 #[tokio::test]

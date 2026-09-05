@@ -7,7 +7,7 @@
 
 use futures::StreamExt;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -60,6 +60,48 @@ pub struct IngestStatus {
     /// `Some(reason)` once ingest has given up; [`run`] returns an error immediately after
     /// publishing it.
     pub halted: Option<String>,
+    /// `Some` while ingest is making no progress for a reason it expects to resolve itself —
+    /// today, only a source that announces a header at a height but will not serve its body.
+    /// Unlike [`IngestStatus::halted`], ingest keeps retrying (see [`STALL_BACKOFF`]), so this
+    /// is the only outward sign that `indexed` has stopped moving.
+    pub stalled: Option<StalledInfo>,
+}
+
+/// Why, where and for how long ingest has been stuck. Published on [`IngestStatus::stalled`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StalledInfo {
+    /// The first height of the wanted range — the one whose body the source will not serve.
+    pub height: u32,
+    /// Seconds since the stall started (since the first failed attempt at `height`).
+    pub since_secs: u64,
+    /// Human-readable cause, safe to show in a UI.
+    pub reason: String,
+}
+
+/// Poll interval used instead of `poll_ms` while stalled. A stall is a source-side hole that
+/// no amount of re-asking fixes quickly, so backing off keeps ingest from hammering the node
+/// (twice a second, at the default `poll_ms`) for as long as it lasts.
+pub const STALL_BACKOFF: Duration = Duration::from_secs(5);
+/// How often a persisting stall is re-logged. The start is always logged.
+const STALL_WARN_EVERY: Duration = Duration::from_secs(60);
+
+/// Live stall bookkeeping. [`StalledInfo`] is derived from it on every publish so `since_secs`
+/// keeps counting up while nothing else changes.
+struct Stall {
+    height: u32,
+    since: Instant,
+    last_warn: Instant,
+    reason: String,
+}
+
+impl Stall {
+    fn info(&self) -> StalledInfo {
+        StalledInfo {
+            height: self.height,
+            since_secs: self.since.elapsed().as_secs(),
+            reason: self.reason.clone(),
+        }
+    }
 }
 
 /// What the per-iteration fork check concluded.
@@ -96,21 +138,35 @@ pub async fn run(
     let mut best = 0u32;
     let mut mode = Mode::Tip;
 
-    let publish = |indexed: Option<u32>, best: u32, mode: Mode, halted: Option<String>| {
+    // `Some` for as long as the source withholds a body we need; see [`Stall`].
+    let mut stall: Option<Stall> = None;
+
+    let publish = |indexed: Option<u32>,
+                   best: u32,
+                   mode: Mode,
+                   halted: Option<String>,
+                   stalled: Option<StalledInfo>| {
         let _ = status.send(IngestStatus {
             indexed,
             best,
             mode,
             source: source_name.clone(),
             halted,
+            stalled,
         });
     };
     // Every transient path is the same three steps — publish, sleep (racing shutdown), retry —
     // so they share one macro rather than five hand-copied blocks that can drift apart.
     macro_rules! retry {
         ($indexed:expr) => {{
-            publish($indexed, best, mode, None);
-            if sleep_or_shutdown(poll, &shutdown).await {
+            publish($indexed, best, mode, None, stall.as_ref().map(Stall::info));
+            // While stalled, re-asking at `poll_ms` only hammers the source; back off.
+            let wait = if stall.is_some() {
+                poll.max(STALL_BACKOFF)
+            } else {
+                poll
+            };
+            if sleep_or_shutdown(wait, &shutdown).await {
                 return Ok(());
             }
             continue;
@@ -121,7 +177,13 @@ pub async fn run(
     macro_rules! halt_store {
         ($indexed:expr, $err:expr) => {{
             let err: StoreError = $err;
-            publish($indexed, best, mode, Some(err.to_string()));
+            publish(
+                $indexed,
+                best,
+                mode,
+                Some(err.to_string()),
+                stall.as_ref().map(Stall::info),
+            );
             return Err(err.into());
         }};
     }
@@ -129,7 +191,13 @@ pub async fn run(
     macro_rules! halt {
         ($indexed:expr, $reason:expr) => {{
             let reason: String = $reason;
-            publish($indexed, best, mode, Some(reason.clone()));
+            publish(
+                $indexed,
+                best,
+                mode,
+                Some(reason.clone()),
+                stall.as_ref().map(Stall::info),
+            );
             return Err(anyhow::anyhow!(reason));
         }};
     }
@@ -245,7 +313,9 @@ pub async fn run(
                 }
                 indexed = h;
                 cur = Some(indexed);
-                publish(cur, best, mode, None);
+                // The wanted range moved; any stall was about a height we are no longer at.
+                stall = None;
+                publish(cur, best, mode, None, None);
             }
         }
 
@@ -260,7 +330,7 @@ pub async fn run(
         };
 
         if indexed >= best {
-            publish(cur, best, mode, None);
+            publish(cur, best, mode, None, stall.as_ref().map(Stall::info));
             if sleep_or_shutdown(poll, &shutdown).await {
                 return Ok(());
             }
@@ -273,15 +343,46 @@ pub async fn run(
         };
         let end = best.min(indexed + batch as u32);
 
-        let bodies = match fetch_range(&source, indexed + 1, end, concurrency).await {
+        let fetched = match fetch_range(&source, indexed + 1, end, concurrency).await {
             Ok(b) => b,
             Err(e) => {
                 warn!(source = %source_name, error = %e, "fetch failed; retrying");
                 retry!(cur);
             }
         };
+        let bodies = fetched.bodies;
         if bodies.is_empty() {
             // The source advertised a higher tip than it will serve bodies for; wait it out.
+            // If it did so by announcing a header and then refusing its body, ingest can wait
+            // forever, so that case is recorded as a stall and published — silence here is
+            // what made the 545683 freeze look like a healthy idle indexer.
+            if let Some(height) = fetched.missing_body_at {
+                let reason = format!(
+                    "source {source_name} announced a header at height {height} but serves no block body"
+                );
+                match &mut stall {
+                    Some(st) if st.height == height => {
+                        if st.last_warn.elapsed() >= STALL_WARN_EVERY {
+                            st.last_warn = Instant::now();
+                            warn!(
+                                height,
+                                stalled_secs = st.since.elapsed().as_secs(),
+                                "ingest still stalled: {reason}"
+                            );
+                        }
+                    }
+                    _ => {
+                        warn!(height, "ingest stalled: {reason}");
+                        let now = Instant::now();
+                        stall = Some(Stall {
+                            height,
+                            since: now,
+                            last_warn: now,
+                            reason,
+                        });
+                    }
+                }
+            }
             retry!(cur);
         }
 
@@ -318,7 +419,9 @@ pub async fn run(
                     durable,
                     "applied"
                 );
-                publish(Some(new_indexed), best, mode, None);
+                // Progress: whatever the source was withholding, it is behind us now.
+                stall = None;
+                publish(Some(new_indexed), best, mode, None, None);
             }
             Err(ApplyErr::Store(StoreError::ParentMismatch { height, have, want })) => {
                 // The source's chain moved under us mid-batch; the next fork check resolves it.
@@ -375,6 +478,24 @@ async fn fork_check(store: &Arc<Store>, source: &Arc<dyn BlockSource>, indexed: 
     }
 }
 
+/// What one height's fetch produced.
+enum FetchOne {
+    Body(String),
+    /// The source has no header at that height: it is simply behind us.
+    NoHeader,
+    /// The source announced a header but would not serve its body — a hole in the source.
+    NoBody,
+}
+
+/// The contiguous run of bodies from `lo`, and why it stopped.
+struct FetchedRange {
+    bodies: Vec<String>,
+    /// `Some(h)` when the run stopped at a height the source announced a header for but has
+    /// no body for. Distinguished from "the source is behind us" because only this one can
+    /// last forever, and so is what a stall is reported on.
+    missing_body_at: Option<u32>,
+}
+
 /// Fetches `lo..=hi`, `concurrency` requests in flight, preserving height order. Stops early
 /// at the first height the source has no block for (a gap makes every later block unusable
 /// anyway, since `apply_batch` requires a contiguous run).
@@ -383,26 +504,35 @@ async fn fetch_range(
     lo: u32,
     hi: u32,
     concurrency: usize,
-) -> Result<Vec<String>, SourceError> {
-    let fetched: Vec<Result<Option<String>, SourceError>> =
-        futures::stream::iter((lo..=hi).map(|h| {
-            let src = source.clone();
-            async move {
-                match src.header_id_at(h).await? {
-                    None => Ok(None),
-                    Some(id) => src.full_block_json(&id).await,
-                }
+) -> Result<FetchedRange, SourceError> {
+    let fetched: Vec<Result<FetchOne, SourceError>> = futures::stream::iter((lo..=hi).map(|h| {
+        let src = source.clone();
+        async move {
+            match src.header_id_at(h).await? {
+                None => Ok(FetchOne::NoHeader),
+                Some(id) => Ok(match src.full_block_json(&id).await? {
+                    Some(json) => FetchOne::Body(json),
+                    None => FetchOne::NoBody,
+                }),
             }
-        }))
-        .buffered(concurrency)
-        .collect()
-        .await;
+        }
+    }))
+    .buffered(concurrency)
+    .collect()
+    .await;
 
-    let mut out = Vec::with_capacity(fetched.len());
-    for r in fetched {
+    let mut out = FetchedRange {
+        bodies: Vec::with_capacity(fetched.len()),
+        missing_body_at: None,
+    };
+    for (i, r) in fetched.into_iter().enumerate() {
         match r? {
-            Some(json) => out.push(json),
-            None => break,
+            FetchOne::Body(json) => out.bodies.push(json),
+            FetchOne::NoHeader => break,
+            FetchOne::NoBody => {
+                out.missing_body_at = Some(lo + i as u32);
+                break;
+            }
         }
     }
     Ok(out)
