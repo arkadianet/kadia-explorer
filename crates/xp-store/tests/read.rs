@@ -121,6 +121,8 @@ fn boxes_of_tx_returns_output_count_rows_in_index_order() {
     assert_eq!(row.output_count as usize, tx.outputs.len());
 
     let boxes = rd.boxes_of_tx(&row, &tx.id.0).unwrap();
+    // Exact contract: precisely `output_count` rows, no more, no less.
+    assert_eq!(boxes.len(), row.output_count as usize);
     assert_eq!(boxes.len(), tx.outputs.len());
     for (i, (id, box_row)) in boxes.iter().enumerate() {
         assert_eq!(*id, tx.outputs[i].id.0);
@@ -201,6 +203,10 @@ fn txs_in_block_returns_exactly_that_blocks_txs_in_order() {
 
     let b1 = fixture(1866001);
     let got = rd.txs_in_block(1866001).unwrap();
+    // Exact contract: precisely `tx_count` rows, no more, no less.
+    let header = rd.header_at(1866001).unwrap().expect("header indexed");
+    assert_eq!(got.len(), header.tx_count as usize);
+    assert_eq!(got.len(), b1.txs.len());
     let got_ids: Vec<Hash32> = got.iter().map(|(id, _)| *id).collect();
     let want_ids: Vec<Hash32> = b1.txs.iter().map(|t| t.id.0).collect();
     assert_eq!(got_ids, want_ids);

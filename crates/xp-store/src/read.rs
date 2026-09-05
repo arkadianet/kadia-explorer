@@ -183,10 +183,11 @@ impl Reader {
         let mut out = Vec::with_capacity(header.tx_count as usize);
         for i in 0..header.tx_count as u64 {
             let gidx = header.first_tx_gidx + i;
-            if let Some(v) = by_gidx.get(k_u64(gidx).as_slice())? {
-                let tx_id = as_hash32(v.value())?;
-                out.push(self.resolve_tx(&txs, tx_id)?);
-            }
+            let v = by_gidx
+                .get(k_u64(gidx).as_slice())?
+                .ok_or(StoreError::Corrupt("dangling tx gidx in block range"))?;
+            let tx_id = as_hash32(v.value())?;
+            out.push(self.resolve_tx(&txs, tx_id)?);
         }
         Ok(out)
     }
@@ -211,20 +212,21 @@ impl Reader {
         let mut out = Vec::with_capacity(tx.output_count as usize);
         for i in 0..tx.output_count as u64 {
             let gidx = tx.first_out_gidx + i;
-            if let Some(v) = box_by_gidx.get(k_u64(gidx).as_slice())? {
-                let box_id = as_hash32(v.value())?;
-                let row = boxes
-                    .get(box_id.as_slice())?
-                    .map(|v| BoxRow::decode(v.value()))
-                    .transpose()?
-                    .ok_or(StoreError::Corrupt("dangling box_by_gidx entry"))?;
-                if row.tx_id != *tx_id {
-                    return Err(StoreError::Corrupt(
-                        "box_by_gidx entry belongs to a different tx",
-                    ));
-                }
-                out.push((box_id, row));
+            let v = box_by_gidx
+                .get(k_u64(gidx).as_slice())?
+                .ok_or(StoreError::Corrupt("dangling box gidx in tx range"))?;
+            let box_id = as_hash32(v.value())?;
+            let row = boxes
+                .get(box_id.as_slice())?
+                .map(|v| BoxRow::decode(v.value()))
+                .transpose()?
+                .ok_or(StoreError::Corrupt("dangling box_by_gidx entry"))?;
+            if row.tx_id != *tx_id {
+                return Err(StoreError::Corrupt(
+                    "box_by_gidx entry belongs to a different tx",
+                ));
             }
+            out.push((box_id, row));
         }
         Ok(out)
     }
@@ -277,28 +279,35 @@ impl Reader {
         Ok((box_id, row))
     }
 
-    pub fn tree_boxes(
+    /// Generic pager over a composite `(prefix, gidx)`-keyed index table (`TREE_BOXES`,
+    /// `TREE_UNSPENT`, `TREE_TXS`, ...): computes `(lo, hi)` from `prefix_range(prefix)`,
+    /// tightens it by `cursor` (`Asc`: lower bound `cursor+1` inclusive; `Desc`: upper bound
+    /// `cursor` exclusive), walks the range (`.rev()` for `Desc`), and resolves each entry's
+    /// trailing gidx via `resolve`. `next_cursor` is set only when the page came back full
+    /// (`items.len() == limit`), and `limit == 0` short-circuits to an empty page.
+    fn page_composite<T>(
         &self,
-        tree: &Hash32,
-        unspent_only: bool,
+        table: Tbl,
+        prefix: &Hash32,
         cursor: Option<Gidx>,
         limit: usize,
         dir: Dir,
-    ) -> Result<Page<(Hash32, BoxRow)>, StoreError> {
-        let index = self.txn.open_table(if unspent_only {
-            TREE_UNSPENT
-        } else {
-            TREE_BOXES
-        })?;
-        let box_by_gidx = self.txn.open_table(BOX_BY_GIDX)?;
-        let boxes = self.txn.open_table(BOXES)?;
-        let (lo, hi) = prefix_range(tree);
+        mut resolve: impl FnMut(&Self, Gidx) -> Result<T, StoreError>,
+    ) -> Result<Page<T>, StoreError> {
+        if limit == 0 {
+            return Ok(Page {
+                items: vec![],
+                next_cursor: None,
+            });
+        }
+        let index = self.txn.open_table(table)?;
+        let (lo, hi) = prefix_range(prefix);
         let mut items = Vec::new();
         let mut last_gidx = None;
         match dir {
             Dir::Asc => {
                 let lo_key = match cursor {
-                    Some(c) => k_hash_gidx(tree, c.saturating_add(1)).to_vec(),
+                    Some(c) => k_hash_gidx(prefix, c.saturating_add(1)).to_vec(),
                     None => lo,
                 };
                 for item in index.range::<&[u8]>((
@@ -308,17 +317,15 @@ impl Reader {
                     if items.len() >= limit {
                         break;
                     }
-                    let (k, v) = item?;
+                    let (k, _) = item?;
                     let gidx = crate::keys::gidx_of_composite(k.value());
-                    let box_id = as_hash32(box_by_gidx_lookup(&box_by_gidx, gidx)?.as_slice())?;
-                    let _ = v; // value is unused (presence-only index)
-                    items.push(self.resolve_box(&boxes, box_id)?);
+                    items.push(resolve(self, gidx)?);
                     last_gidx = Some(gidx);
                 }
             }
             Dir::Desc => {
                 let hi_key = match cursor {
-                    Some(c) => k_hash_gidx(tree, c).to_vec(),
+                    Some(c) => k_hash_gidx(prefix, c).to_vec(),
                     None => hi,
                 };
                 for item in index
@@ -331,11 +338,9 @@ impl Reader {
                     if items.len() >= limit {
                         break;
                     }
-                    let (k, v) = item?;
+                    let (k, _) = item?;
                     let gidx = crate::keys::gidx_of_composite(k.value());
-                    let box_id = as_hash32(box_by_gidx_lookup(&box_by_gidx, gidx)?.as_slice())?;
-                    let _ = v;
-                    items.push(self.resolve_box(&boxes, box_id)?);
+                    items.push(resolve(self, gidx)?);
                     last_gidx = Some(gidx);
                 }
             }
@@ -348,6 +353,27 @@ impl Reader {
         Ok(Page { items, next_cursor })
     }
 
+    pub fn tree_boxes(
+        &self,
+        tree: &Hash32,
+        unspent_only: bool,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+    ) -> Result<Page<(Hash32, BoxRow)>, StoreError> {
+        let table = if unspent_only {
+            TREE_UNSPENT
+        } else {
+            TREE_BOXES
+        };
+        self.page_composite(table, tree, cursor, limit, dir, |r, gidx| {
+            let box_by_gidx = r.txn.open_table(BOX_BY_GIDX)?;
+            let boxes = r.txn.open_table(BOXES)?;
+            let box_id = as_hash32(box_by_gidx_lookup(&box_by_gidx, gidx)?.as_slice())?;
+            r.resolve_box(&boxes, box_id)
+        })
+    }
+
     pub fn tree_txs(
         &self,
         tree: &Hash32,
@@ -355,61 +381,12 @@ impl Reader {
         limit: usize,
         dir: Dir,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
-        let index = self.txn.open_table(TREE_TXS)?;
-        let tx_by_gidx = self.txn.open_table(TX_BY_GIDX)?;
-        let txs = self.txn.open_table(TXS)?;
-        let (lo, hi) = prefix_range(tree);
-        let mut items = Vec::new();
-        let mut last_gidx = None;
-        match dir {
-            Dir::Asc => {
-                let lo_key = match cursor {
-                    Some(c) => k_hash_gidx(tree, c.saturating_add(1)).to_vec(),
-                    None => lo,
-                };
-                for item in index.range::<&[u8]>((
-                    Bound::Included(lo_key.as_slice()),
-                    Bound::Excluded(hi.as_slice()),
-                ))? {
-                    if items.len() >= limit {
-                        break;
-                    }
-                    let (k, _) = item?;
-                    let gidx = crate::keys::gidx_of_composite(k.value());
-                    let tx_id = as_hash32(tx_by_gidx_lookup(&tx_by_gidx, gidx)?.as_slice())?;
-                    items.push(self.resolve_tx(&txs, tx_id)?);
-                    last_gidx = Some(gidx);
-                }
-            }
-            Dir::Desc => {
-                let hi_key = match cursor {
-                    Some(c) => k_hash_gidx(tree, c).to_vec(),
-                    None => hi,
-                };
-                for item in index
-                    .range::<&[u8]>((
-                        Bound::Included(lo.as_slice()),
-                        Bound::Excluded(hi_key.as_slice()),
-                    ))?
-                    .rev()
-                {
-                    if items.len() >= limit {
-                        break;
-                    }
-                    let (k, _) = item?;
-                    let gidx = crate::keys::gidx_of_composite(k.value());
-                    let tx_id = as_hash32(tx_by_gidx_lookup(&tx_by_gidx, gidx)?.as_slice())?;
-                    items.push(self.resolve_tx(&txs, tx_id)?);
-                    last_gidx = Some(gidx);
-                }
-            }
-        }
-        let next_cursor = if items.len() == limit {
-            last_gidx
-        } else {
-            None
-        };
-        Ok(Page { items, next_cursor })
+        self.page_composite(TREE_TXS, tree, cursor, limit, dir, |r, gidx| {
+            let tx_by_gidx = r.txn.open_table(TX_BY_GIDX)?;
+            let txs = r.txn.open_table(TXS)?;
+            let tx_id = as_hash32(tx_by_gidx_lookup(&tx_by_gidx, gidx)?.as_slice())?;
+            r.resolve_tx(&txs, tx_id)
+        })
     }
 
     /// Richest trees by nano-erg balance, descending, capped at `limit`. With a cursor,
@@ -434,7 +411,14 @@ impl Reader {
             }
             let (k, _) = item?;
             let key = k.value();
-            let nano = u64::from_be_bytes(key[..8].try_into().unwrap());
+            if key.len() != 40 {
+                return Err(StoreError::Corrupt("bad rich key width"));
+            }
+            let nano = u64::from_be_bytes(
+                key[..8]
+                    .try_into()
+                    .map_err(|_| StoreError::Corrupt("bad rich key width"))?,
+            );
             let tree = as_hash32(&key[8..])?;
             items.push((tree, nano));
             last = Some((nano, tree));
