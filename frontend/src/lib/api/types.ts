@@ -96,9 +96,10 @@ export interface AddressDto {
 	last_seen: number;
 }
 
-export interface BoxRentDto {
+/** `/v1/boxes/{id}/rent` — the Rust DTO `#[serde(flatten)]`s `RentDto`, so the wire shape is
+ * flat: `{ box_id, maturity_height, due_nano, claimable_at_tip }`. */
+export interface BoxRentDto extends RentDto {
 	box_id: string;
-	rent: RentDto;
 }
 
 export interface AddressRentDto {

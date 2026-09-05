@@ -10,8 +10,19 @@ export interface Pager<T> {
 	reset(): void;
 }
 
-/** Cursor pager over a `PageDto<T>` endpoint. `loadMore` is a no-op while a load is in flight
- * or once the API returned `next_cursor: null`; `reset` puts it back to its initial state. */
+/**
+ * Cursor pager over a `PageDto<T>` endpoint.
+ *
+ * Semantics `InfiniteList` and its callers rely on:
+ * - `loadMore` is a no-op while a load is in flight, and once the API returned
+ *   `next_cursor: null` (`done`).
+ * - A failed load leaves `items`, `cursor` and `done` untouched and sets `error`. It does
+ *   *not* latch: the next `loadMore` retries the same cursor and clears `error` — but nothing
+ *   calls it on its own, so a retry is always an explicit act (the Retry button, or a fresh
+ *   sentinel intersection). Callers must not drive retries from an `$effect` that reads the
+ *   pager's own state; see the `untrack` note in `loadMore`.
+ * - `reset` puts it back to its initial state.
+ */
 export function createPager<T>(fetchPage: (cursor?: string) => Promise<PageDto<T>>): Pager<T> {
 	let items = $state<T[]>([]);
 	let cursor = $state<string | null>(null);
@@ -29,7 +40,9 @@ export function createPager<T>(fetchPage: (cursor?: string) => Promise<PageDto<T
 		error = null;
 		try {
 			const p = await fetchPage(cursor ?? undefined);
-			items = [...items, ...p.items];
+			// Skip the reassignment for an empty page: it would notify every subscriber of the
+			// items signal for no visible change.
+			if (p.items.length > 0) items = [...items, ...p.items];
 			cursor = p.next_cursor;
 			done = p.next_cursor === null;
 		} catch (e) {

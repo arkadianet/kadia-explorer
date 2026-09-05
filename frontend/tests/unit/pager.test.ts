@@ -100,6 +100,46 @@ describe('createPager', () => {
 		expect(pager.done).toBe(true);
 	});
 
+	it('an effect-driven caller does not re-enter after a failure', async () => {
+		// The `$effect`s that kick off the first page re-run whenever a signal they read
+		// changes. `loadMore` reads its `loading`/`done` guard through `untrack` precisely so
+		// those effects never subscribe to it: a failed load must leave the pager parked on the
+		// error, with nothing pulling it back into another request. What a failure leaves
+		// behind: `error` set, `items`/`done` untouched, `loading` false — and a *deliberate*
+		// retry (the Retry button, a fresh sentinel intersection) is still allowed.
+		let calls = 0;
+		const pager = createPager<number>(async () => {
+			calls += 1;
+			throw new Error(`boom ${calls}`);
+		});
+
+		await pager.loadMore();
+		expect(calls).toBe(1);
+		expect(pager.error).toBeInstanceOf(Error);
+		expect(pager.items).toEqual([]);
+		expect(pager.done).toBe(false);
+		expect(pager.loading).toBe(false);
+
+		// Nothing re-entered on its own: the count only moves when a caller asks again.
+		await Promise.resolve();
+		expect(calls).toBe(1);
+
+		await pager.loadMore();
+		expect(calls).toBe(2);
+	});
+
+	it('does not touch the items array for an empty page', async () => {
+		const pager = createPager<number>(async () => page([], 'c1'));
+
+		await pager.loadMore();
+		const first = pager.items;
+		await pager.loadMore();
+
+		expect(pager.items).toEqual([]);
+		// Same array instance both times — an empty page notifies no subscriber.
+		expect(pager.items).toBe(first);
+	});
+
 	it('reset clears items, cursor, error and done', async () => {
 		const seen: (string | undefined)[] = [];
 		const pager = createPager<number>(async (cursor) => {

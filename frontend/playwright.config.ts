@@ -24,7 +24,8 @@ export default defineConfig({
 			command: `node tests/e2e/mock/server.ts`,
 			env: { MOCK_PORT: String(MOCK_PORT) },
 			url: `http://127.0.0.1:${MOCK_PORT}/v1/status`,
-			reuseExistingServer: !process.env.CI,
+			// Never reuse: a stale mock would serve a dataset built from older fixtures.
+			reuseExistingServer: false,
 			stdout: 'ignore',
 			stderr: 'pipe'
 		},
@@ -36,7 +37,8 @@ export default defineConfig({
 			command: `npm run build && npx vite preview --host 127.0.0.1 --port ${APP_PORT} --strictPort`,
 			env: { VITE_API_PROXY: `http://127.0.0.1:${MOCK_PORT}` },
 			url: `http://127.0.0.1:${APP_PORT}/`,
-			reuseExistingServer: !process.env.CI,
+			// Never reuse: a stale preview would skip the build and test yesterday's bundle.
+			reuseExistingServer: false,
 			timeout: 180_000,
 			stdout: 'ignore',
 			stderr: 'pipe'

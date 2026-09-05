@@ -16,11 +16,15 @@ export async function useShortViewport(page: Page): Promise<void> {
  */
 export async function scrollUntilLoaded(page: Page, expected: number): Promise<void> {
 	const rows = page.locator('table.table tbody tr');
-	for (let i = 0; i < 20 && (await rows.count()) < expected; i++) {
+	for (let i = 0; i < 40 && (await rows.count()) < expected; i++) {
 		const sentinel = page.locator('.sentinel');
 		if ((await sentinel.count()) === 0) break;
+		// Back to the top first: the newly appended rows can leave the sentinel *partially*
+		// visible, and then `scrollIntoViewIfNeeded` is a no-op and the observer never fires
+		// again. Leaving and re-entering the viewport guarantees an intersection change.
+		await page.evaluate(() => window.scrollTo(0, 0));
 		await sentinel.first().scrollIntoViewIfNeeded();
-		await page.waitForTimeout(150);
+		await page.waitForTimeout(120);
 	}
 	await expect(rows).toHaveCount(expected);
 }

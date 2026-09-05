@@ -15,6 +15,8 @@
  *    problem JSON, for the ErrorState/retry test.
  *  - `x-mock-lag: 500` / `?__lag=500` / `MOCK_LAG=500` in the environment — `/v1/status`
  *    reports that many blocks of lag, for the lag-banner test.
+ *  - `x-mock-stall: 1` / `?__stall=1` — `/v1/status` reports a non-null `stalled`, for the
+ *    status page's stall row.
  *
  * Pagination is a fixed page of `PAGE_SIZE` items with `next_cursor` = the string offset of
  * the next item, so a `?limit=50` from the app still yields several pages.
@@ -26,6 +28,15 @@ import { buildDataset, type Dataset } from './fixtures.ts';
 
 /** Items per page, small enough that the app's 50-item requests still paginate. */
 export const PAGE_SIZE = 5;
+
+/** Titles for the statuses the fail toggle may produce, mirroring `xp-api`'s `ApiError`. */
+const FAIL_TITLES: Record<number, string> = {
+	400: 'Bad Request',
+	404: 'Not Found',
+	408: 'Request Timeout',
+	500: 'Internal Server Error',
+	503: 'Service Unavailable'
+};
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 const DIGITS = /^\d+$/;
@@ -85,17 +96,23 @@ function header(req: IncomingMessage, name: string): string | null {
 	return typeof v === 'string' ? v : null;
 }
 
+/** The status the fail toggle asks for, restricted to the ones that have a title above. */
 function failStatus(req: IncomingMessage, url: URL): number | null {
 	const raw = header(req, 'x-mock-fail') ?? url.searchParams.get('__fail');
 	if (raw === null) return null;
 	const n = Number(raw);
-	return Number.isInteger(n) && n >= 400 && n <= 599 ? n : 500;
+	return Number.isInteger(n) && n in FAIL_TITLES ? n : 500;
 }
 
 function lagBlocks(req: IncomingMessage, url: URL): number {
 	const raw = header(req, 'x-mock-lag') ?? url.searchParams.get('__lag') ?? process.env.MOCK_LAG;
 	const n = Number(raw);
 	return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function stallRequested(req: IncomingMessage, url: URL): boolean {
+	const raw = header(req, 'x-mock-stall') ?? url.searchParams.get('__stall');
+	return raw !== null && raw !== '' && raw !== '0';
 }
 
 // ------------------------------------------------------------------------------- routing
@@ -146,14 +163,26 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 
 	const fail = failStatus(req, url);
 	if (fail !== null && path.startsWith('/v1/')) {
-		problem(res, fail, 'Internal Server Error', 'internal error');
+		problem(res, fail, FAIL_TITLES[fail], 'the mock was asked to fail this request');
 		return;
 	}
 
 	// --- status --------------------------------------------------------------------
 	if (path === '/v1/status') {
 		const lag = lagBlocks(req, url);
-		sendJson(res, 200, { ...d.status, lag_blocks: lag, best: d.status.best + lag });
+		const indexed = d.status.indexed ?? d.status.best;
+		sendJson(res, 200, {
+			...d.status,
+			lag_blocks: lag,
+			best: d.status.best + lag,
+			stalled: stallRequested(req, url)
+				? {
+						height: indexed + 1,
+						since_secs: 137,
+						reason: 'node has not served this block yet'
+					}
+				: null
+		});
 		return;
 	}
 

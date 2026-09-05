@@ -64,11 +64,16 @@ against a mock API. `playwright.config.ts` starts two servers itself:
    fixtures at `tests/fixtures/blocks/*.json` (`tests/e2e/mock/fixtures.ts`, which documents
    where the mock deliberately differs from `xp-api`). Node ≥ 22.18 strips the TypeScript
    types, so nothing compiles it first. Two request headers steer it, for the error-state
-   specs: `x-mock-fail: 500` makes every `/v1` route answer with problem JSON, and
-   `x-mock-lag: 500` makes `/v1/status` report a lagging index. Both also work as `?__fail=`
-   / `?__lag=` query parameters when poking at the mock by hand.
+   specs: `x-mock-fail: 500` makes every `/v1` route answer with problem JSON,
+   `x-mock-lag: 500` makes `/v1/status` report a lagging index, and `x-mock-stall: 1` makes
+   it report a non-null `stalled`. All three also work as `?__fail=` / `?__lag=` / `?__stall=`
+   query parameters when poking at the mock by hand.
 2. `npm run build && vite preview --port 4173`, with `VITE_API_PROXY` pointed at the mock so
    the preview server proxies `/v1` to it (see `preview.proxy` in `vite.config.ts`).
+
+Neither server is ever reused (`reuseExistingServer: false`), so `npm run test:e2e` always
+rebuilds and always rebuilds the mock's dataset — a preview left running from an earlier
+session can never make the suite test a stale bundle. Both ports (4173, 18099) must be free.
 
 Install the browser once before the first run — no root needed, it lands in
 `~/.cache/ms-playwright`:
@@ -77,11 +82,20 @@ Install the browser once before the first run — no root needed, it lands in
 npx playwright install chromium
 ```
 
-The specs in `tests/e2e/*.spec.ts` cover every phase-1 route: home, blocks list (including
-cursor pagination as the infinite-scroll sentinel comes into view), block detail,
-transaction, box (rent panel), address (both the populated and the "not seen yet" state),
-rich list, both rent tabs, the search flows for a height / tx id / box id / block id /
-address / unparseable query, the theme toggle persisting across a reload, the `/` search
+The specs in `tests/e2e/*.spec.ts` cover every phase-1 route:
+
+- `/` (home) — the three panels; `/blocks` and `/txs` — the lists, each pulling in further
+  pages as the infinite-scroll sentinel comes into view
+- `/blocks/[id]`, `/tx/[id]`, `/box/[id]` — detail pages, including the box rent panel, plus
+  the 404 error page for each
+- `/address/[addr]` — both the populated page (with its hash-driven tabs) and the
+  "Address not seen yet" state
+- `/richlist`, `/rent` (upcoming and eligible tabs), `/status` (fields, and the stall callout
+  under `x-mock-stall`)
+- `/search` — the flows for a height / tx id / box id / block id / address / unparseable
+  query / unknown id
+
+plus the cross-cutting behaviour: the theme toggle persisting across a reload, the `/` search
 shortcut, an API 500 rendering `ErrorState` with a working Retry, and the lag banner.
 
 The home route's gzipped-JS budget runs automatically after every `npm run build`

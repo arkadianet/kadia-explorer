@@ -22,6 +22,12 @@
  *    `claimable_at_tip` and serves them from `/v1/rent/eligible`, with the remaining unspent
  *    boxes served (maturity ascending) from `/v1/rent/upcoming` regardless of the `blocks`
  *    window.
+ *  - **JSON number precision.** The node fixtures encode `value` and token `amount` as JSON
+ *    numbers, so `JSON.parse` gives them back as doubles. Every fixture amount is well under
+ *    2^53 (the largest is the ~1.41e15 nanoERG emission box), so the round trip is exact —
+ *    but a fixture with a larger amount would silently lose precision here, which the real
+ *    server never does. Amounts are converted to `BigInt` immediately and every DTO carries
+ *    them as decimal strings, as the API contract requires.
  *  - **Fees.** A tx fee is `sum(known inputs) - sum(outputs)`, which is only computable when
  *    every input box was created inside the three fixture blocks; otherwise it is 0. A
  *    block's `reward` is the second output of its first transaction (the miner's share of
@@ -124,7 +130,12 @@ function rentDue(size: number, value: bigint): bigint {
 	return due < value ? due : value;
 }
 
-/** Serialised size of a box, approximated from its node JSON — only used for rent maths. */
+/**
+ * Approximate serialised size of a box: the ergo tree's bytes plus rough allowances for the
+ * value, creation height, registers and each token entry. The node fixtures do not carry a
+ * per-box size, and this feeds both the box page's "Size" fact and the rent due, so it only
+ * has to be stable and plausible — it is not the store's exact byte count.
+ */
 function boxSize(out: NodeOutput): number {
 	return Math.ceil(out.ergoTree.length / 2) + 40 + out.assets.length * 40;
 }

@@ -18,14 +18,14 @@ test('a known address shows its balance and per-tab lists', async ({ page }) => 
 	await expect(page.getByText('Boxes', { exact: true })).toBeVisible();
 
 	// Transactions tab is the default and loads on mount.
-	const txRows = page.locator('table.table tbody tr');
-	await expect(txRows.first()).toBeVisible();
+	const rows = page.locator('table.table tbody tr');
+	await expect(rows.first()).toBeVisible();
 
 	// Unspent boxes tab: hash-driven, so it survives a reload.
 	await page.getByRole('tab', { name: 'Unspent boxes' }).click();
 	await expect(page).toHaveURL(`/address/${MOCK_ADDRESS}#unspent`);
 	await expect(page.getByRole('columnheader', { name: 'Value' })).toBeVisible();
-	await expect(txRows.first()).toBeVisible();
+	await expect(rows.first()).toBeVisible();
 	await expect(page.locator('p.sum')).toContainText('Total');
 
 	await page.reload();
