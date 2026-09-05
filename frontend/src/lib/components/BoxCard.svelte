@@ -17,9 +17,13 @@
 	let { box, tip, role }: Props = $props();
 
 	const hasRegisters = $derived(hasDisplayableRegisters(box.registers));
+
+	// The left rule carries the box's state: teal for value that is still on the chain, muted
+	// for value already spent (and for every input, which is spent by definition).
+	const live = $derived(role === 'output' && !box.spent_by);
 </script>
 
-<article class="box">
+<article class="box" class:live>
 	<header>
 		<Amount nano={box.value} maxFrac={9} />
 		{#if role === 'output'}
@@ -78,11 +82,13 @@
 </article>
 
 <style>
+	/* No box: a 2 px rule on the left marks the row and carries its state. */
 	.box {
-		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		background: var(--bg-elev);
-		padding: var(--space-2) var(--space-3);
+		border-left: 2px solid var(--border);
+		padding: var(--space-2) 0 var(--space-2) var(--space-3);
+	}
+	.box.live {
+		border-left-color: var(--ok);
 	}
 	header {
 		display: flex;
@@ -90,13 +96,14 @@
 		justify-content: space-between;
 		gap: var(--space-2);
 		flex-wrap: wrap;
-		margin-bottom: var(--space-2);
+		margin-bottom: var(--space-1);
 	}
 	dl {
 		display: grid;
 		grid-template-columns: auto 1fr;
 		gap: 2px var(--space-3);
 		margin: 0;
+		font-size: var(--fs-data);
 	}
 	dt {
 		color: var(--fg-muted);
@@ -111,19 +118,16 @@
 	}
 	.section {
 		margin-top: var(--space-2);
-		border-top: 1px solid var(--border);
+		border-top: var(--rule);
 		padding-top: var(--space-2);
 	}
 	.section-title {
 		color: var(--fg-muted);
-		font-size: 11px;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		font-size: var(--fs-data);
 	}
 	.tokens {
-		list-style: none;
 		margin: var(--space-1) 0 0;
-		padding: 0;
+		font-size: var(--fs-data);
 	}
 	.tokens li {
 		display: flex;

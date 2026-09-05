@@ -109,22 +109,26 @@
 	.more {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		padding: var(--space-3);
+		align-items: flex-start;
+		padding: var(--space-3) 0;
 	}
 	.sentinel {
 		height: 1px;
 		width: 100%;
 	}
 	.load {
-		background: var(--bg-elev);
-		border: 1px solid var(--border);
+		background: transparent;
+		border: var(--rule);
 		border-radius: var(--radius);
-		padding: var(--space-2) var(--space-4);
+		padding: var(--space-1) var(--space-4);
+		height: 28px;
+		font-size: var(--fs-data);
+		color: var(--fg-muted);
 		cursor: pointer;
 	}
 	.load:hover:not(:disabled) {
-		background: var(--bg-hover);
+		color: var(--fg);
+		border-color: var(--fg-muted);
 	}
 	.load:disabled {
 		color: var(--fg-muted);

@@ -65,20 +65,19 @@
 <style>
 	.tabs {
 		display: flex;
-		gap: var(--space-1);
-		border-bottom: 1px solid var(--border);
+		gap: var(--space-4);
+		border-bottom: var(--rule);
 	}
 	.tab {
 		background: none;
 		border: 0;
 		border-bottom: 2px solid transparent;
-		padding: var(--space-2) var(--space-3);
+		padding: var(--space-2) 0;
 		color: var(--fg-muted);
 		cursor: pointer;
 	}
 	.tab:hover {
 		color: var(--fg);
-		background: var(--bg-hover);
 	}
 	.selected {
 		color: var(--fg);
@@ -87,6 +86,6 @@
 	.count {
 		margin-left: var(--space-1);
 		color: var(--fg-muted);
-		font-size: 11px;
+		font-size: 12px;
 	}
 </style>

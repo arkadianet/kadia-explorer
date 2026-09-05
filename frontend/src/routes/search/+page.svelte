@@ -34,6 +34,6 @@
 
 <style>
 	.retry {
-		padding: 0 var(--space-4) var(--space-4);
+		margin-top: var(--space-4);
 	}
 </style>

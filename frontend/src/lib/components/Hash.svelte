@@ -51,6 +51,10 @@
 		align-items: center;
 		gap: var(--space-1);
 	}
+	.hash a.mono:hover,
+	.hash a.mono:focus-visible {
+		color: var(--accent-ink);
+	}
 	.copy {
 		background: none;
 		border: 0;
@@ -65,7 +69,7 @@
 		background: var(--bg-hover);
 	}
 	.copied {
-		color: var(--ok);
+		color: var(--ok-ink);
 		font-size: 11px;
 	}
 </style>

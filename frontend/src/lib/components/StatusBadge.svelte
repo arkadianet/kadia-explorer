@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Badge from './Badge.svelte';
 	import { status } from '$lib/status/status.svelte';
 
 	const tone = $derived.by((): 'ok' | 'warn' | 'danger' | 'neutral' => {
@@ -11,7 +10,7 @@
 		return 'ok';
 	});
 
-	const label = $derived(status.current ? `#${status.current.indexed ?? 0}` : '…');
+	const label = $derived(status.current ? `${status.current.indexed ?? 0}` : '…');
 
 	const title = $derived.by((): string => {
 		const s = status.current;
@@ -24,12 +23,50 @@
 	});
 </script>
 
-<a href="/status" class="status-badge" aria-live="polite">
-	<Badge {tone} {title}>{label}</Badge>
+<a href="/status" class="tip {tone}" {title} aria-live="polite">
+	<span class="dot" aria-hidden="true"></span>
+	<span class="mono height">{label}</span>
 </a>
 
 <style>
-	.status-badge {
-		text-decoration: none;
+	/* The indexed tip, always on screen: a health dot plus the height itself. It is the one
+	   number that tells you whether anything else on the page is current. */
+	.tip {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: 0 var(--space-2);
+		height: 28px;
+		border: var(--rule);
+		border-radius: var(--radius);
+		color: var(--fg-muted);
+	}
+
+	.tip:hover,
+	.tip:focus-visible {
+		color: var(--fg);
+		background: var(--bg-hover);
+	}
+
+	.height {
+		color: var(--fg);
+	}
+
+	.dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--fg-muted);
+		flex-shrink: 0;
+	}
+
+	.ok .dot {
+		background: var(--ok);
+	}
+	.warn .dot {
+		background: var(--warn);
+	}
+	.danger .dot {
+		background: var(--danger);
 	}
 </style>

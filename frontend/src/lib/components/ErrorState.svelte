@@ -28,11 +28,11 @@
 
 <style>
 	.error {
-		padding: var(--space-5) var(--space-4);
-		text-align: center;
+		padding: var(--space-4) 0;
+		max-width: 62ch;
 	}
 	.title {
-		color: var(--danger);
+		color: var(--danger-ink);
 		font-weight: 600;
 	}
 	.detail {
@@ -41,13 +41,16 @@
 	}
 	.retry {
 		margin-top: var(--space-3);
-		background: var(--bg-elev);
-		border: 1px solid var(--border);
+		background: transparent;
+		border: 1px solid var(--accent);
+		color: var(--accent-ink);
 		border-radius: var(--radius);
-		padding: var(--space-1) var(--space-3);
+		padding: var(--space-1) var(--space-4);
+		height: 28px;
+		font-size: var(--fs-data);
 		cursor: pointer;
 	}
 	.retry:hover {
-		background: var(--bg-hover);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
 	}
 </style>

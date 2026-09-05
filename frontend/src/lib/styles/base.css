@@ -65,6 +65,11 @@ dd a:hover {
 	text-decoration-color: currentcolor;
 }
 
+/* Navigation is not prose: rail and tab links stay clean. */
+nav a {
+	text-decoration: none;
+}
+
 button {
 	font: inherit;
 	color: inherit;

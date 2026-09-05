@@ -100,9 +100,7 @@
 </svelte:head>
 
 <Panel title="Rent">
-	<div class="tabbar">
-		<Tabs tabs={TABS} {active} onchange={selectTab} label="Rent sections" />
-	</div>
+	<Tabs tabs={TABS} {active} onchange={selectTab} label="Rent sections" />
 
 	<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
 		{#if active === 'upcoming'}
@@ -226,18 +224,25 @@
 </Panel>
 
 <style>
-	.tabbar {
-		padding: 0 var(--space-4);
-	}
 	.controls {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
-		padding: var(--space-3) var(--space-4);
+		padding: var(--space-3) 0;
+		font-size: var(--fs-data);
+	}
+	.controls select {
+		font: inherit;
+		color: var(--fg);
+		background: var(--bg-elev);
+		border: var(--rule);
+		border-radius: var(--radius);
+		padding: var(--space-1) var(--space-2);
 	}
 	.sum {
 		color: var(--fg-muted);
-		padding: 0 var(--space-4) var(--space-2);
+		padding-bottom: var(--space-3);
+		font-size: var(--fs-data);
 	}
 	.muted {
 		color: var(--fg-muted);

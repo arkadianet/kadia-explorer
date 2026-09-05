@@ -85,16 +85,17 @@
 
 <style>
 	.stalled {
-		margin: var(--space-3) var(--space-4) 0;
-		padding: var(--space-3);
-		border: 1px solid var(--danger);
-		border-radius: var(--radius);
+		margin-top: var(--space-4);
+		padding-left: var(--space-3);
+		border-left: 2px solid var(--danger);
+		color: var(--danger-ink);
 	}
 	.stalled .reason {
 		color: var(--fg-muted);
 		margin-top: var(--space-1);
 	}
 	.raw {
-		padding: var(--space-3) var(--space-4) var(--space-4);
+		margin-top: var(--space-4);
+		font-size: var(--fs-data);
 	}
 </style>

@@ -62,8 +62,8 @@
 <style>
 	.note {
 		color: var(--fg-muted);
-		padding: 0 var(--space-4) var(--space-2);
-		font-size: 12px;
+		padding-bottom: var(--space-3);
+		font-size: var(--fs-data);
 	}
 	.muted {
 		color: var(--fg-muted);

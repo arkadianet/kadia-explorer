@@ -20,6 +20,7 @@
 	}
 	.unit {
 		color: var(--fg-muted);
+		font-size: 11px;
 		margin-left: var(--space-1);
 	}
 </style>
