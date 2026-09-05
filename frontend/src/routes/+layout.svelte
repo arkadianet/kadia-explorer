@@ -173,6 +173,27 @@
 		min-width: 0;
 	}
 
+	/* Under 720 px there is no room for a usable search field beside the wordmark, so it takes
+	   a line of its own rather than being squeezed to a stub. */
+	@media (max-width: 719px) {
+		.topbar {
+			height: auto;
+			flex-wrap: wrap;
+			gap: var(--space-2) var(--space-3);
+			padding: var(--space-2) var(--space-4);
+		}
+
+		.search-slot {
+			order: 3;
+			flex: 1 0 100%;
+			max-width: none;
+		}
+
+		.status-slot {
+			margin-left: auto;
+		}
+	}
+
 	.status-slot {
 		flex-shrink: 0;
 	}

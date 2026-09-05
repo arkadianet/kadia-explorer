@@ -202,19 +202,14 @@
 
 	@media (max-width: 719px) {
 		.stats {
-			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
+			display: block;
 		}
 		.stat {
-			justify-content: space-between;
-			padding: var(--space-2) var(--space-3);
+			padding: var(--space-2) 0;
 			border-left: 0;
 			border-top: var(--rule);
 		}
-		.stat:nth-child(2n) {
-			border-left: var(--rule);
-		}
-		.stat:nth-child(-n + 2) {
+		.stat:first-child {
 			border-top: 0;
 		}
 	}

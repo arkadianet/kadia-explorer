@@ -114,6 +114,13 @@ td:last-child {
 	font-size: var(--fs-data);
 }
 
+/* Chain data never reflows: a row stays one line and the table scrolls sideways inside its
+   wrapper instead of stacking "1423 d ago" into three lines on a phone. */
+.table th,
+.table td {
+	white-space: nowrap;
+}
+
 .table thead th {
 	position: sticky;
 	top: 0;
