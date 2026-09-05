@@ -1,0 +1,49 @@
+import { describe, it, expect, vi } from 'vitest';
+import { apiGet, ApiError } from '$lib/api/client';
+
+function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
+	return new Response(JSON.stringify(body), {
+		status,
+		statusText,
+		headers: { 'content-type': 'application/json' }
+	});
+}
+
+describe('apiGet', () => {
+	it('rejects with ApiError on a 404 problem response', async () => {
+		const fetchFn = vi.fn().mockResolvedValue(
+			jsonResponse(
+				{
+					type: 'about:blank',
+					title: 'Not Found',
+					status: 404,
+					detail: 'the requested resource does not exist'
+				},
+				404,
+				'Not Found'
+			)
+		);
+		await expect(apiGet('/boxes/nope', undefined, fetchFn)).rejects.toMatchObject({
+			status: 404,
+			title: 'Not Found',
+			detail: 'the requested resource does not exist'
+		});
+		await expect(apiGet('/boxes/nope', undefined, fetchFn)).rejects.toBeInstanceOf(ApiError);
+	});
+
+	it('resolves with the parsed body on 200', async () => {
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ best: 42 }));
+		const result = await apiGet<{ best: number }>('/status', undefined, fetchFn);
+		expect(result).toEqual({ best: 42 });
+	});
+
+	it('serialises query params and skips undefined ones', async () => {
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ items: [] }));
+		await apiGet('/blocks', { cursor: '5', limit: 50, dir: undefined }, fetchFn);
+		const calledUrl = fetchFn.mock.calls[0][0] as string;
+		expect(calledUrl).toContain('/v1/blocks?');
+		expect(calledUrl).toContain('cursor=5');
+		expect(calledUrl).toContain('limit=50');
+		expect(calledUrl).not.toContain('dir=');
+	});
+});
