@@ -33,6 +33,9 @@ impl Store {
         for h in (target + 1..=tip).rev() {
             let undo = {
                 let u = txn.open_table(UNDO)?;
+                // Bind the decoded row before the block ends so the `AccessGuard` borrowed
+                // from `u` (and `u` itself) drop here, before the next `txn.open_table` call
+                // below tries to open a different table for writing.
                 let decoded = UndoRow::decode(
                     u.get(k_u32(h).as_slice())?
                         .ok_or(StoreError::ReindexRequired(tip - target))?
@@ -63,10 +66,14 @@ impl Store {
                     .remove(k_rent(maturity_height(row.creation_height), row.gidx).as_slice())?;
             }
 
-            // 2. Un-spend inputs this block spent. A missing BOXES row here is the same
-            // tolerated-input case apply.rs allows (height 1 / partial store): such an input
-            // was never in `spent_boxes` to begin with... unless it was pushed anyway, so we
-            // still guard with `if let Some`.
+            // 2. Un-spend inputs this block spent. This MUST run after step 1 (un-create):
+            // a box created and spent within the same block is in both `created_boxes` and
+            // `spent_boxes`, step 1 already removed its BOXES row, and step 2 finds nothing
+            // for it — that is the only reason `existing` can legitimately be `None` here.
+            // (apply.rs's tolerated-missing-input case at height 1 / on a partial store
+            // `continue`s before ever pushing onto `spent_boxes`, so that case never reaches
+            // this loop at all.) The `if let Some` guard exists solely for the same-block
+            // create-then-spend case.
             for id in &undo.spent_boxes {
                 let existing = {
                     let b = txn.open_table(BOXES)?;
@@ -164,9 +171,88 @@ impl Store {
                 k_u64(undo.prev_next_box_gidx).as_slice(),
             )?;
             meta.insert(META_NEXT_TX_GIDX, k_u64(undo.prev_next_tx_gidx).as_slice())?;
-            meta.insert(META_INDEXED_HEIGHT, k_u32(h - 1).as_slice())?;
+            if h == 1 {
+                // Rolling back the first-ever block leaves an empty store. `indexed_height()`
+                // treats an *absent* META_INDEXED_HEIGHT as "empty" (see `apply_batch`'s
+                // `None` branch, which starts from height 0 with no tip header to look up);
+                // writing `k_u32(0)` here instead would make the store look like it has a
+                // real height-0 tip, which apply_batch would then try to load a HEADERS row
+                // for and fail. So a rollback to height 0 must be indistinguishable from a
+                // freshly opened store.
+                meta.remove(META_INDEXED_HEIGHT)?;
+            } else {
+                meta.insert(META_INDEXED_HEIGHT, k_u32(h - 1).as_slice())?;
+            }
         }
         txn.commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Focused test for the `h == 1` branch of `rollback_to`: rolling back the first-ever
+    /// block must leave the store indistinguishable from one that was never applied to
+    /// (`indexed_height() == None`), not one sitting at a real height-0 tip. Hand-constructs
+    /// a minimal height-1 store (header + undo row + META_INDEXED_HEIGHT) directly through
+    /// `begin_write`, since no fixture/`apply_batch` call is needed to exercise this branch.
+    #[test]
+    fn rollback_to_zero_leaves_store_indistinguishable_from_fresh() {
+        let dir = tempdir().unwrap();
+        let s = Store::open(&dir.path().join("x.redb")).unwrap();
+
+        let txn = s.db.begin_write().unwrap();
+        {
+            let hrow = HeaderRow {
+                id: [1; 32],
+                parent_id: [0; 32],
+                timestamp: 0,
+                difficulty: 0,
+                miner_pk: [0; 33],
+                tx_count: 0,
+                size: 0,
+                fees: 0,
+                reward: 0,
+                version: 0,
+                raw_json: String::new(),
+            };
+            txn.open_table(HEADERS)
+                .unwrap()
+                .insert(k_u32(1).as_slice(), hrow.encode().as_slice())
+                .unwrap();
+            txn.open_table(HEADER_BY_ID)
+                .unwrap()
+                .insert([1u8; 32].as_slice(), k_u32(1).as_slice())
+                .unwrap();
+            let undo = UndoRow {
+                created_boxes: vec![],
+                spent_boxes: vec![],
+                tx_ids: vec![],
+                tree_txs: vec![],
+                prev_balances: vec![],
+                prev_next_box_gidx: 0,
+                prev_next_tx_gidx: 0,
+                new_trees: vec![],
+            };
+            txn.open_table(UNDO)
+                .unwrap()
+                .insert(k_u32(1).as_slice(), undo.encode().as_slice())
+                .unwrap();
+            txn.open_table(META)
+                .unwrap()
+                .insert(META_INDEXED_HEIGHT, k_u32(1).as_slice())
+                .unwrap();
+        }
+        txn.commit().unwrap();
+
+        assert_eq!(s.indexed_height().unwrap(), Some(1));
+        s.rollback_to(0).unwrap();
+        assert_eq!(s.indexed_height().unwrap(), None);
+        // apply_batch on an empty slice is a no-op regardless of store state; also confirms
+        // the store isn't left in some half-rolled-back state that errors on the next call.
+        assert!(s.apply_batch(&[], true).is_ok());
     }
 }

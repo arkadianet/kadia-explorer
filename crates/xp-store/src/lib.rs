@@ -109,8 +109,14 @@ impl Store {
             hasher.update(t.name().as_bytes());
             for entry in table.range::<&[u8]>(..)? {
                 let (k, v) = entry?;
-                hasher.update(k.value());
-                hasher.update(v.value());
+                let (kb, vb) = (k.value(), v.value());
+                // Length-prefix each key/value so a byte moved across a key/value boundary
+                // (e.g. a shorter key immediately followed by bytes matching what the old
+                // value's prefix looked like) can't produce the same hash input.
+                hasher.update((kb.len() as u32).to_be_bytes());
+                hasher.update(kb);
+                hasher.update((vb.len() as u32).to_be_bytes());
+                hasher.update(vb);
             }
         }
         Ok(hasher.finalize().into())
