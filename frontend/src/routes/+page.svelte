@@ -11,37 +11,20 @@
 
 	let { data }: { data: PageData } = $props();
 
-	// Prefer the layout's live-polled status once it has a value, so the banner reflects the
+	// Prefer the layout's live-polled status once it has a value, so the countdown reflects the
 	// same 5 s-fresh state as the header badge instead of going stale after the initial load.
+	// The lag/stalled banner lives in +layout.svelte, so every route shows it.
 	const status = $derived(statusStore.current ?? data.status.data);
-	const statusError = $derived(statusStore.current ? null : data.status.error);
 
-	const tip = $derived(status?.best ?? null);
-
-	const showLagBanner = $derived(
-		status !== null && status !== undefined && (status.lag_blocks > 100 || status.halted !== null)
-	);
-	const stalledInfo = $derived(status?.stalled ?? null);
+	// `indexed`, not `best`: maturity heights come from the indexer, and the API's
+	// `claimable_at_tip` is measured against the indexed tip too — using the node's `best`
+	// would make the countdown disagree with every other page by the current lag.
+	const tip = $derived(status?.indexed ?? null);
 </script>
 
 <svelte:head>
 	<title>Ergo Explorer</title>
 </svelte:head>
-
-{#if stalledInfo}
-	<div class="banner danger" role="alert">
-		Indexer is waiting on block {stalledInfo.height} from the node for {stalledInfo.since_secs}
-		s.
-	</div>
-{:else if showLagBanner && status}
-	<div class="banner warn" role="status">
-		Index is {status.lag_blocks} blocks behind the node.
-	</div>
-{:else if statusError}
-	<div class="banner">
-		<ErrorState error={statusError} />
-	</div>
-{/if}
 
 <div class="grid">
 	<Panel title="Latest blocks">
@@ -137,21 +120,6 @@
 </div>
 
 <style>
-	.banner {
-		margin-bottom: var(--space-3);
-		padding: var(--space-2) var(--space-3);
-		border-radius: var(--radius);
-		border: 1px solid var(--border);
-		background: var(--bg-elev);
-	}
-	.banner.warn {
-		border-color: var(--warn);
-		color: var(--warn);
-	}
-	.banner.danger {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
 	.grid {
 		display: grid;
 		gap: var(--space-4);

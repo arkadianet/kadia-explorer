@@ -9,6 +9,14 @@
 
 	let { children } = $props();
 
+	// The lag/stalled banner lives here rather than on the home page so every route surfaces a
+	// degraded index — the status store is the single source, polled every 5 s by `status.start()`.
+	const stalledInfo = $derived(status.current?.stalled ?? null);
+	const showLagBanner = $derived.by(() => {
+		const s = status.current;
+		return s !== null && (s.lag_blocks > 100 || s.halted !== null);
+	});
+
 	const navLinks = [
 		{ href: '/blocks', label: 'Blocks' },
 		{ href: '/txs', label: 'Transactions' },
@@ -52,6 +60,16 @@
 	</nav>
 
 	<main class="content">
+		{#if stalledInfo}
+			<div class="banner danger" role="alert">
+				Indexer is waiting on block {stalledInfo.height} from the node for {stalledInfo.since_secs}
+				s.
+			</div>
+		{:else if showLagBanner && status.current}
+			<div class="banner warn" role="status">
+				Index is {status.current.lag_blocks} blocks behind the node.
+			</div>
+		{/if}
 		{@render children()}
 	</main>
 </div>
@@ -124,6 +142,24 @@
 		color: var(--fg);
 		background: var(--bg-hover);
 		text-decoration: none;
+	}
+
+	.banner {
+		margin-bottom: var(--space-3);
+		padding: var(--space-2) var(--space-3);
+		border-radius: var(--radius);
+		border: 1px solid var(--border);
+		background: var(--bg-elev);
+	}
+
+	.banner.warn {
+		border-color: var(--warn);
+		color: var(--warn);
+	}
+
+	.banner.danger {
+		border-color: var(--danger);
+		color: var(--danger);
 	}
 
 	.content {

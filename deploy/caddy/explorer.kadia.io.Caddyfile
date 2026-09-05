@@ -1,0 +1,32 @@
+# Production Caddy site config for explorer.kadia.io (Nuremberg).
+#
+# Deployed by `scripts/deploy_frontend.sh --caddy`, which scp's this file to
+# /etc/caddy/Caddyfile after `caddy validate` on the host, then reloads Caddy.
+#
+# Caching: the SvelteKit app is a single-page app served from a static build. Everything under
+# /_app/immutable/* is content-hashed and may be cached forever; every *other* response —
+# index.html, the SPA fallback for client-side routes such as /blocks/1000, favicon, robots.txt
+# — must be revalidated on each load, or a browser keeps serving a stale shell that points at
+# hashed chunks a later deploy has already pruned. `header` matchers run before `try_files`, so
+# @notimmutable sees the request's original path, not the rewritten /index.html.
+explorer.kadia.io {
+	encode zstd gzip
+
+	# The explorer API (xp-api) — same origin, so the app can call /v1 without CORS.
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:18090
+	}
+
+	handle {
+		root * /var/www/explorer
+
+		@immutable path /_app/immutable/*
+		@notimmutable not path /_app/immutable/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		header @notimmutable Cache-Control "no-cache"
+
+		# Client-side routes have no file on disk; serve the SPA shell for them.
+		try_files {path} /index.html
+		file_server
+	}
+}

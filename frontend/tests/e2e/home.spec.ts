@@ -28,6 +28,13 @@ test('home renders the three panels with rows from the mock', async ({ page }) =
 	});
 	await expect(rent.locator('tbody tr').first()).toBeVisible();
 
+	// "Matures in" counts down from the *indexed* tip (not the node's `best`), so a box that
+	// has not matured yet must read as a positive number of blocks — a `best`-based countdown
+	// would disagree with /rent and, under lag, could even go negative.
+	const maturesIn = rent.locator('tbody tr').first().locator('td').nth(2);
+	await expect(maturesIn).toHaveText(/^\d+ blocks$/);
+	expect(Number((await maturesIn.innerText()).replace(' blocks', ''))).toBeGreaterThan(0);
+
 	// No lag banner in the default (healthy) mock status.
 	await expect(page.getByText(/blocks behind the node/)).toHaveCount(0);
 });

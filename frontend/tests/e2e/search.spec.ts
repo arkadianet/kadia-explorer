@@ -65,3 +65,34 @@ test('pressing "/" focuses the search input', async ({ page }) => {
 	// The key press focuses rather than typing into the field.
 	await expect(page.getByRole('searchbox')).toHaveValue('');
 });
+
+test('/search has its own search box, and only the header owns #global-search', async ({
+	page
+}) => {
+	await page.goto('/search');
+	// Two boxes on the page (header + in-panel), but the id — and the "/" shortcut that goes
+	// with it — belongs to exactly one of them.
+	await expect(page.getByRole('searchbox')).toHaveCount(2);
+	await expect(page.locator('#global-search')).toHaveCount(1);
+	await expect(page.locator('#search-page-search')).toHaveCount(1);
+});
+
+test('Escape clears the search box it is typed into', async ({ page }) => {
+	await page.goto('/');
+	const input = page.getByRole('searchbox');
+	await input.fill('9abc');
+	await expect(input).toHaveValue('9abc');
+	await input.press('Escape');
+	await expect(input).toHaveValue('');
+	await expect(input).not.toBeFocused();
+	// Escape is a no-op for navigation.
+	await expect(page).toHaveURL('/');
+});
+
+test('the in-page search box on /search still submits', async ({ page }) => {
+	await page.goto('/search');
+	const input = page.locator('#search-page-search');
+	await input.fill(String(block.height));
+	await input.press('Enter');
+	await expect(page).toHaveURL(`/blocks/${block.height}`);
+});

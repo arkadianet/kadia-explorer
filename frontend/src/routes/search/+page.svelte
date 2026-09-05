@@ -26,7 +26,9 @@
 		<EmptyState message={hint} />
 	{/if}
 	<div class="retry">
-		<SearchBox />
+		<!-- A distinct id keeps `#global-search` unique to the header box, and the header box
+		     keeps sole ownership of the "/" shortcut. -->
+		<SearchBox id="search-page-search" globalShortcut={false} />
 	</div>
 </Panel>
 

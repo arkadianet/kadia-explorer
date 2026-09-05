@@ -36,3 +36,29 @@ test('the eligible tab survives a reload', async ({ page }) => {
 	);
 	await expect(page.locator('table.table tbody tr').first()).toBeVisible();
 });
+
+test('the N-selector re-requests the upcoming window with the chosen horizon', async ({ page }) => {
+	await page.goto('/rent');
+	await expect(page.getByText(`${upcomingCount} boxes, total due`)).toBeVisible();
+
+	const request = page.waitForRequest(
+		(r) =>
+			r.url().includes('/v1/rent/upcoming') && new URL(r.url()).searchParams.get('blocks') === '72'
+	);
+	await page.getByLabel('Horizon').selectOption('72');
+	await request;
+
+	await expect(page.getByLabel('Horizon')).toHaveValue('72');
+	await expect(page.locator('table.table tbody tr').first()).toBeVisible();
+});
+
+test('the tablist and its panel are wired together for assistive tech', async ({ page }) => {
+	await page.goto('/rent');
+	await expect(page.getByRole('tablist')).toHaveAttribute('aria-label', 'Rent sections');
+	await expect(page.getByRole('tab', { name: 'Upcoming' })).toHaveAttribute(
+		'aria-controls',
+		'panel-upcoming'
+	);
+	await expect(page.getByRole('tabpanel')).toHaveAttribute('id', 'panel-upcoming');
+	await expect(page.getByRole('tabpanel')).toHaveAttribute('tabindex', '0');
+});

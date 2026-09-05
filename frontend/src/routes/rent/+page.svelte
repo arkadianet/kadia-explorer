@@ -44,7 +44,9 @@
 	let upcomingBlocks = $state(720);
 	let upcomingItems = $state<RentItemDto[]>(untrack(() => data.upcoming));
 	let upcomingLoading = $state(false);
-	let upcomingError = $state<unknown>(null);
+	// Seeded from the load function, which returns an `ApiError` as data rather than throwing
+	// so the tabs still render (and the Eligible tab still works) when `/rent/upcoming` is down.
+	let upcomingError = $state<unknown>(untrack(() => data.error));
 
 	// Request generation counter: guards against a slower, earlier request (e.g. the user
 	// flips the N-selector twice in quick succession) overwriting the result of a later one.
@@ -99,10 +101,10 @@
 
 <Panel title="Rent">
 	<div class="tabbar">
-		<Tabs tabs={TABS} {active} onchange={selectTab} />
+		<Tabs tabs={TABS} {active} onchange={selectTab} label="Rent sections" />
 	</div>
 
-	<div role="tabpanel" aria-labelledby={`tab-${active}`}>
+	<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
 		{#if active === 'upcoming'}
 			<div class="controls">
 				<label for="blocks">Horizon</label>
@@ -142,7 +144,13 @@
 					{#each upcomingItems as item (item.box.id)}
 						<tr>
 							<td>
-								<a href={`/blocks/${item.maturity_height}`}>{item.maturity_height}</a>
+								<!-- Only link once the block exists: a maturity height above the tip has no
+								     block page yet, so linking it would be a guaranteed 404. -->
+								{#if tip !== null && item.maturity_height <= tip}
+									<a href={`/blocks/${item.maturity_height}`}>{item.maturity_height}</a>
+								{:else}
+									{item.maturity_height}
+								{/if}
 								{#if tip !== null}
 									<span class="muted">in {item.maturity_height - tip} blocks</span>
 								{/if}

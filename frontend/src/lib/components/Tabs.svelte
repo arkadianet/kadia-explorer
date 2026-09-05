@@ -9,9 +9,11 @@
 		tabs: Tab[];
 		active: string;
 		onchange: (id: string) => void;
+		/** Accessible name for the tablist, e.g. "Address sections". */
+		label: string;
 	}
 
-	let { tabs, active, onchange }: Props = $props();
+	let { tabs, active, onchange, label }: Props = $props();
 
 	let refs: Record<string, HTMLButtonElement | undefined> = $state({});
 
@@ -40,7 +42,7 @@
 	}
 </script>
 
-<div class="tabs" role="tablist">
+<div class="tabs" role="tablist" aria-label={label}>
 	{#each tabs as tab (tab.id)}
 		<button
 			bind:this={refs[tab.id]}
@@ -48,6 +50,7 @@
 			role="tab"
 			id={`tab-${tab.id}`}
 			aria-selected={tab.id === active}
+			aria-controls={`panel-${tab.id}`}
 			tabindex={tab.id === active ? 0 : -1}
 			class="tab"
 			class:selected={tab.id === active}

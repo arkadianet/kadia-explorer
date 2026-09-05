@@ -30,11 +30,26 @@ test('a 500 from the API renders ErrorState, and Retry recovers', async ({ page 
 	await expect(rows.first().locator('td').first()).toHaveText(String(TIP));
 });
 
-test('a lagging index raises the home-page banner', async ({ page }) => {
+test('a lagging index raises the banner on every route', async ({ page }) => {
 	await page.setExtraHTTPHeaders({ 'x-mock-lag': '500' });
 	await page.goto('/');
 
 	const banner = page.locator('.banner.warn');
 	await expect(banner).toBeVisible();
 	await expect(banner).toContainText('Index is 500 blocks behind the node.');
+	await expect(banner).toHaveAttribute('role', 'status');
+
+	// The banner lives in the layout, so it follows the user off the home page.
+	await page.goto('/richlist');
+	await expect(page.locator('.banner.warn')).toContainText('Index is 500 blocks behind the node.');
+});
+
+test('a stalled index raises an alert banner on every route', async ({ page }) => {
+	await page.setExtraHTTPHeaders({ 'x-mock-stall': '1' });
+	await page.goto('/blocks');
+
+	const banner = page.locator('.banner.danger');
+	await expect(banner).toBeVisible();
+	await expect(banner).toContainText('Indexer is waiting on block');
+	await expect(banner).toHaveAttribute('role', 'alert');
 });

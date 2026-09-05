@@ -6,6 +6,7 @@
 	import Age from '$lib/components/Age.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager } from '$lib/pager/pager.svelte';
+	import { formatKb } from '$lib/format/size';
 	import type { BlockDto } from '$lib/api/types';
 
 	const pager = createPager<BlockDto>((cursor) => api.blocks(cursor, 50));
@@ -13,10 +14,6 @@
 	$effect(() => {
 		if (pager.items.length === 0) void pager.loadMore();
 	});
-
-	function kb(size: number): string {
-		return `${(size / 1024).toFixed(1)} KB`;
-	}
 </script>
 
 <svelte:head>
@@ -41,7 +38,7 @@
 				<td><a href={`/blocks/${block.height}`}>{block.height}</a></td>
 				<td><Age ms={block.timestamp} /></td>
 				<td>{block.tx_count}</td>
-				<td>{kb(block.size)}</td>
+				<td>{formatKb(block.size)}</td>
 				<td><Amount nano={block.fees} maxFrac={3} /></td>
 				<td><Amount nano={block.reward} maxFrac={3} /></td>
 				<td><Hash value={block.miner_pk} copy={false} /></td>

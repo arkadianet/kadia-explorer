@@ -1,26 +1,11 @@
-# sv
+# Ergo Explorer — frontend
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
-
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.17.0 create --template minimal --types ts --install npm frontend
-```
+The SvelteKit single-page app for the standalone Ergo explorer. It talks to `xp-api` over
+`/v1` and ships as a static bundle (`@sveltejs/adapter-static`, `ssr = false`).
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Install dependencies with `npm install`, then start the dev server:
 
 ```sh
 npm run dev
@@ -45,8 +30,6 @@ npm run build
 ```
 
 You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
 
 ## Testing
 
@@ -98,9 +81,6 @@ The specs in `tests/e2e/*.spec.ts` cover every phase-1 route:
 plus the cross-cutting behaviour: the theme toggle persisting across a reload, the `/` search
 shortcut, an API 500 rendering `ErrorState` with a working Retry, and the lag banner.
 
-The home route's gzipped-JS budget runs automatically after every `npm run build`
-(`npm run budget`, 120 KB).
-
 ## Bundle budget
 
 `npm run build` runs `postbuild` → `npm run budget` (`scripts/bundle-budget.mjs`), which gzips
@@ -114,7 +94,7 @@ against an existing `build/` with `npm run budget`.
 (Nuremberg, `explorer.kadia.io`):
 
 ```sh
-scripts/deploy_frontend.sh [user@host]
+scripts/deploy_frontend.sh [--caddy] [user@host] [site-url]
 ```
 
 It:
@@ -123,15 +103,22 @@ It:
    bundle budget check as `postbuild`).
 2. `rsync -az --delete`s `build/` to `/var/www/explorer/` over SSH, so removed files are
    pruned on the host too.
-3. Reloads Caddy on the host and prints the resulting HTTPS status code for
-   `https://explorer.kadia.io/`.
+3. With `--caddy`, scp's `deploy/caddy/explorer.kadia.io.Caddyfile` to the host, runs
+   `caddy validate` on it there, backs the live config up as `/etc/caddy/Caddyfile.bak.<ts>`
+   and installs it. Without the flag the host keeps the config it already has.
+4. Reloads Caddy on the host and prints the resulting HTTPS status code for `$SITE_URL`.
 
-Defaults to `root@167.233.240.191`; pass a different `user@host` as `$1` to target another
-box. Set `SSH_KEY` to override the default key (`~/.ssh/hetzner_vps`). The host's Caddy
-config (`/etc/caddy/Caddyfile`) reverse-proxies `/v1/*` to the explorer API on
-`127.0.0.1:18090`, serves the built SPA from `/var/www/explorer` with a `try_files` fallback
-to `index.html` for client-side routes, long-cache immutable headers on
-`/_app/immutable/*`, and `no-cache` on `index.html`.
+Defaults to `root@167.233.240.191`; pass a different `user@host` as the first positional
+argument to target another box, and that box's own site URL as the second (or via the
+`SITE_URL` environment variable — default `https://explorer.kadia.io`) so the health check
+follows the host. Set `SSH_KEY` to override the default key (`~/.ssh/hetzner_vps`).
+
+The committed site config (`deploy/caddy/explorer.kadia.io.Caddyfile`) reverse-proxies `/v1/*`
+to the explorer API on `127.0.0.1:18090`, serves the built SPA from `/var/www/explorer` with a
+`try_files` fallback to `index.html` for client-side routes, sets a one-year immutable
+`Cache-Control` on `/_app/immutable/*`, and `no-cache` on **every other** response — the SPA
+shell included, so a client-side route like `/blocks/1000` can never be served from a stale
+cached shell after a deploy.
 
 Prerequisites: SSH access to the host with the deploy key, and `caddy` already running there
 under systemd (the script reloads it, it does not install or start it).

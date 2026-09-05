@@ -59,17 +59,25 @@
 	let rentLoading = $state(false);
 	let rentError = $state<unknown>(null);
 
+	// Request generation counter, as on /rent: navigating to another address (or flipping back
+	// to the Rent tab) can leave an earlier request in flight, and without this guard its late
+	// reply would overwrite the current address's rows.
+	let rentGen = 0;
+
 	async function loadRent() {
+		const my = ++rentGen;
 		rentLoading = true;
 		rentError = null;
 		try {
 			const res = await api.addressRent(addr);
+			if (my !== rentGen) return;
 			rentItems = [...res.items].sort((a, b) => a.rent.maturity_height - b.rent.maturity_height);
 			rentTruncated = res.truncated;
 		} catch (e) {
+			if (my !== rentGen) return;
 			rentError = e;
 		} finally {
-			rentLoading = false;
+			if (my === rentGen) rentLoading = false;
 		}
 	}
 
@@ -84,6 +92,8 @@
 		txPager = null;
 		unspentPager = null;
 		boxPager = null;
+		// Invalidate any rent request still in flight for the previous address.
+		rentGen++;
 		rentItems = null;
 		rentTruncated = false;
 		rentLoading = false;
@@ -174,10 +184,10 @@
 
 	<Panel>
 		<div class="tabbar">
-			<Tabs tabs={TABS} {active} onchange={selectTab} />
+			<Tabs tabs={TABS} {active} onchange={selectTab} label="Address sections" />
 		</div>
 
-		<div role="tabpanel" aria-labelledby={`tab-${active}`}>
+		<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
 			{#if active === 'txs'}
 				{#if txPager}
 					<InfiniteList table columns={4} dense pager={txPager} empty="No transactions.">
