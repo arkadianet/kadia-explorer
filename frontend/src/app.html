@@ -4,17 +4,14 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<script>
+			// Dark is this explorer's default, not the system's: the UI is designed dark first, so
+			// `prefers-color-scheme` is deliberately not consulted. Only an explicit choice from the
+			// header toggle (persisted as `xp-theme`) selects light. Keep this rule in step with
+			// $lib/theme/theme.svelte.ts.
 			(function () {
 				try {
-					var KEY = 'xp-theme';
-					var saved = localStorage.getItem(KEY);
-					var mode =
-						saved === 'light' || saved === 'dark'
-							? saved
-							: matchMedia('(prefers-color-scheme: light)').matches
-								? 'light'
-								: 'dark';
-					document.documentElement.dataset.theme = mode;
+					var saved = localStorage.getItem('xp-theme');
+					document.documentElement.dataset.theme = saved === 'light' ? 'light' : 'dark';
 				} catch (e) {
 					document.documentElement.dataset.theme = 'dark';
 				}

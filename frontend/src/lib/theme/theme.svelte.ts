@@ -2,10 +2,6 @@ type Mode = 'dark' | 'light';
 
 const KEY = 'xp-theme';
 
-function systemMode(): Mode {
-	return matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-}
-
 let current = $state<Mode>('dark');
 
 function apply(m: Mode) {
@@ -24,7 +20,9 @@ export const theme = {
 		} catch {
 			// localStorage may be unavailable (private mode, disabled storage)
 		}
-		apply(saved === 'light' || saved === 'dark' ? saved : systemMode());
+		// Dark unless light was explicitly chosen. The no-flash script in app.html applies the
+		// same rule before first paint; the two must stay in step.
+		apply(saved === 'light' ? 'light' : 'dark');
 	},
 	toggle() {
 		const m: Mode = current === 'dark' ? 'light' : 'dark';

@@ -1,21 +1,69 @@
+/* Design tokens — "dark data-terminal".
+ *
+ * Dark is the product's default; light is a secondary theme reached through the header
+ * toggle (see src/app.html and $lib/theme/theme.svelte.ts — no saved preference means dark,
+ * regardless of prefers-color-scheme).
+ *
+ * Two families of tone colour exist on purpose:
+ *   --ok / --warn / --danger / --accent   fills, rules, bars, dots, badge washes
+ *   --*-ink                               the same tone used as TEXT
+ * In dark they are identical; in light the ink is darkened so tone text still clears 4.5:1
+ * on the badge's 15 %-alpha wash of its own tone. Never set text to a non-ink tone.
+ *
+ * Contrast (WCAG 2.x sRGB relative luminance, computed with a node script; the "chip" column
+ * is the tone ink over a 15 %-alpha wash of the tone itself on --bg / --bg-elev / --bg-hover):
+ *
+ *   DARK   on --bg / --bg-elev / --bg-hover        chip (bg / elev / hover)
+ *     --fg          15.08  13.89  12.59
+ *     --fg-muted     6.69   6.16   5.58
+ *     --accent-ink   6.30   5.80   5.26           5.18  4.90  4.72
+ *     --ok-ink       7.18   6.61   5.99           5.61  5.31  5.11
+ *     --warn-ink     9.32   8.58   7.78           7.00  6.63  6.38
+ *     --danger-ink   6.12   5.64   5.11           5.02  4.76  4.58
+ *     --accent-fg on --accent: 6.70
+ *
+ *   LIGHT  on --bg / --bg-elev / --bg-hover        chip (bg / elev / hover)
+ *     --fg          15.41  16.52  14.58
+ *     --fg-muted     5.10   5.46   4.82
+ *     --accent-ink   5.75   6.17   5.44           4.76  5.07  4.52
+ *     --ok-ink       6.68   7.16   6.32           5.47  5.83  5.20
+ *     --warn-ink     7.31   7.83   6.91           5.93  6.33  5.64
+ *     --danger-ink   6.57   7.05   6.22           5.26  5.61  5.00
+ *     --accent-fg on --accent: 4.63
+ *
+ * Every text ratio is >= 4.5:1 in both themes. The neutral badge deliberately has no wash —
+ * it sits on --bg-hover with --fg-muted (5.58 dark / 4.82 light).
+ */
+
 :root {
 	color-scheme: dark;
-	--bg: #0e1116;
-	--bg-elev: #151a21;
-	--bg-hover: #1c232c;
-	--fg: #e6e9ee;
-	--fg-muted: #8b95a5;
-	--accent: #4f8cff;
-	--ok: #3ecf8e;
-	--warn: #f0b429;
-	--danger: #f0616d;
-	--border: #232b36;
-	/* WCAG contrast on --bg #0e1116 (relative-luminance ratio, verified with a
-	   small node script computing sRGB relative luminance per WCAG 2.x):
-	   --accent #4f8cff = 5.88:1, --ok #3ecf8e = 9.47:1, --warn #f0b429 = 10.15:1,
-	   --danger #f0616d = 5.98:1. All >= 4.5:1. */
-	--radius: 6px;
-	--radius-lg: 10px;
+
+	--bg: #101820;
+	--bg-elev: #16202a;
+	--bg-hover: #1c2836;
+	--border: #263241;
+	--fg: #e8ecf1;
+	--fg-muted: #8fa0b3;
+
+	--accent: #ff6b2c;
+	--accent-ink: #ff6b2c;
+	--accent-fg: #1a0d05;
+	--ok: #2fb7a3;
+	--ok-ink: #2fb7a3;
+	--warn: #e8b339;
+	--warn-ink: #e8b339;
+	--danger: #f26d6d;
+	--danger-ink: #f26d6d;
+
+	--rule: 1px solid var(--border);
+	/* Alpha of a tone behind its own badge text. */
+	--wash: 0.15;
+
+	/* Controls get a small radius, tiles a slightly larger one; tables, sections and rules
+	   get none — the grid is meant to read as a terminal, not as a card deck. */
+	--radius: 4px;
+	--radius-tile: 6px;
+
 	--space-1: 4px;
 	--space-2: 8px;
 	--space-3: 12px;
@@ -23,28 +71,36 @@
 	--space-5: 20px;
 	--space-6: 24px;
 	--space-8: 32px;
+
+	--fs-data: 13px;
+	--fs-body: 14px;
+	--fs-title: 16px;
+	--fs-page: 20px;
+	--fs-key: 28px;
+
 	--font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :root[data-theme='light'] {
 	color-scheme: light;
-	--bg: #f7f8fa;
+
+	--bg: #f6f7f9;
 	--bg-elev: #ffffff;
 	--bg-hover: #eef1f5;
-	--fg: #151a21;
-	--fg-muted: #5b6675;
-	/* WCAG contrast on --bg #f7f8fa (relative-luminance ratio, verified with a
-	   small node script computing sRGB relative luminance per WCAG 2.x):
-	   --accent #1f5fd0 = 5.48:1 (was #2f6fe4 = 4.38:1, failed),
-	   --ok #12744b = 5.45:1 (was #188a5b = 4.10:1, failed),
-	   --warn #8a5a00 = 5.58:1 (was #a56f00 = 4.05:1, failed),
-	   --danger #c0343f = 5.19:1 (unchanged, already passed). All >= 4.5:1. */
-	--accent: #1f5fd0;
-	--ok: #12744b;
+	--border: #d9dee6;
+	--fg: #14202b;
+	--fg-muted: #5b6b7d;
+
+	--accent: #d9501a;
+	--accent-ink: #ab3d0e;
+	--accent-fg: #1a0d05;
+	--ok: #157a68;
+	--ok-ink: #106354;
 	--warn: #8a5a00;
+	--warn-ink: #714a00;
 	--danger: #c0343f;
-	--border: #dde2e9;
+	--danger-ink: #a52a34;
 }
 
 @media (prefers-reduced-motion: reduce) {
