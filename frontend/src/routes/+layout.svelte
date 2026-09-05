@@ -2,6 +2,8 @@
 	import '$lib/styles/tokens.css';
 	import '$lib/styles/base.css';
 	import { theme } from '$lib/theme/theme.svelte';
+	import { status } from '$lib/status/status.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -16,6 +18,8 @@
 
 	onMount(() => {
 		theme.init();
+		status.start();
+		return () => status.stop();
 	});
 </script>
 
@@ -26,7 +30,7 @@
 			<!-- Task 10: SearchBox mounts here -->
 		</div>
 		<div class="status-slot" data-testid="status-slot">
-			<!-- Task 4: StatusBadge mounts here -->
+			<StatusBadge />
 		</div>
 		<button
 			type="button"

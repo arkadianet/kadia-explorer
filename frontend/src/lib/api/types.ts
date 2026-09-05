@@ -6,6 +6,12 @@ export interface PageDto<T> {
 	next_cursor: string | null;
 }
 
+export interface StatusStalledDto {
+	height: number;
+	since_secs: number;
+	reason: string;
+}
+
 export interface StatusDto {
 	indexed: number | null;
 	best: number;
@@ -13,6 +19,7 @@ export interface StatusDto {
 	source: string;
 	halted: string | null;
 	lag_blocks: number;
+	stalled: StatusStalledDto | null;
 }
 
 export interface BlockDto {
