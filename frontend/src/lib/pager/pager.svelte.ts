@@ -1,3 +1,4 @@
+import { untrack } from 'svelte';
 import type { PageDto } from '$lib/api/types';
 
 export interface Pager<T> {
@@ -19,7 +20,11 @@ export function createPager<T>(fetchPage: (cursor?: string) => Promise<PageDto<T
 	let done = $state(false);
 
 	async function loadMore(): Promise<void> {
-		if (loading || done) return;
+		// `untrack`: callers drive the first page from an `$effect`, so a tracked read of
+		// `loading`/`done` here would subscribe that effect to them — and the `loading = false`
+		// in the `finally` below would re-run it, re-calling `loadMore` forever whenever the
+		// items array stays empty (i.e. on every failed request).
+		if (untrack(() => loading || done)) return;
 		loading = true;
 		error = null;
 		try {
