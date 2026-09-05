@@ -212,25 +212,14 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
                 ctx.undo.new_trees.push(o.tree_hash.0);
             }
 
-            let row = BoxRow {
+            insert_output(
+                &mut boxes,
+                &mut box_by_gidx,
+                &mut tree_boxes,
+                &mut tree_unspent,
+                &mut rent_matures,
                 gidx,
-                value: o.value,
-                tree_hash: o.tree_hash.0,
-                creation_height: o.creation_height,
-                tx_id: o.tx_id.0,
-                index: o.index,
-                size: o.size,
-                tokens: o.tokens.clone(),
-                registers_json: o.registers_json.clone(),
-                spent: None,
-            };
-            boxes.insert(o.id.0.as_slice(), row.encode().as_slice())?;
-            box_by_gidx.insert(k_u64(gidx).as_slice(), o.id.0.as_slice())?;
-            tree_boxes.insert(k_hash_gidx(&o.tree_hash.0, gidx).as_slice(), &[][..])?;
-            tree_unspent.insert(k_hash_gidx(&o.tree_hash.0, gidx).as_slice(), &[][..])?;
-            rent_matures.insert(
-                k_rent(maturity_height(o.creation_height), gidx).as_slice(),
-                o.id.0.as_slice(),
+                o,
             )?;
 
             let bal = load_balance(&tree_balance, &mut touched_balances, &o.tree_hash.0)?;
@@ -286,7 +275,10 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         );
     }
 
-    // Balances and the value-ordered "rich" index are flushed once per block.
+    // Balances and the value-ordered "rich" index are flushed once per block, from the
+    // `touched_balances` cache built above. `Store::seed_genesis` (genesis.rs) does the same
+    // work per box instead of per block (it has three boxes and no undo row to write); the
+    // two must stay in agreement about what a `BalanceRow` and a `RICH` key contain.
     let mut rich = ctx.txn.open_table(RICH)?;
     for (tree, bal) in touched_balances {
         let prev = tree_balance
@@ -329,6 +321,46 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         .open_table(HEADER_BY_ID)?
         .insert(b.header.id.0.as_slice(), k_u32(ctx.height).as_slice())?;
 
+    Ok(())
+}
+
+/// Writes the five per-box tables for one newly created box: `BOXES` (unspent), `BOX_BY_GIDX`,
+/// `TREE_BOXES`, `TREE_UNSPENT` and `RENT_MATURES`.
+///
+/// Shared by [`apply_block`] (a block's outputs) and `Store::seed_genesis` (genesis.rs, the
+/// chain-spec boxes that belong to no block), so that "what it means to index a new box" lives
+/// in one place: a table added here is automatically written by both paths. Balances and the
+/// `RICH` index are deliberately NOT touched here — the two callers batch them differently
+/// (per block vs. per box) — nor is `ERGO_TREES`, which is [`upsert_tree`]'s job.
+pub(crate) fn insert_output(
+    boxes: &mut Table<'_, &'static [u8], &'static [u8]>,
+    box_by_gidx: &mut Table<'_, &'static [u8], &'static [u8]>,
+    tree_boxes: &mut Table<'_, &'static [u8], &'static [u8]>,
+    tree_unspent: &mut Table<'_, &'static [u8], &'static [u8]>,
+    rent_matures: &mut Table<'_, &'static [u8], &'static [u8]>,
+    gidx: Gidx,
+    o: &xp_wire::DecodedBox,
+) -> Result<(), StoreError> {
+    let row = BoxRow {
+        gidx,
+        value: o.value,
+        tree_hash: o.tree_hash.0,
+        creation_height: o.creation_height,
+        tx_id: o.tx_id.0,
+        index: o.index,
+        size: o.size,
+        tokens: o.tokens.clone(),
+        registers_json: o.registers_json.clone(),
+        spent: None,
+    };
+    boxes.insert(o.id.0.as_slice(), row.encode().as_slice())?;
+    box_by_gidx.insert(k_u64(gidx).as_slice(), o.id.0.as_slice())?;
+    tree_boxes.insert(k_hash_gidx(&o.tree_hash.0, gidx).as_slice(), &[][..])?;
+    tree_unspent.insert(k_hash_gidx(&o.tree_hash.0, gidx).as_slice(), &[][..])?;
+    rent_matures.insert(
+        k_rent(maturity_height(o.creation_height), gidx).as_slice(),
+        o.id.0.as_slice(),
+    )?;
     Ok(())
 }
 

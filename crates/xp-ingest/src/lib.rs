@@ -165,6 +165,14 @@ pub async fn run(
         let out = tokio::task::spawn_blocking(move || -> Result<usize, ApplyErr> {
             let boxes = xp_wire::decode_genesis_boxes(&json)
                 .map_err(|e| ApplyErr::Decode(e.to_string()))?;
+            if boxes.is_empty() {
+                // Still seeded (the flag is what stops us re-fetching, and test doubles
+                // legitimately return an empty list), but on a real chain this guarantees
+                // the first block that spends a genesis box will halt ingest.
+                warn!(
+                    "node returned zero genesis boxes; a from-scratch mainnet sync will halt at height 1 — check the source"
+                );
+            }
             s.seed_genesis(&boxes).map_err(ApplyErr::Store)?;
             Ok(boxes.len())
         })

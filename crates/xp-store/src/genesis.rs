@@ -6,14 +6,17 @@
 //! Without them in the store, those spends look exactly like corruption (and, when
 //! tolerated, silently produce wrong balances), so a full sync from height 1 writes them
 //! first, from the node's `GET /utxo/genesis`.
+//!
+//! Because they belong to no transaction, each carries an all-zero `tx_id` and index 0, and
+//! no `TXS`/`TX_BY_GIDX` row is written for them: a lookup of that all-zero tx id finds
+//! nothing, and `boxes_of_tx` on it returns empty.
 
 use redb::{Durability, ReadableTable};
-use xp_types::rent::maturity_height;
 use xp_wire::DecodedBox;
 
-use crate::apply::upsert_tree;
-use crate::keys::{k_hash_gidx, k_rent, k_rich, k_u64};
-use crate::rows::{BalanceRow, BoxRow};
+use crate::apply::{insert_output, upsert_tree};
+use crate::keys::{k_rich, k_u64};
+use crate::rows::BalanceRow;
 use crate::tables::*;
 use crate::{Store, StoreError};
 
@@ -69,30 +72,22 @@ impl Store {
                 let tree = b.tree_hash.0;
 
                 upsert_tree(&mut ergo_trees, &tree, &b.tree_bytes, 0)?;
-
-                let row = BoxRow {
+                // The per-box tables are written by the same helper `apply_block` uses for a
+                // block's outputs, so the two paths cannot drift apart.
+                insert_output(
+                    &mut boxes_t,
+                    &mut box_by_gidx,
+                    &mut tree_boxes,
+                    &mut tree_unspent,
+                    &mut rent_matures,
                     gidx,
-                    value: b.value,
-                    tree_hash: tree,
-                    creation_height: b.creation_height,
-                    tx_id: b.tx_id.0,
-                    index: b.index,
-                    size: b.size,
-                    tokens: b.tokens.clone(),
-                    registers_json: b.registers_json.clone(),
-                    spent: None,
-                };
-                boxes_t.insert(b.id.0.as_slice(), row.encode().as_slice())?;
-                box_by_gidx.insert(k_u64(gidx).as_slice(), b.id.0.as_slice())?;
-                tree_boxes.insert(k_hash_gidx(&tree, gidx).as_slice(), &[][..])?;
-                tree_unspent.insert(k_hash_gidx(&tree, gidx).as_slice(), &[][..])?;
-                rent_matures.insert(
-                    k_rent(maturity_height(b.creation_height), gidx).as_slice(),
-                    b.id.0.as_slice(),
+                    b,
                 )?;
 
-                // Two genesis boxes could in principle share a tree, so the balance is
-                // read back per box rather than built once.
+                // Balances and `RICH` are the one thing `insert_output` leaves to the caller:
+                // apply.rs flushes them once per block from a cache, this seeds three boxes and
+                // reads the row back per box (two genesis boxes could in principle share a
+                // tree). The `BalanceRow` and `RICH` key contents must match apply.rs's.
                 let mut bal = tree_balance
                     .get(tree.as_slice())?
                     .map(|v| BalanceRow::decode(v.value()))
@@ -121,7 +116,7 @@ impl Store {
                 tree_balance.insert(tree.as_slice(), bal.encode().as_slice())?;
             }
 
-            meta.insert(META_NEXT_BOX_GIDX, crate::keys::k_u64(next_box).as_slice())?;
+            meta.insert(META_NEXT_BOX_GIDX, k_u64(next_box).as_slice())?;
             meta.insert(META_GENESIS_SEEDED, &[1u8][..])?;
         }
         txn.commit()?;

@@ -42,6 +42,13 @@ fn seeds_genesis_boxes_into_an_empty_store() {
     assert_eq!(bal.first_seen, 0);
     assert_eq!(bal.last_seen, 0);
 
+    // Genesis boxes belong to no transaction: all-zero tx_id, index 0, and no TXS row for
+    // that id (so a lookup of it finds nothing rather than a phantom transaction).
+    for b in &boxes {
+        assert_eq!(b.tx_id.0, [0u8; 32]);
+    }
+    assert!(rd.tx_by_id(&[0u8; 32]).unwrap().is_none());
+
     let matures = rd.rent_matures_range(maturity_height(0), 1, 10).unwrap();
     assert_eq!(matures.len(), 3);
     for b in &boxes {

@@ -70,9 +70,9 @@ impl Store {
             // a box created and spent within the same block is in both `created_boxes` and
             // `spent_boxes`, step 1 already removed its BOXES row, and step 2 finds nothing
             // for it — that is the only reason `existing` can legitimately be `None` here.
-            // (apply.rs's tolerated-missing-input case at height 1 / on a partial store
-            // `continue`s before ever pushing onto `spent_boxes`, so that case never reaches
-            // this loop at all.) The `if let Some` guard exists solely for the same-block
+            // (apply.rs's tolerated-missing-input case — on a partial store only, since the
+            // chain-spec genesis boxes are now seeded rather than tolerated — `continue`s
+            // before ever pushing onto `spent_boxes`, so it never reaches this loop at all.) The `if let Some` guard exists solely for the same-block
             // create-then-spend case.
             for id in &undo.spent_boxes {
                 let existing = {
@@ -195,12 +195,14 @@ mod tests {
     use tempfile::tempdir;
 
     /// Focused test for the `h == 1` branch of `rollback_to`: rolling back the first-ever
-    /// block must leave the store indistinguishable from one that was never applied to
-    /// (`indexed_height() == None`), not one sitting at a real height-0 tip. Hand-constructs
+    /// block must clear `indexed_height()` back to `None` (not leave a real height-0 tip), so
+    /// that height 1 can be applied again. It does NOT make the store byte-identical to a
+    /// fresh one: seeded chain-spec genesis boxes (see genesis.rs) survive rollback by
+    /// design, which is exactly what a re-apply of height 1 needs. Hand-constructs
     /// a minimal height-1 store (header + undo row + META_INDEXED_HEIGHT) directly through
     /// `begin_write`, since no fixture/`apply_batch` call is needed to exercise this branch.
     #[test]
-    fn rollback_to_zero_leaves_store_indistinguishable_from_fresh() {
+    fn rollback_to_zero_clears_indexed_height_and_allows_reapply() {
         let dir = tempdir().unwrap();
         let s = Store::open(&dir.path().join("x.redb")).unwrap();
 
