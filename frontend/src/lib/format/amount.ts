@@ -38,3 +38,8 @@ export function formatNano(nano: string | bigint): string {
 	const abs = negative ? -n : n;
 	return `${negative ? '-' : ''}${groupInt(abs.toString())}`;
 }
+
+/** Sums decimal nanoERG amounts via BigInt, e.g. summing a tx's output values. */
+export function sumNano(values: string[]): bigint {
+	return values.reduce((total, v) => total + BigInt(v), 0n);
+}

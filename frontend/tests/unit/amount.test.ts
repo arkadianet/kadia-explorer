@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatErg, formatNano } from '$lib/format/amount';
+import { formatErg, formatNano, sumNano } from '$lib/format/amount';
 
 describe('formatErg', () => {
 	it('handles zero and one nanoERG exactly', () => {
@@ -24,4 +24,16 @@ describe('formatErg', () => {
 
 describe('formatNano', () => {
 	it('groups', () => expect(formatNano('1250000')).toBe('1,250,000'));
+});
+
+describe('sumNano', () => {
+	it('sums an empty list to zero', () => {
+		expect(sumNano([])).toBe(0n);
+	});
+	it('sums decimal strings as BigInt', () => {
+		expect(sumNano(['1', '2', '3'])).toBe(6n);
+	});
+	it('never loses precision above 2^53', () => {
+		expect(sumNano(['93409132500000000', '1'])).toBe(93409132500000001n);
+	});
 });
