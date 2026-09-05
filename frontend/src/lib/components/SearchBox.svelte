@@ -18,11 +18,20 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
-		if (e.key === '/' && !isTypingTarget(e.target)) {
+		if (
+			e.key === '/' &&
+			!e.ctrlKey &&
+			!e.metaKey &&
+			!e.altKey &&
+			!isTypingTarget(e.target) &&
+			document.activeElement !== inputEl
+		) {
 			e.preventDefault();
 			inputEl?.focus();
 			return;
 		}
+		// Escape only clears/blurs when the search input itself is focused, so it never
+		// hijacks Escape while the user is elsewhere on the page (e.g. closing a dialog).
 		if (e.key === 'Escape' && document.activeElement === inputEl) {
 			q = '';
 			inputEl?.blur();
@@ -46,14 +55,18 @@
 		autocomplete="off"
 		spellcheck="false"
 	/>
+	<button type="submit" class="submit-btn" aria-label="Search">Go</button>
 </form>
 
 <style>
 	.search {
+		display: flex;
+		gap: var(--space-2);
 		max-width: 480px;
 	}
 
 	.search input {
+		flex: 1;
 		width: 100%;
 		padding: var(--space-2) var(--space-3);
 		background: var(--bg);
@@ -64,6 +77,26 @@
 	}
 
 	.search input:focus {
+		outline: 2px solid var(--accent);
+		outline-offset: -1px;
+	}
+
+	.submit-btn {
+		flex-shrink: 0;
+		padding: var(--space-2) var(--space-3);
+		background: var(--bg-elev);
+		color: var(--fg);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		font: inherit;
+		cursor: pointer;
+	}
+
+	.submit-btn:hover {
+		background: var(--bg-hover);
+	}
+
+	.submit-btn:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: -1px;
 	}
