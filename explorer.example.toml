@@ -1,0 +1,11 @@
+data_dir = "./data"
+bind = "127.0.0.1:8090"
+[source]
+kind = "rust_node"
+url = "http://127.0.0.1:9063"
+[ingest]
+poll_ms = 500
+bulk_batch = 64
+bulk_concurrency = 8
+durable_every = 256
+tip_lag_for_bulk = 64
