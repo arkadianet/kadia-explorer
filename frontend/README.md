@@ -29,6 +29,13 @@ npm run dev
 npm run dev -- --open
 ```
 
+`vite dev` (and `vite preview`) proxy `/v1` to the explorer API at `http://127.0.0.1:18090` by
+default. Point it elsewhere with `VITE_API_PROXY`:
+
+```sh
+VITE_API_PROXY=http://127.0.0.1:18090 npm run dev
+```
+
 ## Building
 
 To create a production version of your app:
@@ -79,3 +86,38 @@ shortcut, an API 500 rendering `ErrorState` with a working Retry, and the lag ba
 
 The home route's gzipped-JS budget runs automatically after every `npm run build`
 (`npm run budget`, 120 KB).
+
+## Bundle budget
+
+`npm run build` runs `postbuild` → `npm run budget` (`scripts/bundle-budget.mjs`), which gzips
+the root layout, the home route, and their shared entry/chunk files under
+`build/_app/immutable/` and fails the build if the total exceeds 120 KB. Run it standalone
+against an existing `build/` with `npm run budget`.
+
+## Deploy
+
+`scripts/deploy_frontend.sh` (repo root) builds and ships this app to the production host
+(Nuremberg, `explorer.kadia.io`):
+
+```sh
+scripts/deploy_frontend.sh [user@host]
+```
+
+It:
+
+1. `cd`s into `frontend/`, runs `npm ci --silent && npm run build` (which also runs the
+   bundle budget check as `postbuild`).
+2. `rsync -az --delete`s `build/` to `/var/www/explorer/` over SSH, so removed files are
+   pruned on the host too.
+3. Reloads Caddy on the host and prints the resulting HTTPS status code for
+   `https://explorer.kadia.io/`.
+
+Defaults to `root@167.233.240.191`; pass a different `user@host` as `$1` to target another
+box. Set `SSH_KEY` to override the default key (`~/.ssh/hetzner_vps`). The host's Caddy
+config (`/etc/caddy/Caddyfile`) reverse-proxies `/v1/*` to the explorer API on
+`127.0.0.1:18090`, serves the built SPA from `/var/www/explorer` with a `try_files` fallback
+to `index.html` for client-side routes, long-cache immutable headers on
+`/_app/immutable/*`, and `no-cache` on `index.html`.
+
+Prerequisites: SSH access to the host with the deploy key, and `caddy` already running there
+under systemd (the script reloads it, it does not install or start it).
