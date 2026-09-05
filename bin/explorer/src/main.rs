@@ -98,6 +98,14 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
     let store = Arc::new(Store::open(&db_path).context("opening store")?);
     let source: Arc<dyn BlockSource> = Arc::new(RustNode::new(&cfg.source.url));
 
+    // Bind before spawning ingest: a bad `bind` address must fail fast without the ingest
+    // task ever having touched the store, so there is nothing running yet to cancel or wait
+    // out when `?` returns early here.
+    let listener = tokio::net::TcpListener::bind(&cfg.bind)
+        .await
+        .with_context(|| format!("binding {}", cfg.bind))?;
+    info!(addr = %cfg.bind, "listening");
+
     let indexed = store.indexed_height().context("reading indexed height")?;
     let (status_tx, status_rx) = watch::channel(IngestStatus {
         indexed,
@@ -123,11 +131,6 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         status: status_rx,
     };
     let app = xp_api::router(app_state);
-
-    let listener = tokio::net::TcpListener::bind(&cfg.bind)
-        .await
-        .with_context(|| format!("binding {}", cfg.bind))?;
-    info!(addr = %cfg.bind, "listening");
 
     {
         let signal_shutdown = shutdown.clone();
