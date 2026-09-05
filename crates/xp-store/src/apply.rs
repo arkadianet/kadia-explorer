@@ -236,6 +236,11 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         }
 
         // Index 0 is the block's coinbase-like emission tx: it has no fee semantics.
+        //
+        // TODO(emission-end): "tx 0 is the emission tx" is only true while emission is still
+        // running (mainnet emission ends around height 2,080,800). Past that height the
+        // block's first tx is an ordinary tx again, and both this rule and [`block_reward`]
+        // below must be revisited before the index can be trusted at those heights.
         let fee = if ti == 0 {
             0
         } else {
@@ -295,11 +300,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         tree_balance.insert(tree.as_slice(), bal.encode().as_slice())?;
     }
 
-    let reward = b
-        .txs
-        .first()
-        .map(|t| t.outputs.iter().map(|o| o.value).sum::<u64>())
-        .unwrap_or(0);
+    let reward = block_reward(&boxes, b)?;
     let hrow = HeaderRow {
         id: b.header.id.0,
         parent_id: b.header.parent_id.0,
@@ -322,6 +323,51 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         .insert(b.header.id.0.as_slice(), k_u32(ctx.height).as_slice())?;
 
     Ok(())
+}
+
+/// The miner's block reward, as stored in [`HeaderRow::reward`].
+///
+/// Ergo's tx 0 is the emission transaction: it spends the current emission box and outputs
+/// `[re-created emission box, miner reward box(es)]`. Summing *all* of tx 0's outputs
+/// therefore yields the emission remainder (over a million ERG), not the reward. The
+/// re-created emission box is the output paying back to the same ergo tree as tx 0's own
+/// input box, so the reward is the sum of every other tx 0 output.
+///
+/// Fallback: if tx 0's input box cannot be resolved in `BOXES` — only possible on a partial
+/// store, whose view of history begins after the box was created — the largest single output
+/// is dropped and the rest summed. The emission box dwarfs the reward by five orders of
+/// magnitude for the whole of emission, so "largest output" and "emission box" coincide.
+///
+/// See the `TODO(emission-end)` in [`apply_block`]: after emission ends there is no emission
+/// tx at index 0 and this whole computation stops being meaningful.
+fn block_reward(
+    boxes: &Table<'_, &'static [u8], &'static [u8]>,
+    b: &DecodedBlock,
+) -> Result<u64, StoreError> {
+    let Some(tx0) = b.txs.first() else {
+        return Ok(0);
+    };
+    let input_tree = match tx0.inputs.first() {
+        Some(inp) => boxes
+            .get(inp.0.as_slice())?
+            .map(|v| BoxRow::decode(v.value()))
+            .transpose()?
+            .map(|r| r.tree_hash),
+        None => None,
+    };
+    match input_tree {
+        Some(tree) => Ok(tx0
+            .outputs
+            .iter()
+            .filter(|o| o.tree_hash.0 != tree)
+            .map(|o| o.value)
+            .sum()),
+        None => {
+            let total: u64 = tx0.outputs.iter().map(|o| o.value).sum();
+            let largest = tx0.outputs.iter().map(|o| o.value).max().unwrap_or(0);
+            Ok(total - largest)
+        }
+    }
 }
 
 /// Writes the five per-box tables for one newly created box: `BOXES` (unspent), `BOX_BY_GIDX`,

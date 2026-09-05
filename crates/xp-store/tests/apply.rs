@@ -207,3 +207,29 @@ fn missing_input_at_height_one_is_corruption_on_a_non_partial_store() {
     );
     assert_eq!(s.indexed_height().unwrap(), None); // txn rolled back
 }
+
+/// Block 1866000's tx 0 is the emission tx: it spends the emission box and outputs
+/// `[re-created emission box (1_412_124 ERG), miner reward (12 ERG)]`. The header's `reward`
+/// must be the miner's 12 ERG, not the emission remainder.
+#[test]
+fn header_reward_is_the_miner_share_not_the_emission_remainder() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    let b = fixture(1866000);
+    s.apply_batch(std::slice::from_ref(&b), true).unwrap();
+    let rd = xp_store::Reader::new(&s).unwrap();
+    let h = rd.header_at(1866000).unwrap().expect("header indexed");
+    assert_eq!(h.reward, 12_000_000_000);
+    // Sanity: the naive "sum every tx 0 output" would have been three orders of magnitude
+    // larger, so the assertion above is really testing the split.
+    let all_outputs: u64 = b.txs[0].outputs.iter().map(|o| o.value).sum();
+    assert!(all_outputs > 1_000_000 * 1_000_000_000);
+
+    // 1866000 exercised the fallback (its tx 0 input predates this partial store's seed
+    // point). 1866001's tx 0 spends the emission box block 1866000 created, so it exercises
+    // the primary path: the input box resolves and its tree identifies the emission output.
+    s.apply_batch(&[fixture(1866001)], true).unwrap();
+    let rd = xp_store::Reader::new(&s).unwrap();
+    let h1 = rd.header_at(1866001).unwrap().expect("header indexed");
+    assert_eq!(h1.reward, 12_000_000_000);
+}
