@@ -258,7 +258,13 @@
 									{/if}
 								</td>
 								<td>{box.tokens.length}</td>
-								<td><RentBadge rent={box.rent} {tip} /></td>
+								<td>
+									{#if box.spent_by}
+										<span class="muted" title="Rent no longer applies — the box is spent">—</span>
+									{:else}
+										<RentBadge rent={box.rent} {tip} />
+									{/if}
+								</td>
 							</tr>
 						{/snippet}
 					</InfiniteList>
