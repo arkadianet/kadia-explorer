@@ -75,7 +75,7 @@
 		{#if block.height > 1}
 			<a href={`/blocks/${block.height - 1}`}>&larr; Prev</a>
 		{:else}
-			<span class="disabled">&larr; Prev</span>
+			<span class="disabled" aria-disabled="true">&larr; Prev</span>
 		{/if}
 		<a href={`/blocks/${block.height + 1}`}>Next &rarr;</a>
 	</div>

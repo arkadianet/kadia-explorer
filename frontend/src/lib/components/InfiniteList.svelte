@@ -5,19 +5,45 @@
 	import Skeleton from './Skeleton.svelte';
 	import type { Pager } from '$lib/pager/pager.svelte';
 
+	/**
+	 * Infinite-scroll list over a `Pager<T>`: renders items via the `children` snippet, a
+	 * "Load more" button, and an `IntersectionObserver` sentinel that calls `loadMore()` as it
+	 * scrolls into view. Shows `Skeleton` while loading the first page, `ErrorState` with retry
+	 * on error, `EmptyState` once done with zero items.
+	 *
+	 * For tabular lists, set `table` (with `columns` and a `head` snippet for the `<tr>` of
+	 * header cells) so InfiniteList renders its own `<table>`/`<thead>`/`<tbody>`/`<tfoot>` —
+	 * never place InfiniteList in its default (div-list) mode inside a `<tbody>`; a `<div>` is
+	 * not valid `<tbody>` content.
+	 */
 	interface Props {
 		pager: Pager<T>;
 		children: Snippet<[T, number]>;
 		empty?: string;
+		table?: boolean;
+		columns?: number;
+		head?: Snippet;
+		dense?: boolean;
 	}
 
-	let { pager, children, empty = 'Nothing here.' }: Props = $props();
+	let {
+		pager,
+		children,
+		empty = 'Nothing here.',
+		table = false,
+		columns = 1,
+		head,
+		dense = false
+	}: Props = $props();
 
 	let sentinel: HTMLDivElement | undefined = $state();
 
 	const firstLoad = $derived(pager.loading && pager.items.length === 0);
 	const showEmpty = $derived(pager.done && pager.items.length === 0 && !pager.error);
 	const canLoadMore = $derived(!pager.done && !pager.loading && !pager.error);
+	const showFooter = $derived(
+		firstLoad || pager.error !== null || showEmpty || (!pager.done && !pager.error)
+	);
 
 	$effect(() => {
 		const el = sentinel;
@@ -30,11 +56,7 @@
 	});
 </script>
 
-<div class="list">
-	{#each pager.items as item, i (i)}
-		{@render children(item, i)}
-	{/each}
-
+{#snippet footer()}
 	{#if firstLoad}
 		<Skeleton />
 	{/if}
@@ -53,7 +75,35 @@
 			</button>
 		</div>
 	{/if}
-</div>
+{/snippet}
+
+{#if table}
+	<div class="table-wrap">
+		<table class="table" class:dense>
+			{#if head}
+				<thead>{@render head()}</thead>
+			{/if}
+			<tbody>
+				{#each pager.items as item, i (i)}
+					{@render children(item, i)}
+				{/each}
+			</tbody>
+			{#if showFooter}
+				<tfoot>
+					<tr><td colspan={columns}>{@render footer()}</td></tr>
+				</tfoot>
+			{/if}
+		</table>
+	</div>
+{:else}
+	<div class="list">
+		{#each pager.items as item, i (i)}
+			{@render children(item, i)}
+		{/each}
+
+		{@render footer()}
+	</div>
+{/if}
 
 <style>
 	.more {

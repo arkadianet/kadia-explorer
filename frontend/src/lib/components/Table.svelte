@@ -10,32 +10,14 @@
 	let { dense = false, head, children }: Props = $props();
 </script>
 
-<div class="wrap">
-	<table class:dense>
+<!-- `.table`/`.table-wrap`/`.dense` are shared, global classes defined in
+     $lib/styles/base.css so InfiniteList's table mode can render an identical-looking
+     table without duplicating this component's styles. -->
+<div class="table-wrap">
+	<table class="table" class:dense>
 		{#if head}
 			<thead>{@render head()}</thead>
 		{/if}
 		<tbody>{@render children?.()}</tbody>
 	</table>
 </div>
-
-<style>
-	.wrap {
-		overflow-x: auto;
-	}
-	thead :global(th) {
-		position: sticky;
-		top: 0;
-		z-index: 1;
-		background: var(--bg-elev);
-		color: var(--fg-muted);
-		font-size: 12px;
-		font-weight: 600;
-	}
-	tbody :global(tr):hover {
-		background: var(--bg-hover);
-	}
-	.dense :global(tr) {
-		height: 28px;
-	}
-</style>

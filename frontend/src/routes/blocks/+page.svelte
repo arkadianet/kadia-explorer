@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Panel from '$lib/components/Panel.svelte';
-	import Table from '$lib/components/Table.svelte';
 	import InfiniteList from '$lib/components/InfiniteList.svelte';
 	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
@@ -25,7 +24,7 @@
 </svelte:head>
 
 <Panel title="Blocks">
-	<Table dense>
+	<InfiniteList table columns={7} dense {pager} empty="No blocks yet.">
 		{#snippet head()}
 			<tr>
 				<th>Height</th>
@@ -37,18 +36,16 @@
 				<th>Miner</th>
 			</tr>
 		{/snippet}
-		<InfiniteList {pager} empty="No blocks yet.">
-			{#snippet children(block: BlockDto)}
-				<tr>
-					<td><a href={`/blocks/${block.height}`}>{block.height}</a></td>
-					<td><Age ms={block.timestamp} /></td>
-					<td>{block.tx_count}</td>
-					<td>{kb(block.size)}</td>
-					<td><Amount nano={block.fees} maxFrac={3} /></td>
-					<td><Amount nano={block.reward} maxFrac={3} /></td>
-					<td><Hash value={block.miner_pk} copy={false} /></td>
-				</tr>
-			{/snippet}
-		</InfiniteList>
-	</Table>
+		{#snippet children(block: BlockDto)}
+			<tr>
+				<td><a href={`/blocks/${block.height}`}>{block.height}</a></td>
+				<td><Age ms={block.timestamp} /></td>
+				<td>{block.tx_count}</td>
+				<td>{kb(block.size)}</td>
+				<td><Amount nano={block.fees} maxFrac={3} /></td>
+				<td><Amount nano={block.reward} maxFrac={3} /></td>
+				<td><Hash value={block.miner_pk} copy={false} /></td>
+			</tr>
+		{/snippet}
+	</InfiniteList>
 </Panel>

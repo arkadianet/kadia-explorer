@@ -57,6 +57,31 @@ td {
 	text-align: left;
 }
 
+/* Shared look for Table.svelte and InfiniteList's table mode: apply the `.table` class to the
+   `<table>` element (plus `.dense` for compact rows) so both components render identically
+   without duplicating scoped CSS. */
+.table-wrap {
+	overflow-x: auto;
+}
+
+.table thead th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: var(--bg-elev);
+	color: var(--fg-muted);
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.table tbody tr:hover {
+	background: var(--bg-hover);
+}
+
+.table.dense tr {
+	height: 28px;
+}
+
 ul,
 ol {
 	margin: 0;
