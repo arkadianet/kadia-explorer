@@ -26,10 +26,11 @@ impl Store {
     /// `blocks[0].header.height` must equal `indexed_height() + 1` (or `1` on an empty store);
     /// each block's `parent_id` must match the previous block's (or stored tip's) id, else
     /// [`StoreError::ParentMismatch`] is returned and nothing is committed. A missing input box
-    /// is tolerated only at height 1 (chain-spec genesis boxes) or when the store is marked
-    /// partial (`tables::META_PARTIAL_FROM`, set by `seed_for_tests`) — anywhere else it is
-    /// [`StoreError::Corrupt`]; fees for a tx with a tolerated unknown input are computed from
-    /// its known inputs only.
+    /// is tolerated only when the store is marked partial (`tables::META_PARTIAL_FROM`, set by
+    /// `seed_for_tests`) — anywhere else, height 1 included, it is [`StoreError::Corrupt`];
+    /// fees for a tx with a tolerated unknown input are computed from its known inputs only.
+    /// (Height 1 spends chain-spec genesis boxes, which no block creates: a full sync must
+    /// call [`Store::seed_genesis`] before applying it.)
     pub fn apply_batch(&self, blocks: &[DecodedBlock], durable: bool) -> Result<(), StoreError> {
         if blocks.is_empty() {
             return Ok(());
@@ -168,13 +169,14 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
                 .map(|v| BoxRow::decode(v.value()))
                 .transpose()?;
             // A missing input is tolerated only where the store is known to have a real gap
-            // in its view of history: height 1 (whose inputs are the chain-spec genesis
-            // boxes, never indexed by anyone) or a store explicitly seeded as partial. Any
-            // other missing input means the store's own bookkeeping is wrong, so it is
-            // treated as corruption rather than silently producing wrong balances.
+            // in its view of history: a store explicitly seeded as partial. Height 1's inputs
+            // are the chain-spec genesis boxes, which `Store::seed_genesis` puts in the store
+            // before ingest starts, so they are not a gap. Any other missing input means the
+            // store's own bookkeeping is wrong, so it is treated as corruption rather than
+            // silently producing wrong balances.
             let mut row = match existing {
                 Some(r) => r,
-                None if ctx.height == 1 || ctx.partial => {
+                None if ctx.partial => {
                     skipped_inputs += 1;
                     continue;
                 }
@@ -206,33 +208,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             ctx.next_box += 1;
             value_out += o.value;
 
-            if ergo_trees.get(o.tree_hash.0.as_slice())?.is_none() {
-                let info = match tree_info(&o.tree_bytes) {
-                    Ok(info) => info,
-                    Err(_) => {
-                        tracing::warn!(
-                            tree = %hex::encode(o.tree_hash.0),
-                            height = ctx.height,
-                            "ergo tree failed to parse; storing fallback TreeRow"
-                        );
-                        xp_wire::TreeInfo {
-                            template_hash: [0; 32],
-                            address: hex::encode(&o.tree_bytes),
-                            kind: xp_wire::TreeKind::Other,
-                        }
-                    }
-                };
-                ergo_trees.insert(
-                    o.tree_hash.0.as_slice(),
-                    TreeRow {
-                        tree_bytes: o.tree_bytes.clone(),
-                        template_hash: info.template_hash,
-                        address: info.address,
-                        kind: info.kind as u8,
-                    }
-                    .encode()
-                    .as_slice(),
-                )?;
+            if upsert_tree(&mut ergo_trees, &o.tree_hash.0, &o.tree_bytes, ctx.height)? {
                 ctx.undo.new_trees.push(o.tree_hash.0);
             }
 
@@ -306,7 +282,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         tracing::debug!(
             height = ctx.height,
             skipped_inputs,
-            "tolerated missing input box(es) (genesis or partial store)"
+            "tolerated missing input box(es) (partial store)"
         );
     }
 
@@ -354,6 +330,48 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         .insert(b.header.id.0.as_slice(), k_u32(ctx.height).as_slice())?;
 
     Ok(())
+}
+
+/// Inserts the [`TreeRow`] for `tree_hash` if the table does not already hold it, returning
+/// whether it was newly inserted (the caller records that in its undo row, where it has one).
+/// A tree that fails to parse is stored with a fallback row rather than failing the block, so
+/// one odd script cannot stall the whole index; `height` is only for the warning's context.
+pub(crate) fn upsert_tree(
+    ergo_trees: &mut Table<'_, &'static [u8], &'static [u8]>,
+    tree_hash: &Hash32,
+    tree_bytes: &[u8],
+    height: u32,
+) -> Result<bool, StoreError> {
+    if ergo_trees.get(tree_hash.as_slice())?.is_some() {
+        return Ok(false);
+    }
+    let info = match tree_info(tree_bytes) {
+        Ok(info) => info,
+        Err(_) => {
+            tracing::warn!(
+                tree = %hex::encode(tree_hash),
+                height,
+                "ergo tree failed to parse; storing fallback TreeRow"
+            );
+            xp_wire::TreeInfo {
+                template_hash: [0; 32],
+                address: hex::encode(tree_bytes),
+                kind: xp_wire::TreeKind::Other,
+            }
+        }
+    };
+    ergo_trees.insert(
+        tree_hash.as_slice(),
+        TreeRow {
+            tree_bytes: tree_bytes.to_vec(),
+            template_hash: info.template_hash,
+            address: info.address,
+            kind: info.kind as u8,
+        }
+        .encode()
+        .as_slice(),
+    )?;
+    Ok(true)
 }
 
 fn load_balance<'a>(

@@ -1,4 +1,5 @@
 pub mod apply;
+pub mod genesis;
 pub mod keys;
 pub mod read;
 pub mod rollback;

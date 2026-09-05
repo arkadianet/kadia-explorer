@@ -74,10 +74,9 @@ Bounded smoke run against a local mainnet archive node (`http://127.0.0.1:9063`)
 from genesis with the default `[ingest]` settings. *First ~90 s from genesis, early small
 blocks — not representative of tip-era blocks.*
 
-- Reached height **3,848** in **~1.3 s** (~3,000 blocks/s) before ingest halted — see
-  "Known issue" below. `mode` was reported as `"bulk"` throughout, as expected this far
-  behind the chain tip.
-- `du -sh data/explorer.redb` at that point: **28M**.
+- Reached height **6,000** in **~1.8–2.5 s** (~2,400–3,300 blocks/s across runs). `mode` was reported as
+  `"bulk"` throughout, as expected this far behind the chain tip.
+- `du -sh data/explorer.redb`: **28M** at height 3,848 (measured with the standalone binary).
 - Graceful shutdown (`SIGTERM`): confirmed process exits **0**, log shows `shutdown signal
   received` followed by the in-flight batch finishing before exit.
 - Cold restart: confirmed the store resumes indexing from the previously persisted height
@@ -87,14 +86,10 @@ blocks — not representative of tip-era blocks.*
   `xp_ingest::run` returns `Err`, and that this happens promptly rather than leaving the
   server up serving a stale snapshot.
 
-### Known issue (out of scope for this task)
+### Note on upgrading
 
-Syncing real mainnet data past height ~3,848 currently halts ingest with `corrupt row:
-input box missing`. This is not caused by the `bin/explorer` wiring in this task — the
-existing `xp-ingest` smoke test (`cargo test -p xp-ingest -- --ignored smoke_local_node`)
-only syncs to height 2,000 and passes; bisecting with a smaller `bulk_batch` narrowed the
-first failure to somewhere in the 3,841–3,848 range. Likely a real edge case in early
-mainnet chain data (or in how it's applied) that the store's genesis-only "missing input"
-tolerance (`height == 1`) doesn't cover. Flagged here for the team; not fixed as part of
-Task 10, since it lives in `xp-store`/`xp-ingest` (earlier tasks) rather than in this
-binary's config/wiring/lifecycle.
+The store now seeds Ergo's three chain-spec genesis boxes (from the node's `/utxo/genesis`)
+before applying height 1, and no longer tolerates a missing input at height 1. An
+`explorer.redb` written before that change was built on the old tolerance and holds wrong
+balances for the genesis trees, so **delete any existing `data/explorer.redb` and re-sync**.
+The schema version is unchanged (nothing is deployed), so this is not detected automatically.

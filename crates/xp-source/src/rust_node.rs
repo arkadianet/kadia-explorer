@@ -110,4 +110,23 @@ impl BlockSource for RustNode {
             .map(Some)
             .map_err(|e| SourceError::Decode(e.to_string()))
     }
+
+    async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
+        let url = format!("{}/utxo/genesis", self.base);
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(Self::map_reqwest_err)?;
+        if !resp.status().is_success() {
+            return Err(SourceError::Http(format!(
+                "GET {url}: status {}",
+                resp.status()
+            )));
+        }
+        resp.text()
+            .await
+            .map_err(|e| SourceError::Decode(e.to_string()))
+    }
 }

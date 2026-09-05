@@ -134,6 +134,50 @@ pub async fn run(
         }};
     }
 
+    // The chain-spec genesis boxes belong to no block, so a store that will sync from
+    // height 1 has to be given them before the first block is applied — otherwise height 1's
+    // spend of the emission box, and later spends of the other two, look like missing inputs.
+    // Skipped for a store that already indexed something (it either seeded already or was
+    // seeded partial from a later height).
+    loop {
+        if shutdown.is_cancelled() {
+            return Ok(());
+        }
+        let empty = match store.indexed_height() {
+            Ok(v) => v.is_none(),
+            Err(e) => halt_store!(None, e),
+        };
+        let seeded = match store.genesis_seeded() {
+            Ok(v) => v,
+            Err(e) => halt_store!(None, e),
+        };
+        if !empty || seeded {
+            break;
+        }
+        let json = match source.genesis_boxes_json().await {
+            Ok(j) => j,
+            Err(e) => {
+                warn!(source = %source_name, error = %e, "genesis box fetch failed; retrying");
+                retry!(None);
+            }
+        };
+        let s = store.clone();
+        let out = tokio::task::spawn_blocking(move || -> Result<usize, ApplyErr> {
+            let boxes = xp_wire::decode_genesis_boxes(&json)
+                .map_err(|e| ApplyErr::Decode(e.to_string()))?;
+            s.seed_genesis(&boxes).map_err(ApplyErr::Store)?;
+            Ok(boxes.len())
+        })
+        .await;
+        match out {
+            Ok(Ok(n)) => info!(boxes = n, "seeded chain-spec genesis boxes"),
+            Ok(Err(ApplyErr::Store(e))) => halt_store!(None, e),
+            Ok(Err(ApplyErr::Decode(e))) => halt!(None, format!("undecodable genesis boxes: {e}")),
+            Err(join) => halt!(None, join.to_string()),
+        }
+        break;
+    }
+
     loop {
         if shutdown.is_cancelled() {
             return Ok(());

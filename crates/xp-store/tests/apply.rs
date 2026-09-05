@@ -174,3 +174,36 @@ fn spends_a_box_across_blocks_and_updates_all_indexes() {
     let next_box = u64::from_be_bytes(next_box_bytes.value().try_into().unwrap());
     assert_eq!(next_box, total_outputs);
 }
+
+#[test]
+fn missing_input_at_height_one_is_corruption_on_a_non_partial_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(&dir.path().join("x.redb")).unwrap();
+    let boxes = xp_wire::decode_genesis_boxes(
+        &std::fs::read_to_string(format!(
+            "{}/../../tests/fixtures/genesis.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    s.seed_genesis(&boxes).unwrap();
+
+    // A synthetic height-1 block whose only tx spends a box nobody ever created. Once the
+    // real genesis boxes are seeded there is no reason left for height 1 to tolerate an
+    // unknown input, so this must be corruption rather than a silently skipped input.
+    let mut b = fixture(1866000);
+    b.header.height = 1;
+    b.header.parent_id = xp_types::HeaderId([0u8; 32]);
+    let mut tx = b.txs[0].clone();
+    tx.inputs = vec![xp_types::BoxId([0x5Au8; 32])];
+    tx.outputs = vec![];
+    b.txs = vec![tx];
+
+    let err = s.apply_batch(&[b], true).unwrap_err();
+    assert!(
+        matches!(err, xp_store::StoreError::Corrupt("input box missing")),
+        "unexpected error: {err}"
+    );
+    assert_eq!(s.indexed_height().unwrap(), None); // txn rolled back
+}

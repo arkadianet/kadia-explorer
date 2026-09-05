@@ -3,6 +3,7 @@ pub use tree::{template_hash_of, tree_hash, tree_info, TreeInfo, TreeKind};
 
 use ergo_lib::chain::block::FullBlock;
 use ergo_lib::ergo_chain_types::Digest32;
+use ergo_lib::ergotree_ir::chain::ergo_box::ErgoBox;
 use ergo_lib::ergotree_ir::serialization::SigmaSerializable;
 use xp_types::{BoxId, Hash32, HeaderId, TreeHash, TxId};
 
@@ -172,6 +173,50 @@ pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
         .and_then(|s| s.as_u64())
         .ok_or(WireError::MissingField("size"))? as u32;
     Ok(DecodedBlock { header, txs, size })
+}
+
+/// Decodes the chain-spec genesis boxes as served by a node's `GET /utxo/genesis`: a JSON
+/// array of `ErgoBox` objects. These boxes are created by the chain spec rather than by any
+/// block, so they never appear in block data and must be seeded into a store separately —
+/// otherwise the first block that spends one looks like a missing input.
+///
+/// The resulting [`DecodedBox`]es follow exactly the same rules `decode_block` applies to a
+/// transaction's outputs, except that `tx_id` and `index` come from the JSON (all-zero tx id,
+/// index 0 for each) instead of from an enclosing transaction.
+pub fn decode_genesis_boxes(json: &str) -> Result<Vec<DecodedBox>, WireError> {
+    let raw: Vec<ErgoBox> = serde_json::from_str(json)?;
+    let mut out = Vec::with_capacity(raw.len());
+    for b in &raw {
+        let bytes = b
+            .sigma_serialize_bytes()
+            .map_err(|e| WireError::Ser(e.to_string()))?;
+        let tree_bytes = b
+            .ergo_tree
+            .sigma_serialize_bytes()
+            .map_err(|e| WireError::Ser(e.to_string()))?;
+        let tokens = b
+            .tokens
+            .as_ref()
+            .map(|ts| {
+                ts.iter()
+                    .map(|t| (token_id_to_hash32(t.token_id), *t.amount.as_u64()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(DecodedBox {
+            id: BoxId(box_id_to_hash32(b.box_id())),
+            value: *b.value.as_u64(),
+            tree_hash: tree_hash(&tree_bytes),
+            tree_bytes,
+            creation_height: b.creation_height,
+            tx_id: TxId(b.transaction_id.0 .0),
+            index: b.index,
+            tokens,
+            registers_json: serde_json::to_string(&b.additional_registers)?,
+            size: bytes.len() as u32,
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

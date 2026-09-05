@@ -17,6 +17,10 @@ pub trait BlockSource: Send + Sync {
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError>;
     /// The raw block JSON body for header `id`, or `None` if the source doesn't have it.
     async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError>;
+    /// The raw JSON array of the chain-spec genesis boxes (`/utxo/genesis`). These boxes are
+    /// created by the chain spec rather than by any block, so they are the one piece of
+    /// indexable state that cannot be reached through the block endpoints.
+    async fn genesis_boxes_json(&self) -> Result<String, SourceError>;
 }
 
 #[derive(Debug, thiserror::Error)]

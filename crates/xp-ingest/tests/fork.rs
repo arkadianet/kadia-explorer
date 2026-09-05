@@ -129,6 +129,9 @@ impl BlockSource for FakeSource {
             .find(|b| &b.1 == id)
             .map(|b| b.2.clone()))
     }
+    async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
+        Ok("[]".into())
+    }
 }
 
 /// A source that can never answer anything: every call is a transient failure. Used to observe
@@ -149,6 +152,9 @@ impl BlockSource for DeadSource {
     async fn full_block_json(&self, _id: &Hash32) -> Result<Option<String>, SourceError> {
         Err(SourceError::Unavailable)
     }
+    async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
+        Ok("[]".into())
+    }
 }
 
 /// A source that reports a tip but cannot serve anything else, so ingest gets as far as the
@@ -168,6 +174,9 @@ impl BlockSource for TipOnlySource {
     }
     async fn full_block_json(&self, _id: &Hash32) -> Result<Option<String>, SourceError> {
         Err(SourceError::Unavailable)
+    }
+    async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
+        Ok("[]".into())
     }
 }
 

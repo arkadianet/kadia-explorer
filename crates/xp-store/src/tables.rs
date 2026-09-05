@@ -40,11 +40,15 @@ pub const META_INDEXED_HEIGHT: &[u8] = b"indexed_height";
 pub const META_NEXT_BOX_GIDX: &[u8] = b"next_box_gidx";
 pub const META_NEXT_TX_GIDX: &[u8] = b"next_tx_gidx";
 pub const META_SCHEMA: &[u8] = b"schema_version";
+/// Set to `[1]` once the chain-spec genesis boxes have been written into the store by
+/// `Store::seed_genesis`. Distinct from `META_INDEXED_HEIGHT`: genesis boxes belong to no
+/// block, so seeding them leaves the store's indexed height untouched (still `None`).
+pub const META_GENESIS_SEEDED: &[u8] = b"genesis_seeded";
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Present only on a store that began indexing later than chain genesis (written by
 /// `Store::seed_for_tests` in tests; a real full sync from height 1 never sets it). Its
-/// value is the height the store was seeded at. When set, `apply_batch` additionally
-/// tolerates missing input boxes for the first block applied after the seed point, the
-/// same way height 1 tolerates the chain-spec genesis boxes.
+/// value is the height the store was seeded at. When set, `apply_batch` tolerates missing
+/// input boxes, since boxes created before the seed point were never indexed. It is the only
+/// such tolerance: a store synced from height 1 seeds the chain-spec genesis boxes instead.
 pub const META_PARTIAL_FROM: &[u8] = b"partial_from";

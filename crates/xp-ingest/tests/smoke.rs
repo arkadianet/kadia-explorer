@@ -13,7 +13,7 @@ use xp_store::Store;
 use xp_types::Hash32;
 
 const NODE: &str = "http://127.0.0.1:9063";
-const TARGET: u32 = 2000;
+const TARGET: u32 = 6000;
 
 /// A real node, but pretending the chain ends at `cap`, so the run terminates at a known
 /// height instead of chasing the live tip.
@@ -38,6 +38,9 @@ impl BlockSource for Capped {
     }
     async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError> {
         self.inner.full_block_json(id).await
+    }
+    async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
+        self.inner.genesis_boxes_json().await
     }
 }
 
@@ -86,8 +89,10 @@ async fn smoke_local_node() {
     handle.await.unwrap().unwrap();
 
     assert_eq!(store.indexed_height().unwrap(), Some(TARGET));
-    // Height 1 spends chain-spec genesis boxes the store never saw; applying it at all proves
-    // that path did not error.
+    // Height 1 spends a chain-spec genesis box, and later heights within this range spend the
+    // other two; reaching TARGET at all proves genesis seeding put them in the store, since
+    // apply_batch no longer tolerates a missing input anywhere.
+    assert!(store.genesis_seeded().unwrap());
     assert!(store.header_id_at(1).unwrap().is_some());
     println!(
         "smoke: {TARGET} blocks in {:.2}s = {:.0} blocks/s",
