@@ -79,6 +79,15 @@ configurable). A `PublicPool` source round-robins over a list with per-host
 rate limiting and quarantines hosts on error or on a header id that
 disagrees with the majority.
 
+**Bootstrap source (optional).** `LocalNodeDb` implements `BlockSource` over a
+*copy* of a Rust node's `state.redb`, reading full block bodies from its block
+sections table with no HTTP. Constraints: the node's live file is never
+opened (redb takes an exclusive lock and a live copy is inconsistent); the
+copy is taken with the node stopped or from a filesystem snapshot. The crate
+(`xp-source-nodedb`) is the only place that knows the node's on-disk layout
+and is not linked into the runtime binary. Build it only if a benchmark shows
+loopback REST fetch, not apply, is the sync bottleneck.
+
 **Pipeline.** Ingest produces `BlockBatch { blocks: Vec<FullBlock>, from: u32 }`
 into a bounded channel (depth 8). During initial sync a batch is up to 64
 blocks fetched with concurrency 8; at tip a batch is one block.
