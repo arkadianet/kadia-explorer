@@ -17,10 +17,11 @@ pub fn tree_hash(tree_bytes: &[u8]) -> TreeHash {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TreeKind {
-    P2pk,
-    P2s,
-    Other,
+    P2pk = 0,
+    P2s = 1,
+    Other = 2,
 }
 
 #[derive(Debug, Clone)]

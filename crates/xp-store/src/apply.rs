@@ -45,7 +45,8 @@ impl Store {
             let meta = txn.open_table(META)?;
             let h = meta
                 .get(META_INDEXED_HEIGHT)?
-                .map(|v| u32::from_be_bytes(v.value().try_into().unwrap()));
+                .map(|v| crate::meta_u32(v.value()))
+                .transpose()?;
             match h {
                 Some(h) => {
                     let headers = txn.open_table(HEADERS)?;
@@ -63,10 +64,10 @@ impl Store {
         let (mut next_box, mut next_tx) = {
             let meta = txn.open_table(META)?;
             let rd = |k: &[u8]| -> Result<Gidx, StoreError> {
-                Ok(meta
-                    .get(k)?
-                    .map(|v| u64::from_be_bytes(v.value().try_into().unwrap()))
-                    .unwrap_or(0))
+                meta.get(k)?
+                    .map(|v| crate::meta_u64(v.value()))
+                    .transpose()
+                    .map(|v| v.unwrap_or(0))
             };
             (rd(META_NEXT_BOX_GIDX)?, rd(META_NEXT_TX_GIDX)?)
         };
@@ -104,6 +105,7 @@ impl Store {
                     created_boxes: vec![],
                     spent_boxes: vec![],
                     tx_ids: vec![],
+                    tree_txs: vec![],
                     prev_balances: vec![],
                     prev_next_box_gidx: next_box,
                     prev_next_tx_gidx: next_tx,
@@ -188,9 +190,8 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
                 .remove(k_rent(maturity_height(row.creation_height), row.gidx).as_slice())?;
 
             let bal = load_balance(&tree_balance, &mut touched_balances, &row.tree_hash)?;
-            bal.nano = bal.nano.saturating_sub(row.value);
-            bal.box_count = bal.box_count.saturating_sub(1);
-            sub_tokens(&mut bal.tokens, &row.tokens);
+            debit_balance(bal, row.value, ctx.partial)?;
+            sub_tokens(&mut bal.tokens, &row.tokens, ctx.partial)?;
             bal.last_seen = ctx.height;
 
             trees_in_tx.push(row.tree_hash);
@@ -205,11 +206,21 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             value_out += o.value;
 
             if ergo_trees.get(o.tree_hash.0.as_slice())?.is_none() {
-                let info = tree_info(&o.tree_bytes).unwrap_or_else(|_| xp_wire::TreeInfo {
-                    template_hash: [0; 32],
-                    address: hex::encode(&o.tree_bytes),
-                    kind: xp_wire::TreeKind::Other,
-                });
+                let info = match tree_info(&o.tree_bytes) {
+                    Ok(info) => info,
+                    Err(_) => {
+                        tracing::warn!(
+                            tree = %hex::encode(o.tree_hash.0),
+                            height = ctx.height,
+                            "ergo tree failed to parse; storing fallback TreeRow"
+                        );
+                        xp_wire::TreeInfo {
+                            template_hash: [0; 32],
+                            address: hex::encode(&o.tree_bytes),
+                            kind: xp_wire::TreeKind::Other,
+                        }
+                    }
+                };
                 ergo_trees.insert(
                     o.tree_hash.0.as_slice(),
                     TreeRow {
@@ -270,6 +281,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         trees_in_tx.dedup();
         for t in trees_in_tx {
             tree_txs.insert(k_hash_gidx(&t, tx_gidx).as_slice(), &[][..])?;
+            ctx.undo.tree_txs.push((t, tx_gidx));
         }
 
         let txrow = TxRow {
@@ -364,6 +376,28 @@ fn load_balance<'a>(
     Ok(cache.get_mut(tree).unwrap())
 }
 
+/// Debits a box's value and box count from a tree's balance. On a fully-synced (non-partial)
+/// store an underflow means the store's own bookkeeping is wrong, so it errors; a partial
+/// store can legitimately see it (an earlier box for this tree predates the seed point), so
+/// it saturates instead.
+fn debit_balance(bal: &mut BalanceRow, value: u64, partial: bool) -> Result<(), StoreError> {
+    bal.nano = if partial {
+        bal.nano.saturating_sub(value)
+    } else {
+        bal.nano
+            .checked_sub(value)
+            .ok_or(StoreError::Corrupt("balance underflow"))?
+    };
+    bal.box_count = if partial {
+        bal.box_count.saturating_sub(1)
+    } else {
+        bal.box_count
+            .checked_sub(1)
+            .ok_or(StoreError::Corrupt("box_count underflow"))?
+    };
+    Ok(())
+}
+
 fn add_tokens(bal: &mut Vec<(Hash32, u64)>, add: &[(Hash32, u64)]) {
     for (id, amt) in add {
         match bal.iter_mut().find(|(i, _)| i == id) {
@@ -373,13 +407,31 @@ fn add_tokens(bal: &mut Vec<(Hash32, u64)>, add: &[(Hash32, u64)]) {
     }
 }
 
-fn sub_tokens(bal: &mut Vec<(Hash32, u64)>, sub: &[(Hash32, u64)]) {
+/// Same underflow policy as [`debit_balance`]: a partial store saturates (and drops the
+/// token entirely if it wasn't held), a fully-synced store treats either case as corruption.
+fn sub_tokens(
+    bal: &mut Vec<(Hash32, u64)>,
+    sub: &[(Hash32, u64)],
+    partial: bool,
+) -> Result<(), StoreError> {
     for (id, amt) in sub {
-        if let Some(pos) = bal.iter().position(|(i, _)| i == id) {
-            bal[pos].1 = bal[pos].1.saturating_sub(*amt);
-            if bal[pos].1 == 0 {
-                bal.swap_remove(pos);
+        match bal.iter().position(|(i, _)| i == id) {
+            Some(pos) => {
+                bal[pos].1 = if partial {
+                    bal[pos].1.saturating_sub(*amt)
+                } else {
+                    bal[pos]
+                        .1
+                        .checked_sub(*amt)
+                        .ok_or(StoreError::Corrupt("token balance underflow"))?
+                };
+                if bal[pos].1 == 0 {
+                    bal.swap_remove(pos);
+                }
             }
+            None if partial => {}
+            None => return Err(StoreError::Corrupt("token balance underflow")),
         }
     }
+    Ok(())
 }

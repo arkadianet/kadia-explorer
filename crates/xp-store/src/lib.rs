@@ -15,6 +15,25 @@ use xp_types::Hash32;
 /// deep a chain fork can be rolled back before a full reindex is required.
 pub const ROLLBACK_WINDOW: u32 = 1_000;
 
+/// Decodes a big-endian `u32` from an exactly-4-byte slice (a stored meta counter or a key's
+/// height component), failing with [`StoreError::Corrupt`] instead of panicking on a
+/// wrong-width value.
+pub(crate) fn meta_u32(b: &[u8]) -> Result<u32, StoreError> {
+    Ok(u32::from_be_bytes(
+        b.try_into()
+            .map_err(|_| StoreError::Corrupt("bad meta width"))?,
+    ))
+}
+
+/// Decodes a big-endian `u64` from an exactly-8-byte slice (a stored meta counter), failing
+/// with [`StoreError::Corrupt`] instead of panicking on a wrong-width value.
+pub(crate) fn meta_u64(b: &[u8]) -> Result<u64, StoreError> {
+    Ok(u64::from_be_bytes(
+        b.try_into()
+            .map_err(|_| StoreError::Corrupt("bad meta width"))?,
+    ))
+}
+
 pub struct Store {
     db: Database,
 }
@@ -33,7 +52,8 @@ impl Store {
             let mut meta = txn.open_table(META)?;
             let existing = meta
                 .get(META_SCHEMA)?
-                .map(|v| u32::from_be_bytes(v.value().try_into().unwrap()));
+                .map(|v| meta_u32(v.value()))
+                .transpose()?;
             match existing {
                 None => {
                     meta.insert(META_SCHEMA, keys::k_u32(SCHEMA_VERSION).as_slice())?;
@@ -50,9 +70,9 @@ impl Store {
     pub fn indexed_height(&self) -> Result<Option<u32>, StoreError> {
         let txn = self.db.begin_read()?;
         let meta = txn.open_table(META)?;
-        Ok(meta
-            .get(META_INDEXED_HEIGHT)?
-            .map(|v| u32::from_be_bytes(v.value().try_into().unwrap())))
+        meta.get(META_INDEXED_HEIGHT)?
+            .map(|v| meta_u32(v.value()))
+            .transpose()
     }
 
     pub fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, StoreError> {

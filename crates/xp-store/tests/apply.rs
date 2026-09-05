@@ -83,3 +83,94 @@ fn missing_input_on_a_non_partial_store_is_corruption() {
     ));
     assert_eq!(s.indexed_height().unwrap(), Some(1865999)); // txn rolled back
 }
+
+#[test]
+fn spends_a_box_across_blocks_and_updates_all_indexes() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    let b0 = fixture(1866000);
+    let b1 = fixture(1866001);
+
+    // Box created by block 1866000's tx 0 output 0 is spent by block 1866001's tx 0 — the
+    // emission-box chain, which guarantees a cross-block spend exists in every pair of
+    // consecutive blocks.
+    let spent_box = b0.txs[0].outputs[0].clone();
+    let spending_tx = b1.txs[0].clone();
+    assert_eq!(spending_tx.inputs[0], spent_box.id);
+
+    s.apply_batch(std::slice::from_ref(&b0), true).unwrap();
+    let bal_before = xp_store::Reader::new(&s)
+        .unwrap()
+        .balance(&spent_box.tree_hash.0)
+        .unwrap()
+        .expect("tree balance after block 1866000");
+
+    s.apply_batch(std::slice::from_ref(&b1), true).unwrap();
+
+    let rd = xp_store::Reader::new(&s).unwrap();
+    let row = rd
+        .box_by_id(&spent_box.id.0)
+        .unwrap()
+        .expect("spent box still indexed");
+    assert_eq!(row.spent, Some((spending_tx.id.0, 1866001)));
+
+    let txn = s.begin_read().unwrap();
+    let tree_unspent = txn.open_table(xp_store::tables::TREE_UNSPENT).unwrap();
+    let tree_boxes = txn.open_table(xp_store::tables::TREE_BOXES).unwrap();
+    let rent_matures = txn.open_table(xp_store::tables::RENT_MATURES).unwrap();
+    let ku = xp_store::keys::k_hash_gidx(&spent_box.tree_hash.0, row.gidx);
+    assert!(
+        tree_unspent.get(ku.as_slice()).unwrap().is_none(),
+        "TREE_UNSPENT key must be removed once the box is spent"
+    );
+    assert!(
+        tree_boxes.get(ku.as_slice()).unwrap().is_some(),
+        "TREE_BOXES key must remain (it indexes all boxes, not just unspent ones)"
+    );
+    let kr = xp_store::keys::k_rent(
+        xp_types::rent::maturity_height(spent_box.creation_height),
+        row.gidx,
+    );
+    assert!(
+        rent_matures.get(kr.as_slice()).unwrap().is_none(),
+        "RENT_MATURES key must be removed once the box is spent"
+    );
+
+    // Net effect of the spending tx on the tree's balance: it loses `spent_box.value` and
+    // regains whatever of that same tx's own outputs land back on the same tree (the emission
+    // chain re-credits itself a fresh box, minus the amount routed elsewhere).
+    let credited: u64 = spending_tx
+        .outputs
+        .iter()
+        .filter(|o| o.tree_hash == spent_box.tree_hash)
+        .map(|o| o.value)
+        .sum();
+    let bal_after = rd
+        .balance(&spent_box.tree_hash.0)
+        .unwrap()
+        .expect("tree balance after block 1866001");
+    assert_eq!(bal_after.nano, bal_before.nano - spent_box.value + credited);
+
+    // UNDO recorded for both applied heights.
+    let undo = txn.open_table(xp_store::tables::UNDO).unwrap();
+    assert!(undo
+        .get(xp_store::keys::k_u32(1866000).as_slice())
+        .unwrap()
+        .is_some());
+    assert!(undo
+        .get(xp_store::keys::k_u32(1866001).as_slice())
+        .unwrap()
+        .is_some());
+
+    // META next_box_gidx equals the total output count of both blocks (seeded store starts
+    // its gidx counters at 0).
+    let total_outputs: u64 = b0.txs.iter().map(|t| t.outputs.len() as u64).sum::<u64>()
+        + b1.txs.iter().map(|t| t.outputs.len() as u64).sum::<u64>();
+    let meta = txn.open_table(xp_store::tables::META).unwrap();
+    let next_box_bytes = meta
+        .get(xp_store::tables::META_NEXT_BOX_GIDX)
+        .unwrap()
+        .unwrap();
+    let next_box = u64::from_be_bytes(next_box_bytes.value().try_into().unwrap());
+    assert_eq!(next_box, total_outputs);
+}

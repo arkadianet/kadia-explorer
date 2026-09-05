@@ -54,7 +54,7 @@ impl Reader {
             }
             let (k, v) = item?;
             let key = k.value();
-            let height = u32::from_be_bytes(key[..4].try_into().unwrap());
+            let height = crate::meta_u32(&key[..4])?;
             let id: Hash32 = v
                 .value()
                 .try_into()

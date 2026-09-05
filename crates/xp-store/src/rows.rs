@@ -392,6 +392,9 @@ pub struct UndoRow {
     pub created_boxes: Vec<Hash32>,
     pub spent_boxes: Vec<Hash32>,
     pub tx_ids: Vec<Hash32>,
+    /// `(tree_hash, tx_gidx)` pairs inserted into `TREE_TXS` by this block, so rollback can
+    /// remove exactly the keys this block added.
+    pub tree_txs: Vec<(Hash32, Gidx)>,
     pub prev_balances: Vec<(Hash32, Option<BalanceRow>)>,
     pub prev_next_box_gidx: Gidx,
     pub prev_next_tx_gidx: Gidx,
@@ -404,6 +407,7 @@ impl UndoRow {
         w.hash_vec(&self.created_boxes);
         w.hash_vec(&self.spent_boxes);
         w.hash_vec(&self.tx_ids);
+        w.token_vec(&self.tree_txs);
         w.u32(self.prev_balances.len() as u32);
         for (tree, bal) in &self.prev_balances {
             w.hash(tree);
@@ -423,6 +427,7 @@ impl UndoRow {
         let created_boxes = r.hash_vec()?;
         let spent_boxes = r.hash_vec()?;
         let tx_ids = r.hash_vec()?;
+        let tree_txs = r.token_vec()?;
         let n = r.u32()? as usize;
         let mut prev_balances = Vec::with_capacity(n.min(1024));
         for _ in 0..n {
@@ -441,6 +446,7 @@ impl UndoRow {
             created_boxes,
             spent_boxes,
             tx_ids,
+            tree_txs,
             prev_balances,
             prev_next_box_gidx,
             prev_next_tx_gidx,
@@ -500,6 +506,7 @@ mod tests {
             created_boxes: vec![[1; 32]],
             spent_boxes: vec![[2; 32], [3; 32]],
             tx_ids: vec![[4; 32]],
+            tree_txs: vec![([9; 32], 42), ([10; 32], 43)],
             prev_balances: vec![
                 ([5; 32], None),
                 (
@@ -630,6 +637,7 @@ mod tests {
             created_boxes: vec![[1; 32]],
             spent_boxes: vec![[2; 32]],
             tx_ids: vec![[3; 32]],
+            tree_txs: vec![([9; 32], 8)],
             prev_balances: vec![(
                 [4; 32],
                 Some(BalanceRow {
