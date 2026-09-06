@@ -124,12 +124,23 @@ impl BlockSource for RustNode {
             .await
             .map_err(Self::map_reqwest_err)?;
         if !resp.status().is_success() {
-            // Only a node without the endpoint falls back; a 5xx from a node that has it
-            // would too, and then gets the same first-id behaviour it had before.
+            // Only "this node does not have that endpoint" falls back. Anything else — a 503
+            // from a node that does have it, say — is a transient failure the caller retries,
+            // because quietly degrading to `/blocks/at`'s first id is exactly the orphan bug.
+            let status = resp.status();
+            let absent = matches!(
+                status,
+                reqwest::StatusCode::NOT_FOUND
+                    | reqwest::StatusCode::METHOD_NOT_ALLOWED
+                    | reqwest::StatusCode::NOT_IMPLEMENTED
+            );
+            if !absent {
+                return Err(SourceError::Http(format!("GET {url}: status {status}")));
+            }
             NO_CHAIN_SLICE_WARNED.call_once(|| {
                 tracing::warn!(
                     node = %self.base,
-                    status = %resp.status(),
+                    %status,
                     "node has no /blocks/chainSlice; falling back to /blocks/at, which cannot \
                      distinguish an orphan from the best-chain header at a height"
                 );

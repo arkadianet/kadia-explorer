@@ -4,7 +4,7 @@
 //! the recovery — the fork check rolling the orphan back once the source names the best-chain
 //! header, and a parent mismatch that persists becoming *visible* as a published stall.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
@@ -79,8 +79,17 @@ struct OrphanSource {
     offer_next: bool,
     /// How many times the height *below* the orphan has been asked about. Nothing asks for it
     /// once it is indexed unless the fork check walks back below our tip, so it is the visible
-    /// trace of that walk-back.
+    /// trace of that walk-back — and, with `offer_next`, the trigger for the blackout below.
     asked_below: AtomicU32,
+    /// Set once ingest has asked for the successor's body, i.e. once the parent mismatch is
+    /// under way. From then on, an ask for the height below the orphan can only be the fork
+    /// check walking below our tip.
+    wedged: AtomicBool,
+    /// Set when that walk-back happens: past it the source stops announcing the orphan's
+    /// height at all, so the rollback is followed by no successful apply. That is what makes
+    /// "the stall survived the rollback" observable rather than a race against the orphan
+    /// being re-applied (which would clear the stall legitimately, as progress).
+    blackout: AtomicBool,
 }
 
 impl OrphanSource {
@@ -93,6 +102,8 @@ impl OrphanSource {
             orphan_wins: Mutex::new(true),
             offer_next,
             asked_below: AtomicU32::new(0),
+            wedged: AtomicBool::new(false),
+            blackout: AtomicBool::new(false),
         }
     }
     fn asked_below(&self) -> u32 {
@@ -115,9 +126,15 @@ impl BlockSource for OrphanSource {
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError> {
         if height == 1866000 {
             self.asked_below.fetch_add(1, Ordering::Relaxed);
+            if self.offer_next && self.wedged.load(Ordering::Relaxed) {
+                self.blackout.store(true, Ordering::Relaxed);
+            }
         }
         if *self.orphan_wins.lock().unwrap() {
             if height == 1866001 {
+                if self.blackout.load(Ordering::Relaxed) {
+                    return Ok(None);
+                }
                 return Ok(Some(self.orphan.1));
             }
             if height == 1866002 && !self.offer_next {
@@ -127,6 +144,9 @@ impl BlockSource for OrphanSource {
         Ok(self.best.iter().find(|b| b.0 == height).map(|b| b.1))
     }
     async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError> {
+        if id == &id_at(&self.best, 1866002) {
+            self.wedged.store(true, Ordering::Relaxed);
+        }
         if id == &self.orphan.1 {
             return Ok(Some(self.orphan.2.clone()));
         }
@@ -291,6 +311,7 @@ async fn persistent_parent_mismatch_publishes_a_stall_and_then_recovers() {
     // hold there — and so never looks lower. A stalled parent check must make it distrust the
     // tip and walk back regardless, which is what asking about 1866000 again proves.
     let before = source.asked_below();
+    let since_before = rx.borrow().stalled.clone().unwrap().since_secs;
     {
         let src = source.clone();
         wait_for(
@@ -298,6 +319,40 @@ async fn persistent_parent_mismatch_publishes_a_stall_and_then_recovers() {
             30,
             "the fork check to walk below our tip",
             move || src.asked_below() > before,
+        )
+        .await;
+    }
+
+    // The rollback that walk-back triggers is an *attempt* to clear the wedge, not the end of
+    // it: nothing has applied yet. So the stall must survive it, still naming the same height
+    // and still counting from when the wedge started. Clearing it on rollback (as a
+    // missing-body stall is cleared) would drop it here for good — after the walk-back the
+    // source stops announcing 1866001, so no further mismatch can re-raise it.
+    {
+        let rx2 = rx.clone();
+        wait_for(
+            &mut rx,
+            40,
+            "the stall to keep ageing across the rollback",
+            move || {
+                let s = rx2.borrow();
+                let stalled = s
+                    .stalled
+                    .clone()
+                    .expect("the stall must survive the rollback");
+                assert_eq!(stalled.height, 1866002, "the stall must not change height");
+                assert!(
+                    stalled.reason.contains("parent mismatch"),
+                    "the stall must keep its cause, got {:?}",
+                    stalled.reason
+                );
+                assert!(
+                    stalled.since_secs >= since_before,
+                    "since_secs went backwards: {since_before} then {}",
+                    stalled.since_secs
+                );
+                stalled.since_secs > since_before
+            },
         )
         .await;
     }

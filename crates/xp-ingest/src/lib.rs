@@ -71,7 +71,8 @@ pub struct IngestStatus {
 /// Why, where and for how long ingest has been stuck. Published on [`IngestStatus::stalled`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StalledInfo {
-    /// The first height of the wanted range — the one whose body the source will not serve.
+    /// The height ingest cannot get past: the one whose body the source will not serve, or
+    /// the one whose parent check keeps failing.
     pub height: u32,
     /// Seconds since the stall started (since the first failed attempt at `height`).
     pub since_secs: u64,
@@ -92,6 +93,18 @@ pub const STALL_BACKOFF: Duration = Duration::from_secs(5);
 /// How often a persisting stall is re-logged. The start is always logged.
 const STALL_WARN_EVERY: Duration = Duration::from_secs(60);
 
+/// What put ingest in a stall. Not published — [`StalledInfo::reason`] is what a UI shows —
+/// but the run loop has to tell the two apart: a stall raised by a persistent parent mismatch
+/// outlives the rollback taken to clear it, while a missing-body stall is about a height the
+/// rollback moved away from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StallOrigin {
+    /// The source announced a header at the height but would not serve its body.
+    MissingBody,
+    /// The same height failed its parent check [`PARENT_MISMATCH_LIMIT`] times over.
+    ParentMismatch,
+}
+
 /// Live stall bookkeeping. [`StalledInfo`] is derived from it on every publish so `since_secs`
 /// keeps counting up while nothing else changes.
 struct Stall {
@@ -99,6 +112,7 @@ struct Stall {
     since: Instant,
     last_warn: Instant,
     reason: String,
+    origin: StallOrigin,
 }
 
 impl Stall {
@@ -107,6 +121,39 @@ impl Stall {
             height: self.height,
             since_secs: self.since.elapsed().as_secs(),
             reason: self.reason.clone(),
+        }
+    }
+}
+
+/// Records that ingest is stuck at `height` for `reason`, starting a stall or refreshing the
+/// one already running. Both stall sites go through here so that "start, keep `since` ticking,
+/// re-warn at most every [`STALL_WARN_EVERY`]" has exactly one implementation.
+///
+/// A stall at a different height, or from a different `origin`, replaces the current one:
+/// `since_secs` measures how long *this* wedge has lasted, not how long ingest has been
+/// unhappy in general.
+fn note_stall(stall: &mut Option<Stall>, height: u32, origin: StallOrigin, reason: String) {
+    match stall {
+        Some(st) if st.height == height && st.origin == origin => {
+            if st.last_warn.elapsed() >= STALL_WARN_EVERY {
+                st.last_warn = Instant::now();
+                warn!(
+                    height,
+                    stalled_secs = st.since.elapsed().as_secs(),
+                    "ingest still stalled: {reason}"
+                );
+            }
+        }
+        _ => {
+            warn!(height, "ingest stalled: {reason}");
+            let now = Instant::now();
+            *stall = Some(Stall {
+                height,
+                since: now,
+                last_warn: now,
+                reason,
+                origin,
+            });
         }
     }
 }
@@ -330,10 +377,19 @@ pub async fn run(
                 }
                 indexed = h;
                 cur = Some(indexed);
-                // The wanted range moved; any stall was about a height we are no longer at.
-                stall = None;
+                // The wanted range moved, so a stall about a body the source would not serve
+                // is about a height we are no longer at. A parent-mismatch stall is not: this
+                // rollback is the *attempt* to clear it, and until a batch actually applies
+                // the wedge is still on. Dropping it here would restart `since_secs` on every
+                // rollback→re-apply cycle and silence the re-warn cadence.
+                if matches!(
+                    stall.as_ref().map(|s| s.origin),
+                    None | Some(StallOrigin::MissingBody)
+                ) {
+                    stall = None;
+                }
                 parent_mismatch = None;
-                publish(cur, best, mode, None, None);
+                publish(cur, best, mode, None, stall.as_ref().map(Stall::info));
             }
         }
 
@@ -378,28 +434,7 @@ pub async fn run(
                 let reason = format!(
                     "source {source_name} announced a header at height {height} but serves no block body"
                 );
-                match &mut stall {
-                    Some(st) if st.height == height => {
-                        if st.last_warn.elapsed() >= STALL_WARN_EVERY {
-                            st.last_warn = Instant::now();
-                            warn!(
-                                height,
-                                stalled_secs = st.since.elapsed().as_secs(),
-                                "ingest still stalled: {reason}"
-                            );
-                        }
-                    }
-                    _ => {
-                        warn!(height, "ingest stalled: {reason}");
-                        let now = Instant::now();
-                        stall = Some(Stall {
-                            height,
-                            since: now,
-                            last_warn: now,
-                            reason,
-                        });
-                    }
-                }
+                note_stall(&mut stall, height, StallOrigin::MissingBody, reason);
             }
             retry!(cur);
         }
@@ -451,38 +486,20 @@ pub async fn run(
                 debug!(height, %have, %want, "parent mismatch; re-checking fork");
                 let times = match parent_mismatch {
                     Some((h, n)) if h == height => n + 1,
-                    // The failing height moved, so any stall we raised described the old one.
-                    Some(_) => {
-                        stall = None;
-                        1
-                    }
-                    None => 1,
+                    // The failing height moved: only the counter restarts. A stall of some
+                    // other origin (a body the source withheld) is still true, and a
+                    // mismatch stall for the old height is replaced by `note_stall` below
+                    // once this run reaches the limit — not silently dropped in between.
+                    _ => 1,
                 };
                 parent_mismatch = Some((height, times));
                 if times >= PARENT_MISMATCH_LIMIT {
-                    let reason = "parent mismatch persists (orphan sibling applied?)".to_owned();
-                    match &mut stall {
-                        Some(st) if st.height == height => {
-                            if st.last_warn.elapsed() >= STALL_WARN_EVERY {
-                                st.last_warn = Instant::now();
-                                warn!(
-                                    height,
-                                    stalled_secs = st.since.elapsed().as_secs(),
-                                    "ingest still stalled: {reason}"
-                                );
-                            }
-                        }
-                        _ => {
-                            warn!(height, %have, %want, "ingest stalled: {reason}");
-                            let now = Instant::now();
-                            stall = Some(Stall {
-                                height,
-                                since: now,
-                                last_warn: now,
-                                reason,
-                            });
-                        }
-                    }
+                    note_stall(
+                        &mut stall,
+                        height,
+                        StallOrigin::ParentMismatch,
+                        "parent mismatch persists (orphan sibling applied?)".to_owned(),
+                    );
                 }
                 retry!(cur);
             }
@@ -506,13 +523,20 @@ enum ApplyErr {
 /// With `distrust_tip`, the comparison starts one height *below* the store's tip, so the
 /// answer is never [`ForkCheck::Agreed`] and at least one block is always rolled back. The
 /// caller uses it when the tip is the suspect: nothing the source says about that height can
-/// clear it, because agreeing there is exactly what leaves ingest wedged.
+/// clear it, because agreeing there is exactly what leaves ingest wedged. Below height 2 there
+/// is nothing to walk back to, so it yields [`ForkCheck::Wait`].
 async fn fork_check(
     store: &Arc<Store>,
     source: &Arc<dyn BlockSource>,
     indexed: u32,
     distrust_tip: bool,
 ) -> ForkCheck {
+    if distrust_tip && indexed <= 1 {
+        // There is no height below 1 to fall back to — height 0 is not a block we hold, so
+        // walking there would read as a fork past the window and halt. Wait instead: a chain
+        // this short cannot have the deep orphan problem `distrust_tip` exists for.
+        return ForkCheck::Wait;
+    }
     if indexed == 0 {
         return ForkCheck::Agreed;
     }

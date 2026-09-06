@@ -47,7 +47,11 @@ async fn chain_slice(
     axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>,
 ) -> Json<Vec<serde_json::Value>> {
     let to: u32 = q.get("toHeight").and_then(|v| v.parse().ok()).unwrap_or(0);
-    match state.by_height.get(&to) {
+    // A real node clamps a range that runs past its tip rather than answering empty, so a
+    // request above the tip comes back with the *tip's* header. `header_id_at` must reject
+    // that on height rather than hand back an id from the wrong height.
+    let at = to.min(state.tip);
+    match state.by_height.get(&at) {
         Some(json) => {
             let v: serde_json::Value = serde_json::from_str(json).unwrap();
             Json(vec![v.get("header").unwrap().clone()])
@@ -123,6 +127,9 @@ async fn header_id_at_unknown_height_is_none() {
     let base = spawn_server().await;
     let node = RustNode::new(&base);
     assert_eq!(node.header_id_at(1).await.unwrap(), None);
+    // Above the node's tip the mock clamps to the tip header, as a real node does. Answering
+    // with that id would make ingest fetch the tip's body for a height it does not belong to.
+    assert_eq!(node.header_id_at(1866007).await.unwrap(), None);
 }
 
 #[tokio::test]
@@ -213,6 +220,36 @@ async fn header_id_at_ignores_chain_slice_headers_at_other_heights() {
     );
     let base = serve(app).await;
     assert_eq!(RustNode::new(&base).header_id_at(42).await.unwrap(), None);
+}
+
+/// A `chainSlice` that fails for any reason other than "no such endpoint" must surface as a
+/// transient error. Degrading to `/blocks/at`'s first id on, say, a 503 would silently
+/// reintroduce the orphan bug on a node that does have the endpoint.
+#[tokio::test]
+async fn header_id_at_chain_slice_server_error_is_an_error_not_a_fallback() {
+    let ids = vec![xp_types::hex32(&[0x11u8; 32])];
+    let app = Router::new()
+        .route(
+            "/blocks/at/{height}",
+            get(move || {
+                let ids = ids.clone();
+                async move { Json(ids) }
+            }),
+        )
+        .route(
+            "/blocks/chainSlice",
+            get(|| async { axum::http::StatusCode::SERVICE_UNAVAILABLE }),
+        );
+    let base = serve(app).await;
+
+    let err = RustNode::new(&base)
+        .header_id_at(1866000)
+        .await
+        .unwrap_err();
+    match err {
+        xp_source::SourceError::Http(msg) => assert!(msg.contains("503"), "got {msg}"),
+        other => panic!("unexpected error variant: {other:?}"),
+    }
 }
 
 /// Older nodes have no `chainSlice` endpoint at all. Then — and only then — the source falls
