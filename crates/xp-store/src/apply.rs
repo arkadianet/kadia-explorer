@@ -151,6 +151,10 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
     let mut fees = 0u64;
     let mut touched_balances: HashMap<Hash32, BalanceRow> = HashMap::new();
     let mut skipped_inputs = 0u32;
+    // Boxes whose id we could not reproduce from our own serialisation. We index them under
+    // the node's (authoritative) id anyway — see `xp_wire::DecodedBox::id_verified` — but
+    // their recorded size may be wrong, so say so once per block.
+    let mut unverified_boxes = 0u32;
     let first_tx_gidx = ctx.next_tx;
 
     for (ti, tx) in b.txs.iter().enumerate() {
@@ -208,6 +212,9 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             let gidx = ctx.next_box;
             ctx.next_box += 1;
             value_out += o.value;
+            if !o.id_verified {
+                unverified_boxes += 1;
+            }
 
             if upsert_tree(&mut ergo_trees, &o.tree_hash.0, &o.tree_bytes, ctx.height)? {
                 ctx.undo.new_trees.push(o.tree_hash.0);
@@ -273,6 +280,14 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         txs_table.insert(tx.id.0.as_slice(), txrow.encode().as_slice())?;
         tx_by_gidx.insert(k_u64(tx_gidx).as_slice(), tx.id.0.as_slice())?;
         ctx.undo.tx_ids.push(tx.id.0);
+    }
+
+    if unverified_boxes > 0 {
+        tracing::warn!(
+            height = ctx.height,
+            unverified_boxes,
+            "box id(s) could not be reproduced from our serialisation; kept the node's ids"
+        );
     }
 
     if skipped_inputs > 0 {

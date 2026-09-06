@@ -5,7 +5,7 @@
 
 use xp_wire::boxser::box_bytes_from_json;
 use xp_wire::tree::blake2b256;
-use xp_wire::{decode_block, decode_genesis_boxes};
+use xp_wire::{decode_block, decode_genesis_boxes, recomputed_box_id, DecodedBox};
 
 const CANONICAL: [u32; 3] = [1866000, 1866001, 1866002];
 const NON_CANONICAL: u32 = 1702686;
@@ -180,4 +180,53 @@ fn canonical_fixtures_match_ergo_lib_derived_values() {
         }
     }
     println!("compared {n} boxes against ergo-lib");
+}
+
+/// The decoder's own parts — the tx id it took from the enclosing transaction, the index it
+/// took from the output's position, the registers as it stored them — must reproduce the
+/// node's id for every fixture box. Equivalently: the `id_verified == false` path never fires
+/// on real data.
+#[test]
+fn decoded_boxes_verify_against_their_own_parts() {
+    fn check(b: &DecodedBox) {
+        assert_eq!(
+            hex::encode(recomputed_box_id(b).unwrap()),
+            hex::encode(b.id.0),
+            "recomputed id differs for {}",
+            hex::encode(b.id.0)
+        );
+        assert!(
+            b.id_verified,
+            "id_verified is false for {}",
+            hex::encode(b.id.0)
+        );
+    }
+
+    let mut n = 0usize;
+    for h in CANONICAL.iter().copied().chain([NON_CANONICAL]) {
+        let block = decode_block(&fixture(h)).unwrap();
+        for tx in &block.txs {
+            for (i, o) in tx.outputs.iter().enumerate() {
+                // the parts really are the decoder's, not the JSON's
+                assert_eq!(o.tx_id, tx.id);
+                assert_eq!(o.index as usize, i);
+                check(o);
+                n += 1;
+            }
+        }
+    }
+    let genesis = decode_genesis_boxes(
+        &std::fs::read_to_string(format!(
+            "{}/../../tests/fixtures/genesis.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    for b in &genesis {
+        check(b);
+        n += 1;
+    }
+    assert!(n >= 50, "only {n} boxes checked");
+    println!("verified {n} decoded boxes against their own parts");
 }

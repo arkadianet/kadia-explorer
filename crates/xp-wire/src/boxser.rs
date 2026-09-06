@@ -63,7 +63,7 @@ pub fn box_bytes(p: &BoxParts<'_>) -> Vec<u8> {
     out
 }
 
-fn hex_field(v: &serde_json::Value, field: &'static str) -> Result<Vec<u8>, WireError> {
+pub(crate) fn hex_field(v: &serde_json::Value, field: &'static str) -> Result<Vec<u8>, WireError> {
     let s = v
         .get(field)
         .and_then(|x| x.as_str())
@@ -88,6 +88,15 @@ pub(crate) fn u64_field(v: &serde_json::Value, field: &'static str) -> Result<u6
         .ok_or(WireError::MissingField(field))
 }
 
+/// Guards the narrowing `as` casts: a value the node could not really have produced turns
+/// into an error rather than silently wrapping around.
+pub(crate) fn bounded(n: u64, max: u64, name: &'static str) -> Result<u64, WireError> {
+    if n > max {
+        return Err(WireError::OutOfRange(name));
+    }
+    Ok(n)
+}
+
 pub(crate) fn tokens_of(v: &serde_json::Value) -> Result<Vec<(Hash32, u64)>, WireError> {
     let Some(assets) = v.get("assets") else {
         return Ok(Vec::new());
@@ -99,9 +108,24 @@ pub(crate) fn tokens_of(v: &serde_json::Value) -> Result<Vec<(Hash32, u64)>, Wir
         .collect()
 }
 
-/// Raw register bytes in R4..R9 order. A gap (e.g. R4 then R6) would make the box
-/// unserialisable the same way the chain would reject it, so we stop at the first missing
-/// register and let the id check report the mismatch.
+/// Raw register bytes in R4..R9 order. Registers are contiguous from R4 up, so an absent one
+/// ends the run; a register that is present but not a hex string is an error, not a stop.
+pub(crate) fn registers_from_object(
+    regs: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Vec<Vec<u8>>, WireError> {
+    let mut out = Vec::new();
+    for name in REGISTER_NAMES {
+        let Some(val) = regs.get(name) else {
+            break;
+        };
+        let hex_str = val
+            .as_str()
+            .ok_or(WireError::MissingField("additionalRegisters"))?;
+        out.push(hex::decode(hex_str).map_err(|_| WireError::MissingField("additionalRegisters"))?);
+    }
+    Ok(out)
+}
+
 pub(crate) fn registers_of(v: &serde_json::Value) -> Result<Vec<Vec<u8>>, WireError> {
     let Some(regs) = v.get("additionalRegisters") else {
         return Ok(Vec::new());
@@ -109,24 +133,21 @@ pub(crate) fn registers_of(v: &serde_json::Value) -> Result<Vec<Vec<u8>>, WireEr
     let regs = regs
         .as_object()
         .ok_or(WireError::MissingField("additionalRegisters"))?;
-    let mut out = Vec::new();
-    for name in REGISTER_NAMES {
-        let Some(hex_str) = regs.get(name).and_then(|x| x.as_str()) else {
-            break;
-        };
-        out.push(hex::decode(hex_str).map_err(|_| WireError::MissingField("additionalRegisters"))?);
-    }
-    Ok(out)
+    registers_from_object(regs)
 }
 
 /// Serialise a box straight from a node JSON object (`transactionId`/`index` read from it).
 pub fn box_bytes_from_json(v: &serde_json::Value) -> Result<Vec<u8>, WireError> {
     let tx_id = hash32_field(v, "transactionId")?;
-    let index = u64_field(v, "index")? as u16;
+    let index = bounded(u64_field(v, "index")?, u64::from(u16::MAX), "box.index")? as u16;
     Ok(box_bytes(&BoxParts {
         value: u64_field(v, "value")?,
         tree_bytes: &hex_field(v, "ergoTree")?,
-        creation_height: u64_field(v, "creationHeight")? as u32,
+        creation_height: bounded(
+            u64_field(v, "creationHeight")?,
+            u64::from(u32::MAX),
+            "box.creationHeight",
+        )? as u32,
         tokens: &tokens_of(v)?,
         registers: &registers_of(v)?,
         tx_id: &tx_id,

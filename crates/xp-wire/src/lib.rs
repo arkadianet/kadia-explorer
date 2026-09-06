@@ -3,7 +3,8 @@ pub mod tree;
 pub use tree::{template_hash_of, tree_hash, tree_info, TreeInfo, TreeKind};
 
 use boxser::{
-    box_bytes, hash32_field, registers_of, tokens_of, u64_field, BoxParts, REGISTER_NAMES,
+    bounded, box_bytes, hash32_field, hex_field, registers_from_object, registers_of, tokens_of,
+    u64_field, BoxParts, REGISTER_NAMES,
 };
 use tree::blake2b256;
 use xp_types::{BoxId, Hash32, HeaderId, TreeHash, TxId};
@@ -14,8 +15,8 @@ pub enum WireError {
     Json(#[from] serde_json::Error),
     #[error("tree: {0}")]
     Tree(String),
-    #[error("serialize: {0}")]
-    Ser(String),
+    #[error("value out of range: {0}")]
+    OutOfRange(&'static str),
     #[error("missing or invalid field: {0}")]
     MissingField(&'static str),
 }
@@ -43,6 +44,10 @@ pub struct DecodedBox {
     pub index: u16,
     pub tokens: Vec<(Hash32, u64)>,
     pub registers_json: String,
+    /// Whether `blake2b256` of our serialisation of this box reproduced the node's `id`.
+    /// False means we kept the node's (authoritative) id but our `size` may be wrong; the
+    /// box is still indexed rather than halting the block. See [`recomputed_box_id`].
+    pub id_verified: bool,
     /// Consensus box size as used for storage rent (`ErgoBox.bytes`: candidate body with
     /// full token ids + tx id + index), NOT the compacted in-block footprint.
     pub size: u32,
@@ -60,14 +65,6 @@ pub struct DecodedBlock {
     pub header: DecodedHeader,
     pub txs: Vec<DecodedTx>,
     pub size: u32,
-}
-
-fn hex_field(v: &serde_json::Value, field: &'static str) -> Result<Vec<u8>, WireError> {
-    let s = v
-        .get(field)
-        .and_then(|x| x.as_str())
-        .ok_or(WireError::MissingField(field))?;
-    hex::decode(s).map_err(|_| WireError::MissingField(field))
 }
 
 fn array_field<'a>(
@@ -127,13 +124,17 @@ fn decode_box(
     };
     let index = match index {
         Some(i) => i,
-        None => u64_field(v, "index")? as u16,
+        None => bounded(u64_field(v, "index")?, u64::from(u16::MAX), "box.index")? as u16,
     };
     let tree_bytes = hex_field(v, "ergoTree")?;
     let tokens = tokens_of(v)?;
     let registers = registers_of(v)?;
     let value = u64_field(v, "value")?;
-    let creation_height = u64_field(v, "creationHeight")? as u32;
+    let creation_height = bounded(
+        u64_field(v, "creationHeight")?,
+        u64::from(u32::MAX),
+        "box.creationHeight",
+    )? as u32;
     let bytes = box_bytes(&BoxParts {
         value,
         tree_bytes: &tree_bytes,
@@ -144,7 +145,8 @@ fn decode_box(
         index,
     });
     let computed = blake2b256(&bytes);
-    if computed != id.0 {
+    let id_verified = computed == id.0;
+    if !id_verified {
         tracing::warn!(
             node_box_id = %hex::encode(id.0),
             computed_box_id = %hex::encode(computed),
@@ -161,8 +163,30 @@ fn decode_box(
         index,
         registers_json: registers_json_of(v, registers.len()),
         tokens,
+        id_verified,
         size: bytes.len() as u32,
     })
+}
+
+/// Re-derives a decoded box's id from the parts [`DecodedBox`] carries — including the
+/// `tx_id`/`index` the decoder assigned from the enclosing transaction and the registers as
+/// they were stored — so callers and tests can check `id_verified` independently of the JSON
+/// the box came from.
+pub fn recomputed_box_id(b: &DecodedBox) -> Result<Hash32, WireError> {
+    let regs: serde_json::Value = serde_json::from_str(&b.registers_json)?;
+    let registers = registers_from_object(
+        regs.as_object()
+            .ok_or(WireError::MissingField("registers_json"))?,
+    )?;
+    Ok(blake2b256(&box_bytes(&BoxParts {
+        value: b.value,
+        tree_bytes: &b.tree_bytes,
+        creation_height: b.creation_height,
+        tokens: &b.tokens,
+        registers: &registers,
+        tx_id: &b.tx_id.0,
+        index: b.index,
+    })))
 }
 
 fn decode_header(header_json: &serde_json::Value) -> Result<DecodedHeader, WireError> {
@@ -180,11 +204,19 @@ fn decode_header(header_json: &serde_json::Value) -> Result<DecodedHeader, WireE
     let votes: [u8; 3] = hex_field(header_json, "votes")?
         .try_into()
         .map_err(|_| WireError::MissingField("header.votes"))?;
-    let version = u64_field(header_json, "version")? as u8;
+    let version = bounded(
+        u64_field(header_json, "version")?,
+        u64::from(u8::MAX),
+        "header.version",
+    )? as u8;
     Ok(DecodedHeader {
         id: HeaderId(hash32_field(header_json, "id")?),
         parent_id: HeaderId(hash32_field(header_json, "parentId")?),
-        height: u64_field(header_json, "height")? as u32,
+        height: bounded(
+            u64_field(header_json, "height")?,
+            u64::from(u32::MAX),
+            "header.height",
+        )? as u32,
         timestamp: u64_field(header_json, "timestamp")?,
         difficulty,
         miner_pk,
@@ -218,13 +250,20 @@ pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
             inputs: referenced_box_ids(tx, "inputs", true)?,
             data_inputs: referenced_box_ids(tx, "dataInputs", false)?,
             outputs,
-            size: u64_field(tx, "size")? as u32,
+            size: bounded(
+                u64_field(tx, "size")?,
+                u64::from(u32::MAX),
+                "transaction.size",
+            )? as u32,
         });
     }
-    let size = v
-        .get("size")
-        .and_then(|s| s.as_u64())
-        .ok_or(WireError::MissingField("size"))? as u32;
+    let size = bounded(
+        v.get("size")
+            .and_then(|s| s.as_u64())
+            .ok_or(WireError::MissingField("size"))?,
+        u64::from(u32::MAX),
+        "block.size",
+    )? as u32;
     Ok(DecodedBlock { header, txs, size })
 }
 
@@ -263,6 +302,59 @@ mod tests {
         v.as_object_mut().unwrap().remove("size");
         let err = decode_block(&v.to_string()).unwrap_err();
         assert!(matches!(err, WireError::MissingField("size")));
+    }
+
+    #[test]
+    fn a_box_we_cannot_reproduce_is_kept_with_id_verified_false() {
+        let mut v = fixture_value();
+        // tamper with the value: the node's boxId no longer matches our serialisation
+        v["blockTransactions"]["transactions"][0]["outputs"][0]["value"] =
+            serde_json::json!(12345u64);
+        let b = decode_block(&v.to_string()).expect("a box we cannot reproduce must not halt");
+        let o = &b.txs[0].outputs[0];
+        assert!(!o.id_verified);
+        assert_eq!(o.value, 12345);
+        // the node's id is kept verbatim
+        assert_eq!(
+            hex::encode(o.id.0),
+            v["blockTransactions"]["transactions"][0]["outputs"][0]["boxId"]
+                .as_str()
+                .unwrap()
+        );
+        assert_ne!(
+            hex::encode(recomputed_box_id(o).unwrap()),
+            hex::encode(o.id.0)
+        );
+        // every other box is unaffected
+        assert!(
+            b.txs
+                .iter()
+                .flat_map(|t| &t.outputs)
+                .filter(|o| !o.id_verified)
+                .count()
+                == 1
+        );
+    }
+
+    #[test]
+    fn out_of_range_creation_height_is_an_error() {
+        let mut v = fixture_value();
+        v["blockTransactions"]["transactions"][0]["outputs"][0]["creationHeight"] =
+            serde_json::json!(u64::from(u32::MAX) + 1);
+        let err = decode_block(&v.to_string()).unwrap_err();
+        assert!(matches!(err, WireError::OutOfRange("box.creationHeight")));
+    }
+
+    #[test]
+    fn a_non_string_register_is_an_error() {
+        let mut v = fixture_value();
+        v["blockTransactions"]["transactions"][0]["outputs"][0]["additionalRegisters"] =
+            serde_json::json!({ "R4": 4 });
+        let err = decode_block(&v.to_string()).unwrap_err();
+        assert!(matches!(
+            err,
+            WireError::MissingField("additionalRegisters")
+        ));
     }
 
     #[test]
