@@ -3035,6 +3035,7 @@ dependencies = [
  "hex",
  "serde_json",
  "thiserror 2.0.20",
+ "tracing",
  "xp-types",
 ]
 

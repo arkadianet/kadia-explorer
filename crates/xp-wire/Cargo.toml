@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 xp-types.workspace = true
 ergo-lib.workspace = true
+tracing.workspace = true
 serde_json.workspace = true
 blake2.workspace = true
 hex.workspace = true

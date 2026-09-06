@@ -1,10 +1,11 @@
+pub mod boxser;
 pub mod tree;
 pub use tree::{template_hash_of, tree_hash, tree_info, TreeInfo, TreeKind};
 
-use ergo_lib::chain::block::FullBlock;
-use ergo_lib::ergo_chain_types::Digest32;
-use ergo_lib::ergotree_ir::chain::ergo_box::ErgoBox;
-use ergo_lib::ergotree_ir::serialization::SigmaSerializable;
+use boxser::{
+    box_bytes, hash32_field, registers_of, tokens_of, u64_field, BoxParts, REGISTER_NAMES,
+};
+use tree::blake2b256;
 use xp_types::{BoxId, Hash32, HeaderId, TreeHash, TxId};
 
 #[derive(Debug, thiserror::Error)]
@@ -61,111 +62,163 @@ pub struct DecodedBlock {
     pub size: u32,
 }
 
-fn box_id_to_hash32(id: ergo_lib::ergotree_ir::chain::ergo_box::BoxId) -> Hash32 {
-    Digest32::from(id).0
+fn hex_field(v: &serde_json::Value, field: &'static str) -> Result<Vec<u8>, WireError> {
+    let s = v
+        .get(field)
+        .and_then(|x| x.as_str())
+        .ok_or(WireError::MissingField(field))?;
+    hex::decode(s).map_err(|_| WireError::MissingField(field))
 }
 
-fn token_id_to_hash32(id: ergo_lib::ergotree_ir::chain::token::TokenId) -> Hash32 {
-    Digest32::from(id).0
+fn array_field<'a>(
+    v: &'a serde_json::Value,
+    field: &'static str,
+) -> Result<&'a Vec<serde_json::Value>, WireError> {
+    v.get(field)
+        .and_then(|x| x.as_array())
+        .ok_or(WireError::MissingField(field))
 }
 
-pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
-    let v: serde_json::Value = serde_json::from_str(json)?;
-    let fb: FullBlock = serde_json::from_value(v.clone())?;
-    let h = &fb.header;
-    // `header` cannot be absent once `fb` has parsed successfully above, but we still need
-    // its raw JSON to read `difficulty` (not modeled on `ergo_chain_types::Header`), so fetch
-    // it with a real error instead of silently defaulting to an empty object.
-    let header_json = v
-        .get("header")
-        .cloned()
-        .ok_or(WireError::MissingField("header"))?;
+/// Ids of the boxes referenced by an `inputs`/`dataInputs` array (absent array = empty).
+fn referenced_box_ids(
+    tx: &serde_json::Value,
+    field: &'static str,
+    required: bool,
+) -> Result<Vec<BoxId>, WireError> {
+    let items = match tx.get(field) {
+        Some(v) => v.as_array().ok_or(WireError::MissingField(field))?,
+        None if !required => return Ok(Vec::new()),
+        None => return Err(WireError::MissingField(field)),
+    };
+    items
+        .iter()
+        .map(|i| Ok(BoxId(hash32_field(i, "boxId")?)))
+        .collect()
+}
+
+/// Registers as `{"R4": "<hex>", ...}` — the node's hex verbatim, R4..R9 in order.
+fn registers_json_of(v: &serde_json::Value, count: usize) -> String {
+    let mut map = serde_json::Map::new();
+    if let Some(regs) = v.get("additionalRegisters").and_then(|r| r.as_object()) {
+        for name in REGISTER_NAMES.iter().take(count) {
+            if let Some(val) = regs.get(*name) {
+                map.insert((*name).to_string(), val.clone());
+            }
+        }
+    }
+    serde_json::Value::Object(map).to_string()
+}
+
+/// Decodes one box from node JSON. `tx_id`/`index` override the JSON fields when the box is
+/// read as a transaction output (they are the enclosing transaction's, and authoritative).
+///
+/// The node's `boxId` is kept even if our serialisation disagrees: the chain accepted those
+/// bytes, and halting the whole sync over one box we cannot re-serialise is worse than a
+/// possibly-off size for it.
+fn decode_box(
+    v: &serde_json::Value,
+    tx_id: Option<TxId>,
+    index: Option<u16>,
+) -> Result<DecodedBox, WireError> {
+    let id = BoxId(hash32_field(v, "boxId")?);
+    let tx_id = match tx_id {
+        Some(t) => t,
+        None => TxId(hash32_field(v, "transactionId")?),
+    };
+    let index = match index {
+        Some(i) => i,
+        None => u64_field(v, "index")? as u16,
+    };
+    let tree_bytes = hex_field(v, "ergoTree")?;
+    let tokens = tokens_of(v)?;
+    let registers = registers_of(v)?;
+    let value = u64_field(v, "value")?;
+    let creation_height = u64_field(v, "creationHeight")? as u32;
+    let bytes = box_bytes(&BoxParts {
+        value,
+        tree_bytes: &tree_bytes,
+        creation_height,
+        tokens: &tokens,
+        registers: &registers,
+        tx_id: &tx_id.0,
+        index,
+    });
+    let computed = blake2b256(&bytes);
+    if computed != id.0 {
+        tracing::warn!(
+            node_box_id = %hex::encode(id.0),
+            computed_box_id = %hex::encode(computed),
+            "box id from our serialisation differs from the node's; keeping the node's id"
+        );
+    }
+    Ok(DecodedBox {
+        id,
+        value,
+        tree_hash: tree_hash(&tree_bytes),
+        tree_bytes,
+        creation_height,
+        tx_id,
+        index,
+        registers_json: registers_json_of(v, registers.len()),
+        tokens,
+        size: bytes.len() as u32,
+    })
+}
+
+fn decode_header(header_json: &serde_json::Value) -> Result<DecodedHeader, WireError> {
     let difficulty: u128 = header_json
         .get("difficulty")
         .and_then(|d| d.as_str())
         .and_then(|s| s.parse().ok())
         .ok_or(WireError::MissingField("header.difficulty"))?;
-    let miner_pk_hex = h.autolykos_solution.miner_pk.to_string();
-    let miner_pk_bytes = hex::decode(&miner_pk_hex).map_err(|e| WireError::Ser(e.to_string()))?;
-    let mut miner_pk = [0u8; 33];
-    if miner_pk_bytes.len() != miner_pk.len() {
-        return Err(WireError::Ser(format!(
-            "unexpected miner_pk length: {}",
-            miner_pk_bytes.len()
-        )));
-    }
-    miner_pk.copy_from_slice(&miner_pk_bytes);
-    let header = DecodedHeader {
-        id: HeaderId(h.id.0 .0),
-        parent_id: HeaderId(h.parent_id.0 .0),
-        height: h.height,
-        timestamp: h.timestamp,
+    let miner_pk: [u8; 33] = header_json
+        .get("powSolutions")
+        .ok_or(WireError::MissingField("header.powSolutions"))
+        .and_then(|s| hex_field(s, "pk"))?
+        .try_into()
+        .map_err(|_| WireError::MissingField("header.powSolutions.pk"))?;
+    let votes: [u8; 3] = hex_field(header_json, "votes")?
+        .try_into()
+        .map_err(|_| WireError::MissingField("header.votes"))?;
+    let version = u64_field(header_json, "version")? as u8;
+    Ok(DecodedHeader {
+        id: HeaderId(hash32_field(header_json, "id")?),
+        parent_id: HeaderId(hash32_field(header_json, "parentId")?),
+        height: u64_field(header_json, "height")? as u32,
+        timestamp: u64_field(header_json, "timestamp")?,
         difficulty,
         miner_pk,
-        votes: h.votes.0,
-        version: h.version,
+        votes,
+        version,
         raw_json: header_json.to_string(),
-    };
-    let mut txs = Vec::with_capacity(fb.block_transactions.transactions.len());
-    for tx in fb.block_transactions.transactions.iter() {
-        let tx_id = TxId(tx.id().0 .0);
-        let mut outputs = Vec::with_capacity(tx.outputs.len());
-        for (i, o) in tx.outputs.iter().enumerate() {
-            // Consensus box size (storage rent basis): `ErgoBox.bytes` = candidate body
-            // serialized with full 32-byte token ids + tx id + index, per sigmastate's
-            // `ErgoBox.sigmaSerializer`. This is exactly `ErgoBox::sigma_serialize_bytes`,
-            // not the compacted in-block footprint.
-            let bytes = o
-                .sigma_serialize_bytes()
-                .map_err(|e| WireError::Ser(e.to_string()))?;
-            let tree_bytes = o
-                .ergo_tree
-                .sigma_serialize_bytes()
-                .map_err(|e| WireError::Ser(e.to_string()))?;
-            let tokens = o
-                .tokens
-                .as_ref()
-                .map(|ts| {
-                    ts.iter()
-                        .map(|t| (token_id_to_hash32(t.token_id), *t.amount.as_u64()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            outputs.push(DecodedBox {
-                id: BoxId(box_id_to_hash32(o.box_id())),
-                value: *o.value.as_u64(),
-                tree_hash: tree_hash(&tree_bytes),
-                tree_bytes,
-                creation_height: o.creation_height,
-                tx_id,
-                index: i as u16,
-                tokens,
-                registers_json: serde_json::to_string(&o.additional_registers)?,
-                size: bytes.len() as u32,
-            });
+    })
+}
+
+/// Decodes a node `FullBlock` JSON without going through ergo-lib's block/box model: the
+/// node's ids are taken verbatim, so a box the chain accepted but ergo-lib cannot
+/// re-serialise canonically no longer makes the whole block undecodable.
+pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
+    let v: serde_json::Value = serde_json::from_str(json)?;
+    let header_json = v.get("header").ok_or(WireError::MissingField("header"))?;
+    let header = decode_header(header_json)?;
+    let block_txs = v
+        .get("blockTransactions")
+        .ok_or(WireError::MissingField("blockTransactions"))?;
+    let raw_txs = array_field(block_txs, "transactions")?;
+    let mut txs = Vec::with_capacity(raw_txs.len());
+    for tx in raw_txs {
+        let tx_id = TxId(hash32_field(tx, "id")?);
+        let raw_outputs = array_field(tx, "outputs")?;
+        let mut outputs = Vec::with_capacity(raw_outputs.len());
+        for (i, o) in raw_outputs.iter().enumerate() {
+            outputs.push(decode_box(o, Some(tx_id), Some(i as u16))?);
         }
-        let size = tx
-            .sigma_serialize_bytes()
-            .map_err(|e| WireError::Ser(e.to_string()))?
-            .len() as u32;
         txs.push(DecodedTx {
             id: tx_id,
-            inputs: tx
-                .inputs
-                .iter()
-                .map(|i| BoxId(box_id_to_hash32(i.box_id)))
-                .collect(),
-            data_inputs: tx
-                .data_inputs
-                .as_ref()
-                .map(|d| {
-                    d.iter()
-                        .map(|i| BoxId(box_id_to_hash32(i.box_id)))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            inputs: referenced_box_ids(tx, "inputs", true)?,
+            data_inputs: referenced_box_ids(tx, "dataInputs", false)?,
             outputs,
-            size,
+            size: u64_field(tx, "size")? as u32,
         });
     }
     let size = v
@@ -184,39 +237,11 @@ pub fn decode_block(json: &str) -> Result<DecodedBlock, WireError> {
 /// transaction's outputs, except that `tx_id` and `index` come from the JSON (all-zero tx id,
 /// index 0 for each) instead of from an enclosing transaction.
 pub fn decode_genesis_boxes(json: &str) -> Result<Vec<DecodedBox>, WireError> {
-    let raw: Vec<ErgoBox> = serde_json::from_str(json)?;
-    let mut out = Vec::with_capacity(raw.len());
-    for b in &raw {
-        let bytes = b
-            .sigma_serialize_bytes()
-            .map_err(|e| WireError::Ser(e.to_string()))?;
-        let tree_bytes = b
-            .ergo_tree
-            .sigma_serialize_bytes()
-            .map_err(|e| WireError::Ser(e.to_string()))?;
-        let tokens = b
-            .tokens
-            .as_ref()
-            .map(|ts| {
-                ts.iter()
-                    .map(|t| (token_id_to_hash32(t.token_id), *t.amount.as_u64()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        out.push(DecodedBox {
-            id: BoxId(box_id_to_hash32(b.box_id())),
-            value: *b.value.as_u64(),
-            tree_hash: tree_hash(&tree_bytes),
-            tree_bytes,
-            creation_height: b.creation_height,
-            tx_id: TxId(b.transaction_id.0 .0),
-            index: b.index,
-            tokens,
-            registers_json: serde_json::to_string(&b.additional_registers)?,
-            size: bytes.len() as u32,
-        });
-    }
-    Ok(out)
+    let v: serde_json::Value = serde_json::from_str(json)?;
+    let raw = v
+        .as_array()
+        .ok_or(WireError::MissingField("genesis boxes"))?;
+    raw.iter().map(|b| decode_box(b, None, None)).collect()
 }
 
 #[cfg(test)]
