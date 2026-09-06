@@ -126,7 +126,7 @@
 		</div>
 	</aside>
 
-	<div class="main" style:--banner-h={hasBanner ? '58px' : '0px'}>
+	<div class="main" style:--banner-h={hasBanner ? '30px' : '0px'}>
 		<header class="topbar">
 			<div class="search-slot" data-testid="search-slot">
 				<SearchBox />
@@ -146,12 +146,16 @@
 
 		{#if stalledInfo}
 			<div class="banner danger" role="alert">
-				Indexer is waiting on block {stalledInfo.height} from the node for {stalledInfo.since_secs}
-				s.
+				<span class="dot" aria-hidden="true"></span>
+				<span
+					>Indexer is waiting on block {stalledInfo.height} from the node for {stalledInfo.since_secs}
+					s.</span
+				>
 			</div>
 		{:else if showLagBanner && status.current}
 			<div class="banner warn" role="status">
-				Index is {status.current.lag_blocks} blocks behind the node.
+				<span class="dot" aria-hidden="true"></span>
+				<span>Index is {status.current.lag_blocks} blocks behind the node.</span>
 			</div>
 		{/if}
 
@@ -415,45 +419,43 @@
 		border-color: var(--fg-muted);
 	}
 
-	/* An overlay ribbon rather than a row in the flow: the index being behind is a caveat on
-	   the page, and it must not push the page's opening image out of shape. */
+	/* A caveat, not an alarm: one line of tone-coloured text with a dot, sitting on the hero's
+	   top edge. A boxed amber panel here reads as an error dialogue dropped onto the page and
+	   breaks the opening composition, so this carries no background, border or shadow. */
 	.banner {
 		position: absolute;
-		top: calc(var(--topbar-h) - var(--space-1));
+		top: calc(var(--topbar-h) - var(--space-2));
 		left: var(--gutter);
 		right: var(--gutter);
 		z-index: 25;
 		max-width: 1240px;
-		padding: var(--space-3) var(--space-4);
-		border-radius: var(--radius-control);
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		height: 26px;
 		font-size: var(--fs-data);
-		font-weight: 500;
+		font-weight: 600;
+		/* Text on the hero's sky and, deeper in the page, on a card; a shadow the width of a
+		   hairline keeps it legible over the lightest part of the landscape without drawing a
+		   box around it. */
+		text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
 	}
 
 	.banner.warn {
-		backdrop-filter: blur(10px);
-		box-shadow: var(--shadow-rest);
 		color: var(--warn-ink);
-		background: rgba(255, 250, 238, 0.92);
-		border: 1px solid rgba(201, 138, 0, 0.3);
 	}
 
 	.banner.danger {
-		backdrop-filter: blur(10px);
-		box-shadow: var(--shadow-rest);
 		color: var(--danger-ink);
-		background: rgba(255, 244, 244, 0.94);
-		border: 1px solid rgba(210, 75, 75, 0.3);
 	}
 
-	:global(:root[data-theme='dark']) .banner.warn {
-		background: rgba(34, 28, 14, 0.9);
-		border-color: rgba(217, 164, 65, 0.35);
+	.banner .dot {
+		width: 6px;
+		height: 6px;
 	}
 
-	:global(:root[data-theme='dark']) .banner.danger {
-		background: rgba(38, 20, 20, 0.9);
-		border-color: rgba(224, 112, 112, 0.35);
+	:global(:root[data-theme='dark']) .banner {
+		text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 	}
 
 	.content {

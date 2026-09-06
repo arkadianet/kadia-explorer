@@ -531,6 +531,9 @@
 	.tipcard {
 		flex: none;
 		width: 250px;
+		/* The stat row rises 68 px into the hero; this keeps a clear 28 px of sky between the
+		   card's bottom edge and the top of those cards at every desktop width. */
+		margin-bottom: 56px;
 		padding: var(--space-4) var(--space-5) var(--space-5);
 		border-radius: var(--radius-card);
 		background: var(--ink-panel-soft);
@@ -582,7 +585,7 @@
 	.stats {
 		display: grid;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
-		gap: var(--space-4);
+		gap: var(--space-6);
 		margin-top: calc(var(--space-10) * -1 - 28px);
 		position: relative;
 		z-index: 5;
@@ -912,6 +915,14 @@
 		.panels {
 			grid-template-columns: minmax(0, 1fr);
 		}
+		/* Stacked, the card is no longer beside the copy and the stat row no longer climbs
+		   into the hero, so neither offset applies. */
+		.tipcard {
+			margin-bottom: 0;
+		}
+		.stats {
+			margin-top: var(--space-2);
+		}
 		.hero-in {
 			flex-direction: column;
 			align-items: stretch;
@@ -930,9 +941,6 @@
 		}
 		.tools {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-		.stats {
-			margin-top: var(--space-2);
 		}
 		.hero {
 			border-radius: 0;
