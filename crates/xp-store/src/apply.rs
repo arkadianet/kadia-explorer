@@ -8,6 +8,28 @@ use crate::rows::{BalanceRow, BoxRow, HeaderRow, TreeRow, TxRow, UndoRow};
 use crate::tables::*;
 use crate::{Store, StoreError};
 
+/// Serialized ergo tree of Ergo mainnet's miner-fee contract, hex-encoded.
+///
+/// A transaction pays its fee by creating an OUTPUT locked by this tree; the block's last
+/// transaction (the fee-collection tx) then spends every such box of the block into the
+/// miner's own box. Inputs and outputs of an Ergo tx always balance, so a fee is never a
+/// difference between them.
+pub const FEE_TREE_HEX: &str = "1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a57304";
+
+/// blake2b256 of [`FEE_TREE_HEX`]'s bytes — the key boxes are indexed under. Written out as
+/// a constant so no hashing or hex decoding happens per box;
+/// `fee_tree_hash_is_the_hash_of_the_miner_fee_tree` (tests/apply.rs) pins it to the hash
+/// actually computed from the hex above.
+pub const FEE_TREE_HASH: Hash32 = [
+    0xe5, 0x40, 0xcc, 0xef, 0xfd, 0x3b, 0x8d, 0xd0, 0xf4, 0x01, 0x19, 0x35, 0x76, 0xcc, 0x41, 0x34,
+    0x67, 0x03, 0x96, 0x95, 0x96, 0x94, 0x27, 0xdf, 0x94, 0x45, 0x41, 0x93, 0xdd, 0xdf, 0xb3, 0x75,
+];
+
+/// Whether `tree` is the miner-fee contract — i.e. whether boxes on it are fee payments.
+pub fn is_fee_tree(tree: &Hash32) -> bool {
+    *tree == FEE_TREE_HASH
+}
+
 struct Ctx<'t> {
     txn: &'t WriteTransaction,
     next_box: Gidx,
@@ -27,8 +49,8 @@ impl Store {
     /// each block's `parent_id` must match the previous block's (or stored tip's) id, else
     /// [`StoreError::ParentMismatch`] is returned and nothing is committed. A missing input box
     /// is tolerated only when the store is marked partial (`tables::META_PARTIAL_FROM`, set by
-    /// `seed_for_tests`) — anywhere else, height 1 included, it is [`StoreError::Corrupt`];
-    /// fees for a tx with a tolerated unknown input are computed from its known inputs only.
+    /// `seed_for_tests`) — anywhere else, height 1 included, it is [`StoreError::Corrupt`].
+    /// (Fees do not depend on inputs at all: see [`FEE_TREE_HASH`].)
     /// (Height 1 spends chain-spec genesis boxes, which no block creates: a full sync must
     /// call [`Store::seed_genesis`] before applying it.)
     pub fn apply_batch(&self, blocks: &[DecodedBlock], durable: bool) -> Result<(), StoreError> {
@@ -160,7 +182,6 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
     for (ti, tx) in b.txs.iter().enumerate() {
         let tx_gidx = ctx.next_tx;
         ctx.next_tx += 1;
-        let mut value_in = 0u64;
         let mut trees_in_tx: Vec<Hash32> = vec![];
 
         for inp in &tx.inputs {
@@ -186,7 +207,6 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
                 return Err(StoreError::Corrupt("double spend in block"));
             }
             row.spent = Some((tx.id.0, ctx.height));
-            value_in += row.value;
             boxes.insert(inp.0.as_slice(), row.encode().as_slice())?;
             tree_unspent.remove(k_hash_gidx(&row.tree_hash, row.gidx).as_slice())?;
             rent_matures
@@ -207,11 +227,13 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         }
 
         let first_out_gidx = ctx.next_box;
-        let mut value_out = 0u64;
+        let mut fee = 0u64;
         for o in &tx.outputs {
             let gidx = ctx.next_box;
             ctx.next_box += 1;
-            value_out += o.value;
+            if is_fee_tree(&o.tree_hash.0) {
+                fee += o.value;
+            }
             if !o.id_verified {
                 unverified_boxes += 1;
             }
@@ -245,17 +267,9 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             ctx.undo.created_boxes.push(o.id.0);
         }
 
-        // Index 0 is the block's coinbase-like emission tx: it has no fee semantics.
-        //
-        // TODO(emission-end): "tx 0 is the emission tx" is only true while emission is still
-        // running (mainnet emission ends around height 2,080,800). Past that height the
-        // block's first tx is an ordinary tx again, and both this rule and [`block_reward`]
-        // below must be revisited before the index can be trusted at those heights.
-        let fee = if ti == 0 {
-            0
-        } else {
-            value_in.saturating_sub(value_out)
-        };
+        // `fee` was summed over the outputs above: it is the value this tx locked in the
+        // miner-fee contract. The emission tx (index 0) and the fee-collection tx (the
+        // block's last) create no such output, so both come out at 0 with no special case.
         fees += fee;
 
         trees_in_tx.sort();
@@ -356,8 +370,11 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
 /// is dropped and the rest summed. The emission box dwarfs the reward by five orders of
 /// magnitude for the whole of emission, so "largest output" and "emission box" coincide.
 ///
-/// See the `TODO(emission-end)` in [`apply_block`]: after emission ends there is no emission
-/// tx at index 0 and this whole computation stops being meaningful.
+/// TODO(emission-end): "tx 0 is the emission tx" is only true while emission is still running
+/// (mainnet emission ends around height 2,080,800). Past that height the block's first tx is
+/// an ordinary tx again and this whole computation stops being meaningful, so it must be
+/// revisited before the index can be trusted at those heights. Fees are unaffected: they are
+/// read off the miner-fee outputs (see [`FEE_TREE_HASH`]) and need no such assumption.
 fn block_reward(
     boxes: &Table<'_, &'static [u8], &'static [u8]>,
     b: &DecodedBlock,

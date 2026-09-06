@@ -15,6 +15,7 @@ fn items_of(
     rd: &Reader,
     rows: Vec<(u32, Hash32)>,
     tip: Option<u32>,
+    emission: Option<&Hash32>,
 ) -> Result<Vec<RentItemDto>, ApiError> {
     let mut out = Vec::with_capacity(rows.len());
     for (maturity_height, box_id) in rows {
@@ -25,7 +26,7 @@ fn items_of(
             .ok_or_else(|| ApiError::Internal("rent index points at a missing box".into()))?;
         out.push(RentItemDto {
             maturity_height,
-            box_: box_dto_from_reader(rd, &box_id, &row, tip)?,
+            box_: box_dto_from_reader(rd, &box_id, &row, tip, emission)?,
         });
     }
     Ok(out)
@@ -40,11 +41,12 @@ pub async fn upcoming(
     let limit = parse_limit(p.limit.as_deref())?;
     let blocks = parse_u32_param(p.blocks.as_deref(), "blocks", DEFAULT_UPCOMING_BLOCKS)?;
     let page = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let tip = rd.indexed_height()?;
         let from = tip.unwrap_or(0).saturating_add(1);
         let rows = rd.rent_matures_range(from, blocks, limit)?;
         Ok(PageDto {
-            items: items_of(rd, rows, tip)?,
+            items: items_of(rd, rows, tip, emission.as_ref())?,
             next_cursor: None,
         })
     })
@@ -61,10 +63,11 @@ pub async fn eligible(
     let limit = parse_limit(p.limit.as_deref())?;
     let cursor = parse_rent_cursor(p.cursor.as_deref())?;
     let page = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let tip = rd.indexed_height()?;
         let (rows, next) = rd.rent_eligible(tip.unwrap_or(0), cursor, limit)?;
         Ok(PageDto {
-            items: items_of(rd, rows, tip)?,
+            items: items_of(rd, rows, tip, emission.as_ref())?,
             next_cursor: next.map(|(h, g)| format_rent_cursor(h, g)),
         })
     })

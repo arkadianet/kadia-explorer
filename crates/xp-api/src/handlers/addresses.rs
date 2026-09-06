@@ -50,13 +50,14 @@ pub async fn boxes(
     let dir = parse_dir(p.dir.as_deref())?;
     let unspent = parse_bool_param(p.unspent.as_deref(), "unspent")?;
     let page = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let tree = tree_of(rd, &addr)?;
         let tip = rd.indexed_height()?;
         let page = rd.tree_boxes(&tree, unspent, cursor, limit, dir)?;
         let items = page
             .items
             .iter()
-            .map(|(id, row)| box_dto_from_reader(rd, id, row, tip))
+            .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(PageDto {
             items,
@@ -76,13 +77,14 @@ pub async fn txs(
     let cursor = parse_u64_cursor(p.cursor.as_deref())?;
     let dir = parse_dir(p.dir.as_deref())?;
     let page = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let tree = tree_of(rd, &addr)?;
         let tip = rd.indexed_height()?;
         let page = rd.tree_txs(&tree, cursor, limit, dir)?;
         let items = page
             .items
             .iter()
-            .map(|(id, row)| tx_dto(rd, id, row, tip))
+            .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(PageDto {
             items,
@@ -101,6 +103,7 @@ pub async fn rent(
     Path(addr): Path<String>,
 ) -> Result<Json<AddressRentDto>, ApiError> {
     let dto = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let tree = tree_of(rd, &addr)?;
         let tip = rd.indexed_height()?;
         let mut rows = Vec::new();
@@ -121,7 +124,7 @@ pub async fn rent(
         rows.sort_by_key(|(_, row)| maturity_height(row.creation_height));
         let items = rows
             .iter()
-            .map(|(id, row)| box_dto_from_reader(rd, id, row, tip))
+            .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(AddressRentDto { items, truncated })
     })

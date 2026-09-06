@@ -184,3 +184,25 @@ fn a_later_credit_does_not_overwrite_a_genesis_trees_first_seen() {
     );
     assert_eq!(bal.last_seen, 1);
 }
+
+/// Seeding records the emission box's ergo tree hash in META, which is the only place the
+/// emission contract is ever identified as such (the API reads it back to label boxes).
+#[test]
+fn seeding_records_the_emission_tree_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(&dir.path().join("x.redb")).unwrap();
+    assert_eq!(s.emission_tree_hash().unwrap(), None);
+
+    let boxes = genesis_boxes();
+    s.seed_genesis(&boxes).unwrap();
+    let emission = boxes.iter().max_by_key(|b| b.value).unwrap();
+    assert_eq!(
+        s.emission_tree_hash().unwrap(),
+        Some(emission.tree_hash.0),
+        "emission tree hash recorded at seeding"
+    );
+    let rd = xp_store::Reader::new(&s).unwrap();
+    assert_eq!(rd.emission_tree_hash().unwrap(), Some(emission.tree_hash.0));
+    // The emission contract is not the miner-fee contract.
+    assert!(!xp_store::is_fee_tree(&emission.tree_hash.0));
+}

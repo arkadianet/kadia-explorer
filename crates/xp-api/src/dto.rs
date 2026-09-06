@@ -272,9 +272,37 @@ pub struct BoxDto {
     pub spent_by: Option<String>,
     pub spent_height: Option<u32>,
     pub rent: RentDto,
+    /// What kind of box this is, for clients that want to label it without knowing any
+    /// contract hashes: `"fee"` for the miner-fee contract, `"emission"` for the chain's
+    /// emission contract, `"box"` for everything else.
+    pub kind: &'static str,
 }
 
-pub fn box_dto(id: &Hash32, row: &BoxRow, tree: Option<&TreeRow>, tip: Option<u32>) -> BoxDto {
+/// `emission` is the emission box's tree hash as recorded at genesis seeding
+/// (`Reader::emission_tree_hash`); `None` on a store that never seeded genesis, in which case
+/// emission boxes are simply labelled `"box"`.
+///
+/// Handlers resolve it once per request from their own `Reader` rather than snapshotting it
+/// into `AppState` at startup: genesis seeding runs inside ingest, so a store created fresh
+/// alongside the process is still unseeded when the API boots, and a startup snapshot would
+/// stay `None` for the life of the process. It is one META read per request, not per box.
+fn box_kind(tree: &Hash32, emission: Option<&Hash32>) -> &'static str {
+    if xp_store::is_fee_tree(tree) {
+        "fee"
+    } else if emission == Some(tree) {
+        "emission"
+    } else {
+        "box"
+    }
+}
+
+pub fn box_dto(
+    id: &Hash32,
+    row: &BoxRow,
+    tree: Option<&TreeRow>,
+    tip: Option<u32>,
+    emission: Option<&Hash32>,
+) -> BoxDto {
     BoxDto {
         id: hex32(id),
         tx_id: hex32(&row.tx_id),
@@ -291,6 +319,7 @@ pub fn box_dto(id: &Hash32, row: &BoxRow, tree: Option<&TreeRow>, tip: Option<u3
         spent_by: row.spent.map(|(tx, _)| hex32(&tx)),
         spent_height: row.spent.map(|(_, h)| h),
         rent: rent_dto(row, tip),
+        kind: box_kind(&row.tree_hash, emission),
     }
 }
 
@@ -300,9 +329,10 @@ pub fn box_dto_from_reader(
     id: &Hash32,
     row: &BoxRow,
     tip: Option<u32>,
+    emission: Option<&Hash32>,
 ) -> Result<BoxDto, ApiError> {
     let tree = rd.tree_row(&row.tree_hash)?;
-    Ok(box_dto(id, row, tree.as_ref(), tip))
+    Ok(box_dto(id, row, tree.as_ref(), tip, emission))
 }
 
 /// A transaction input: its box id always, and the resolved box when the store holds it (a
@@ -327,11 +357,17 @@ pub struct TxDto {
     pub outputs: Vec<BoxDto>,
 }
 
-pub fn tx_dto(rd: &Reader, id: &Hash32, row: &TxRow, tip: Option<u32>) -> Result<TxDto, ApiError> {
+pub fn tx_dto(
+    rd: &Reader,
+    id: &Hash32,
+    row: &TxRow,
+    tip: Option<u32>,
+    emission: Option<&Hash32>,
+) -> Result<TxDto, ApiError> {
     let mut inputs = Vec::with_capacity(row.inputs.len());
     for input_id in &row.inputs {
         let resolved = match rd.box_by_id(input_id)? {
-            Some(b) => Some(box_dto_from_reader(rd, input_id, &b, tip)?),
+            Some(b) => Some(box_dto_from_reader(rd, input_id, &b, tip, emission)?),
             None => None,
         };
         inputs.push(InputDto {
@@ -341,7 +377,7 @@ pub fn tx_dto(rd: &Reader, id: &Hash32, row: &TxRow, tip: Option<u32>) -> Result
     }
     let mut outputs = Vec::with_capacity(row.output_count as usize);
     for (box_id, box_row) in rd.boxes_of_tx(row, id)? {
-        outputs.push(box_dto_from_reader(rd, &box_id, &box_row, tip)?);
+        outputs.push(box_dto_from_reader(rd, &box_id, &box_row, tip, emission)?);
     }
     Ok(TxDto {
         id: hex32(id),
@@ -506,5 +542,19 @@ mod tests {
             parse_rent_cursor(Some("nope:100")),
             Err(ApiError::BadRequest(_))
         ));
+    }
+
+    /// `kind` labels a box by the contract it sits on: the miner-fee contract, the chain's
+    /// emission contract (known only once genesis has been seeded), or neither.
+    #[test]
+    fn box_kind_labels_fee_emission_and_ordinary_trees() {
+        let emission = [7u8; 32];
+        let ordinary = [9u8; 32];
+        assert_eq!(box_kind(&xp_store::FEE_TREE_HASH, None), "fee");
+        assert_eq!(box_kind(&xp_store::FEE_TREE_HASH, Some(&emission)), "fee");
+        assert_eq!(box_kind(&emission, Some(&emission)), "emission");
+        assert_eq!(box_kind(&ordinary, Some(&emission)), "box");
+        // Without a seeded genesis there is no emission tree to compare against.
+        assert_eq!(box_kind(&emission, None), "box");
     }
 }

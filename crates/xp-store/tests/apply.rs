@@ -233,3 +233,70 @@ fn header_reward_is_the_miner_share_not_the_emission_remainder() {
     let h1 = rd.header_at(1866001).unwrap().expect("header indexed");
     assert_eq!(h1.reward, 12_000_000_000);
 }
+
+/// The stored [`xp_store::FEE_TREE_HASH`] must really be the blake2b256 of the mainnet
+/// miner-fee contract's serialized ergo tree — the whole fee computation hangs off it, and a
+/// wrong constant would silently make every fee 0 again.
+#[test]
+fn fee_tree_hash_is_the_hash_of_the_miner_fee_tree() {
+    let bytes = hex::decode(xp_store::FEE_TREE_HEX).unwrap();
+    assert_eq!(xp_wire::tree_hash(&bytes).0, xp_store::FEE_TREE_HASH);
+    assert!(xp_store::is_fee_tree(&xp_store::FEE_TREE_HASH));
+    assert!(!xp_store::is_fee_tree(&[0u8; 32]));
+    // Every fee-paying tx in the fixture block creates an output on exactly this tree.
+    let b = fixture(1866000);
+    assert!(b.txs[1]
+        .outputs
+        .iter()
+        .any(|o| o.tree_hash.0 == xp_store::FEE_TREE_HASH));
+}
+
+/// On Ergo a fee is an *output* to the miner-fee contract, not `value_in - value_out` (which
+/// is identically zero, every tx being value-balanced). These are the exact nanoERG amounts
+/// carried by block 1866000's fee outputs.
+#[test]
+fn tx_fee_is_the_sum_of_its_miner_fee_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    s.apply_batch(&[fixture(1866000)], true).unwrap();
+    let rd = xp_store::Reader::new(&s).unwrap();
+    let txs = rd.txs_in_block(1866000).unwrap();
+    assert_eq!(txs.len(), 16);
+
+    let fee = |i: usize| txs.iter().find(|(_, r)| r.index == i as u16).unwrap().1.fee;
+    // tx 0 is the emission tx: no fee output, so no fee.
+    assert_eq!(fee(0), 0);
+    assert_eq!(fee(1), 1_500_000);
+    assert_eq!(fee(11), 1_000_000);
+    assert_eq!(fee(13), 1_100_000);
+    assert_eq!(fee(14), 8_000_000);
+    // The last tx of a block is the fee-collection tx: it *spends* every fee box into the
+    // miner's box and creates no fee output of its own, so its own fee is 0.
+    assert_eq!(fee(15), 0);
+}
+
+/// `HeaderRow::fees` is the sum of its txs' fees, and — the fee-collection invariant — that
+/// sum is exactly what the block's last tx pays out to the miner.
+#[test]
+fn block_fees_sum_tx_fees_and_match_the_fee_collection_tx() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    let blocks = [fixture(1866000), fixture(1866001), fixture(1866002)];
+    s.apply_batch(&blocks, true).unwrap();
+    let rd = xp_store::Reader::new(&s).unwrap();
+
+    let expected = [26_600_000u64, 13_600_000, 2_500_000];
+    for (b, want) in blocks.iter().zip(expected) {
+        let h = b.header.height;
+        let hdr = rd.header_at(h).unwrap().expect("header indexed");
+        let txs = rd.txs_in_block(h).unwrap();
+        let sum: u64 = txs.iter().map(|(_, r)| r.fee).sum();
+        assert_eq!(hdr.fees, want, "block {h} fees");
+        assert_eq!(sum, want, "block {h} tx fee sum");
+        // The fee-collection tx's single output holds precisely the collected fees.
+        let last = b.txs.last().unwrap();
+        let collected: u64 = last.outputs.iter().map(|o| o.value).sum();
+        assert_eq!(collected, want, "block {h} fee-collection output");
+        assert!(hdr.fees > 0);
+    }
+}

@@ -9,10 +9,11 @@ pub async fn get_one(
     Path(raw): Path<String>,
 ) -> Result<Json<BoxDto>, ApiError> {
     let dto = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let id = parse_id(&raw)?;
         let row = rd.box_by_id(&id)?.ok_or(ApiError::NotFound)?;
         let tip = rd.indexed_height()?;
-        box_dto_from_reader(rd, &id, &row, tip)
+        box_dto_from_reader(rd, &id, &row, tip, emission.as_ref())
     })
     .await?;
     Ok(Json(dto))

@@ -509,3 +509,43 @@ async fn search_resolves_height_header_tx_box_and_address() {
     let (st, _) = get(&app, "/v1/search?q=%20").await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
 }
+
+/// Fees are real numbers over the API, not the constant 0 the old `value_in - value_out`
+/// produced, and every fee output is labelled `kind: "fee"`.
+#[tokio::test]
+async fn tx_and_block_fees_are_exposed_with_fee_box_kind() {
+    let (_d, app) = app();
+    let block = fixture(1866000);
+
+    let (st, v) = get(&app, "/v1/blocks/1866000").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["fees"], "26600000");
+
+    // tx 1 pays a single 0.0015 ERG fee; tx 14 pays 0.008 ERG.
+    for (index, fee) in [(1usize, "1500000"), (14, "8000000")] {
+        let id = hex::encode(block.txs[index].id.0);
+        let (st, v) = get(&app, &format!("/v1/txs/{id}")).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(v["fee"], fee, "tx {index}");
+        let kinds: Vec<&str> = v["outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds.iter().filter(|k| **k == "fee").count(), 1);
+        assert!(kinds.iter().all(|k| *k == "fee" || *k == "box"));
+    }
+
+    // The block's last tx collects the fees: it creates no fee output, so its own fee is 0.
+    let last = hex::encode(block.txs.last().unwrap().id.0);
+    let (st, v) = get(&app, &format!("/v1/txs/{last}")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["fee"], "0");
+    assert_eq!(v["outputs"][0]["kind"], "box");
+    assert_eq!(v["outputs"][0]["value"], "26600000");
+    // Its inputs are exactly the block's fee boxes.
+    for inp in v["inputs"].as_array().unwrap() {
+        assert_eq!(inp["box"]["kind"], "fee");
+    }
+}

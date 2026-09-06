@@ -116,6 +116,14 @@ impl Store {
                 tree_balance.insert(tree.as_slice(), bal.encode().as_slice())?;
             }
 
+            // The emission box is the largest of the chain-spec boxes by five orders of
+            // magnitude (93 M ERG against a treasury box of ~4 M and a proof box of 1 nanoERG),
+            // so "largest value" identifies it unambiguously. Recorded here because it is the
+            // only place the emission tree is ever seen as such: the API labels boxes on it
+            // (`BoxDto::kind == "emission"`) by reading this key back.
+            if let Some(emission) = boxes.iter().max_by_key(|b| b.value) {
+                meta.insert(META_EMISSION_TREE_HASH, emission.tree_hash.0.as_slice())?;
+            }
             meta.insert(META_NEXT_BOX_GIDX, k_u64(next_box).as_slice())?;
             meta.insert(META_GENESIS_SEEDED, &[1u8][..])?;
         }

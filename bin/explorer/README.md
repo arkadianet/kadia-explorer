@@ -164,3 +164,15 @@ been written by the old code, and the explorer refuses to open it with
 ```text
 corrupt row: store predates genesis seeding; delete explorer.redb and resync
 ```
+
+### Note on fees (stores written before fee computation was fixed)
+
+Fees used to be computed as `value_in - value_out`, which on Ergo is identically zero: a
+transaction pays its fee by creating an *output* locked by the miner-fee contract, so inputs
+and outputs always balance. Every `fee` and `fees` in a store written before that fix is
+therefore `0`.
+
+Nothing about the store format changed and the schema version is unchanged, so such a store
+opens and keeps indexing normally — but its historical rows are not backfilled. **Re-sync to
+get correct fees for already-indexed heights**; blocks applied after the upgrade are correct
+either way.

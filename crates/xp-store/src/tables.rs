@@ -44,6 +44,10 @@ pub const META_SCHEMA: &[u8] = b"schema_version";
 /// `Store::seed_genesis`. Distinct from `META_INDEXED_HEIGHT`: genesis boxes belong to no
 /// block, so seeding them leaves the store's indexed height untouched (still `None`).
 pub const META_GENESIS_SEEDED: &[u8] = b"genesis_seeded";
+/// The 32-byte blake2b256 ergo tree hash of the chain-spec emission box, written by
+/// `Store::seed_genesis`. Absent on a store that never seeded genesis (a partial store), in
+/// which case the API simply cannot label emission boxes.
+pub const META_EMISSION_TREE_HASH: &[u8] = b"emission_tree_hash";
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Present only on a store that began indexing later than chain genesis (written by

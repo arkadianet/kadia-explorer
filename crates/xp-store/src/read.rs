@@ -47,6 +47,15 @@ impl Reader {
             .transpose()
     }
 
+    /// Ergo tree hash of the chain-spec emission box, or `None` on a store that never
+    /// seeded genesis. See [`crate::tables::META_EMISSION_TREE_HASH`].
+    pub fn emission_tree_hash(&self) -> Result<Option<Hash32>, StoreError> {
+        let meta = self.txn.open_table(META)?;
+        meta.get(META_EMISSION_TREE_HASH)?
+            .map(|v| as_hash32(v.value()))
+            .transpose()
+    }
+
     pub fn header_at(&self, height: u32) -> Result<Option<HeaderRow>, StoreError> {
         let table = self.txn.open_table(HEADERS)?;
         match table.get(k_u32(height).as_slice())? {

@@ -76,6 +76,7 @@ pub async fn block_txs(
     Path(raw): Path<String>,
 ) -> Result<Json<Vec<TxDto>>, ApiError> {
     let out = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let height = resolve_height(rd, &raw)?;
         if rd.header_at(height)?.is_none() {
             return Err(ApiError::NotFound);
@@ -83,7 +84,7 @@ pub async fn block_txs(
         let tip = rd.indexed_height()?;
         rd.txs_in_block(height)?
             .iter()
-            .map(|(id, row)| tx_dto(rd, id, row, tip))
+            .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()
     })
     .await?;

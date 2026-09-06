@@ -6,6 +6,7 @@ pub mod rollback;
 pub mod rows;
 pub mod tables;
 
+pub use apply::{is_fee_tree, FEE_TREE_HASH, FEE_TREE_HEX};
 pub use read::Reader;
 
 use blake2::digest::{consts::U32, Digest};
@@ -94,6 +95,12 @@ impl Store {
         meta.get(META_INDEXED_HEIGHT)?
             .map(|v| meta_u32(v.value()))
             .transpose()
+    }
+
+    /// Ergo tree hash of the chain-spec emission box (see
+    /// [`tables::META_EMISSION_TREE_HASH`]), read once at startup by the API.
+    pub fn emission_tree_hash(&self) -> Result<Option<Hash32>, StoreError> {
+        read::Reader::new(self)?.emission_tree_hash()
     }
 
     pub fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, StoreError> {

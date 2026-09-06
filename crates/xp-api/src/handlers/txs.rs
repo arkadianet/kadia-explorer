@@ -14,12 +14,13 @@ pub async fn list(
     let cursor = parse_u64_cursor(p.cursor.as_deref())?;
     let dir = parse_dir(p.dir.as_deref())?;
     let page = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let tip = rd.indexed_height()?;
         let page = rd.txs_by_gidx(cursor, limit, dir)?;
         let items = page
             .items
             .iter()
-            .map(|(id, row)| tx_dto(rd, id, row, tip))
+            .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(PageDto {
             items,
@@ -35,10 +36,11 @@ pub async fn get_one(
     Path(raw): Path<String>,
 ) -> Result<Json<TxDto>, ApiError> {
     let dto = blocking(&state, move |rd| {
+        let emission = rd.emission_tree_hash()?;
         let id = parse_id(&raw)?;
         let row = rd.tx_by_id(&id)?.ok_or(ApiError::NotFound)?;
         let tip = rd.indexed_height()?;
-        tx_dto(rd, &id, &row, tip)
+        tx_dto(rd, &id, &row, tip, emission.as_ref())
     })
     .await?;
     Ok(Json(dto))
