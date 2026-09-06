@@ -477,7 +477,7 @@
 	}
 
 	.hero {
-		margin-top: calc((var(--topbar-h) + var(--space-2)) * -1);
+		margin-top: calc((var(--topbar-h) + var(--banner-h, 0px) + var(--space-2)) * -1);
 		border-radius: 0 0 var(--radius-card) var(--radius-card);
 	}
 
@@ -487,7 +487,8 @@
 		align-items: flex-end;
 		justify-content: space-between;
 		gap: var(--space-8);
-		padding: calc(var(--topbar-h) + var(--space-12)) var(--gutter) var(--space-10);
+		padding: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-12)) var(--gutter)
+			var(--space-10);
 		min-height: 420px;
 	}
 
@@ -915,7 +916,7 @@
 			flex-direction: column;
 			align-items: stretch;
 			gap: var(--space-8);
-			padding-top: calc(var(--topbar-h) + var(--space-8));
+			padding-top: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-8));
 			min-height: 0;
 		}
 		.tipcard {

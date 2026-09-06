@@ -22,10 +22,9 @@
 
 	const h = $derived(health(status.current));
 
-	/** The home page opens with a full-bleed landscape that runs under the floating header;
-	 * every other route starts with a card, so it needs the header's height reserved — and,
-	 * when the index is behind, the banner's too. */
-	const isHome = $derived(page.url.pathname === '/');
+	/** The header floats over the page's first section and the lag banner floats under it, so
+	 * both have to be reserved as space: `--banner-h` on the main column is what every page
+	 * (and the home hero, which bleeds back up through it) offsets itself by. */
 	const hasBanner = $derived(stalledInfo !== null || (showLagBanner && status.current !== null));
 
 	interface NavLink {
@@ -127,7 +126,7 @@
 		</div>
 	</aside>
 
-	<div class="main">
+	<div class="main" style:--banner-h={hasBanner ? '58px' : '0px'}>
 		<header class="topbar">
 			<div class="search-slot" data-testid="search-slot">
 				<SearchBox />
@@ -156,7 +155,7 @@
 			</div>
 		{/if}
 
-		<main class="content" class:banner-space={hasBanner && !isHome}>
+		<main class="content">
 			{@render children()}
 		</main>
 
@@ -457,16 +456,13 @@
 		border-color: rgba(224, 112, 112, 0.35);
 	}
 
-	.content.banner-space {
-		padding-top: calc(var(--topbar-h) + 62px);
-	}
-
 	.content {
 		flex: 1;
 		min-width: 0;
 		width: 100%;
 		max-width: 1240px;
-		padding: calc(var(--topbar-h) + var(--space-2)) var(--gutter) var(--space-16);
+		padding: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-2)) var(--gutter)
+			var(--space-16);
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-10);
@@ -624,6 +620,10 @@
 		}
 
 		.chain-row span {
+			display: none;
+		}
+
+		.status-slot {
 			display: none;
 		}
 

@@ -162,8 +162,8 @@
 	}
 
 	.go:hover {
-		background: var(--accent-ink);
-		color: #fff;
+		background: var(--btn-hover);
+		color: var(--btn-hover-fg);
 	}
 
 	.hint {

@@ -10,24 +10,32 @@
  * Ergo green at full saturation (#1fb56b) is a 2.2:1 fill, never a text colour — that is what
  * the ink pair is for. Never set text to a non-ink tone.
  *
- * Contrast (WCAG 2.x sRGB relative luminance; measured with scripts noted in the design
- * report). Every text pairing below clears 4.5:1.
+ * Contrast (WCAG 2.x sRGB relative luminance, computed with a node script over these exact
+ * hex values). Every text pairing clears 4.5:1.
  *
- *   LIGHT   on --bg #f5f6f4   on --surface-solid #ffffff
- *     --fg          #14201b        14.99            15.86
- *     --fg-muted    #5f6d66         5.05             5.34
- *     --accent-ink  #0d7a4c         5.29             5.60
- *     --warn-ink    #8a5d00         5.32             5.63
- *     --danger-ink  #b23434         5.24             5.55
- *     --fg on --accent #1fb56b: 5.65   (dark ink on the green pill)
- *     white on --btn #14201b: 15.86
+ *   LIGHT                       on --bg #f5f6f4   on --surface-solid #ffffff
+ *     --fg          #14201b          15.47             16.77
+ *     --fg-muted    #5f6d66           5.01              5.43
+ *     --accent-ink  #0d7a4c           4.96              5.38
+ *     --warn-ink    #8a5d00           5.31              5.76
+ *     --danger-ink  #b23434           5.64              6.12
+ *     --btn-fill-fg on --btn-fill: 16.77; #ffffff on the hover fill #0d7a4c: 5.38
+ *     hero display #14201b on the palest dawn ridge 15.60, on the deepest 8.05
+ *     hero lede    #2f4038 on those two: 10.22 / 5.28
  *
- *   DARK    on --bg #0f1512   on --surface-solid #16201b
- *     --fg          #e9eeea        15.09            13.82
- *     --fg-muted    #93a49a         6.13             5.62
- *     --accent-ink  #43d492         9.55             8.75
- *     --warn-ink    #e6b455        10.28             9.42
- *     --danger-ink  #f08b8b         8.05             7.38
+ *   DARK                        on --bg #0f1512   on --surface-solid #16201b
+ *     --fg          #e9eeea          15.74             14.23
+ *     --fg-muted    #93a49a           7.06              6.38
+ *     --accent-ink  #43d492           9.74              8.81
+ *     --warn-ink    #e6b455           9.70              8.77
+ *     --danger-ink  #f08b8b           7.72              6.98
+ *     --btn-fill-fg on --btn-fill: 15.74; #0f1512 on the hover fill #43d492: 9.74
+ *     hero display #f2f6f3 on the dusk ridges: 9.73 / 17.31
+ *
+ *   INK PANELS (rail, live transactions, go-deeper), on #0f1512 / #0b100d
+ *     --ink-fg      #e9eeea    15.74 / 16.34      --ink-fg-muted #93a49a  7.06 / 7.33
+ *     rent chip     #6fdca7    10.98 / 11.40      token chip     #e8be6a 10.56 / 10.97
+ *     live dot      #1fb56b     6.93 /  7.20      danger chip    #f0a0a0  9.01 / 9.36
  */
 
 :root {
@@ -64,6 +72,10 @@
 	/* Buttons: the filled one is near-black with white text, as in the reference. */
 	--btn-fill: #14201b;
 	--btn-fill-fg: #ffffff;
+	/* Hover swaps the fill for the accent; the pair is chosen per theme because white on a
+	   light-theme green passes and on a dark-theme green does not. */
+	--btn-hover: #0d7a4c;
+	--btn-hover-fg: #ffffff;
 
 	--rule: 1px solid var(--hairline);
 	/* Alpha of a tone behind its own badge text (Badge.svelte). */
@@ -139,6 +151,8 @@
 
 	--btn-fill: #e9eeea;
 	--btn-fill-fg: #0f1512;
+	--btn-hover: #43d492;
+	--btn-hover-fg: #0f1512;
 
 	--shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.45);
 	--shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 16px rgba(0, 0, 0, 0.28);
