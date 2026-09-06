@@ -60,8 +60,9 @@ pub struct IngestStatus {
     /// `Some(reason)` once ingest has given up; [`run`] returns an error immediately after
     /// publishing it.
     pub halted: Option<String>,
-    /// `Some` while ingest is making no progress for a reason it expects to resolve itself —
-    /// today, only a source that announces a header at a height but will not serve its body.
+    /// `Some` while ingest is making no progress for a reason it expects to resolve itself:
+    /// a source that announces a header at a height but will not serve its body, or a parent
+    /// check that keeps failing at the same height (an orphan sibling indexed at our tip).
     /// Unlike [`IngestStatus::halted`], ingest keeps retrying (see [`STALL_BACKOFF`]), so this
     /// is the only outward sign that `indexed` has stopped moving.
     pub stalled: Option<StalledInfo>,
@@ -77,6 +78,12 @@ pub struct StalledInfo {
     /// Human-readable cause, safe to show in a UI.
     pub reason: String,
 }
+
+/// How many times in a row the same height may fail its parent check before ingest treats it
+/// as a wedge rather than a mid-batch chain move: it publishes a stall and forces the fork
+/// check below its own tip. Small, because the benign case (the source's chain moved under us
+/// during a batch) resolves on the very next iteration.
+const PARENT_MISMATCH_LIMIT: u32 = 5;
 
 /// Poll interval used instead of `poll_ms` while stalled. A stall is a source-side hole that
 /// no amount of re-asking fixes quickly, so backing off keeps ingest from hammering the node
@@ -140,6 +147,9 @@ pub async fn run(
 
     // `Some` for as long as the source withholds a body we need; see [`Stall`].
     let mut stall: Option<Stall> = None;
+    // `Some((height, times))` while the same height keeps failing its parent check. Reset by
+    // anything that changes the situation: an applied batch, or a rollback.
+    let mut parent_mismatch: Option<(u32, u32)> = None;
 
     let publish = |indexed: Option<u32>,
                    best: u32,
@@ -283,7 +293,14 @@ pub async fn run(
         // The fork check runs before the `indexed >= best` short-circuit: a reorg that swaps
         // the tip without changing the height (the common case for a 1-block reorg) is
         // invisible to a height comparison, and would otherwise never be noticed.
-        match fork_check(&store, &source, indexed).await {
+        // A parent check that has failed `PARENT_MISMATCH_LIMIT` times at the same height is
+        // not the source's chain moving under us — our own tip is the problem (classically an
+        // orphan sibling that applied because it built on our tip while nothing builds on it).
+        // The plain fork check cannot see that: it compares our tip against the source's id at
+        // that height and, if they agree, concludes there is nothing to do. So force it to
+        // start one block below our tip, which drops the suspect header no matter what.
+        let distrust_tip = parent_mismatch.is_some_and(|(_, n)| n >= PARENT_MISMATCH_LIMIT);
+        match fork_check(&store, &source, indexed, distrust_tip).await {
             ForkCheck::Agreed => {}
             ForkCheck::Wait => {
                 debug!(
@@ -315,6 +332,7 @@ pub async fn run(
                 cur = Some(indexed);
                 // The wanted range moved; any stall was about a height we are no longer at.
                 stall = None;
+                parent_mismatch = None;
                 publish(cur, best, mode, None, None);
             }
         }
@@ -421,11 +439,51 @@ pub async fn run(
                 );
                 // Progress: whatever the source was withholding, it is behind us now.
                 stall = None;
+                parent_mismatch = None;
                 publish(Some(new_indexed), best, mode, None, None);
             }
             Err(ApplyErr::Store(StoreError::ParentMismatch { height, have, want })) => {
-                // The source's chain moved under us mid-batch; the next fork check resolves it.
+                // Usually the source's chain moved under us mid-batch and the next fork check
+                // resolves it. When it does not, the same height fails over and over and
+                // ingest looks idle while getting nowhere — the 1789057 wedge. Count the run,
+                // and once it is clearly not transient say so and distrust our own tip (see
+                // `distrust_tip` above).
                 debug!(height, %have, %want, "parent mismatch; re-checking fork");
+                let times = match parent_mismatch {
+                    Some((h, n)) if h == height => n + 1,
+                    // The failing height moved, so any stall we raised described the old one.
+                    Some(_) => {
+                        stall = None;
+                        1
+                    }
+                    None => 1,
+                };
+                parent_mismatch = Some((height, times));
+                if times >= PARENT_MISMATCH_LIMIT {
+                    let reason = "parent mismatch persists (orphan sibling applied?)".to_owned();
+                    match &mut stall {
+                        Some(st) if st.height == height => {
+                            if st.last_warn.elapsed() >= STALL_WARN_EVERY {
+                                st.last_warn = Instant::now();
+                                warn!(
+                                    height,
+                                    stalled_secs = st.since.elapsed().as_secs(),
+                                    "ingest still stalled: {reason}"
+                                );
+                            }
+                        }
+                        _ => {
+                            warn!(height, %have, %want, "ingest stalled: {reason}");
+                            let now = Instant::now();
+                            stall = Some(Stall {
+                                height,
+                                since: now,
+                                last_warn: now,
+                                reason,
+                            });
+                        }
+                    }
+                }
                 retry!(cur);
             }
             Err(ApplyErr::Store(e)) => halt_store!(cur, e),
@@ -444,11 +502,21 @@ enum ApplyErr {
 /// cannot confirm a common ancestor we do not hold. A store *error*, by contrast, is never a
 /// disagreement — it is reported as [`ForkCheck::StoreError`] so the caller halts on the real
 /// cause instead of walking the window and blaming a fork.
-async fn fork_check(store: &Arc<Store>, source: &Arc<dyn BlockSource>, indexed: u32) -> ForkCheck {
+///
+/// With `distrust_tip`, the comparison starts one height *below* the store's tip, so the
+/// answer is never [`ForkCheck::Agreed`] and at least one block is always rolled back. The
+/// caller uses it when the tip is the suspect: nothing the source says about that height can
+/// clear it, because agreeing there is exactly what leaves ingest wedged.
+async fn fork_check(
+    store: &Arc<Store>,
+    source: &Arc<dyn BlockSource>,
+    indexed: u32,
+    distrust_tip: bool,
+) -> ForkCheck {
     if indexed == 0 {
         return ForkCheck::Agreed;
     }
-    let mut h = indexed;
+    let mut h = if distrust_tip { indexed - 1 } else { indexed };
     loop {
         let ours: Option<Hash32> = match store.header_id_at(h) {
             Ok(v) => v,

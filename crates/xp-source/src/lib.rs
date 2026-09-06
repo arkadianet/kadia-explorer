@@ -17,11 +17,11 @@ pub trait BlockSource: Send + Sync {
     /// The header id at `height` on the source's current best chain, or `None` if the
     /// source has no block at that height (yet, or ever, if it is beyond its own tip).
     ///
-    /// A height can hold more than one header (competing blocks the node has seen and kept).
-    /// The node's `/blocks/at/{h}` lists the best-chain header first, and implementations
-    /// rely on that convention: they return the first id and log a warning when there is
-    /// more than one. Callers get one id per height, so a fork is detected the usual way —
-    /// by the id at a height changing between polls — not by inspecting a list here.
+    /// A height can hold more than one header (competing blocks the node has seen and kept),
+    /// and implementations must resolve that to the *best-chain* one — `/blocks/at/{h}` lists
+    /// orphans too, in no dependable order. Callers get one id per height, so a fork is
+    /// detected the usual way — by the id at a height changing between polls — not by
+    /// inspecting a list here.
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError>;
     /// The raw block JSON body for header `id`, or `None` if the source doesn't have it.
     async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError>;

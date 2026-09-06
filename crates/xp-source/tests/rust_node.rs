@@ -40,6 +40,22 @@ async fn blocks_at(
     }
 }
 
+/// `/blocks/chainSlice` — the best-chain headers in `(from, to]`, except that `from == to`
+/// returns the single header at that height (verified against a live node).
+async fn chain_slice(
+    state: axum::extract::State<Arc<Fixtures>>,
+    axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>,
+) -> Json<Vec<serde_json::Value>> {
+    let to: u32 = q.get("toHeight").and_then(|v| v.parse().ok()).unwrap_or(0);
+    match state.by_height.get(&to) {
+        Some(json) => {
+            let v: serde_json::Value = serde_json::from_str(json).unwrap();
+            Json(vec![v.get("header").unwrap().clone()])
+        }
+        None => Json(vec![]),
+    }
+}
+
 async fn block_by_id(
     state: axum::extract::State<Arc<Fixtures>>,
     Path(id): Path<String>,
@@ -48,6 +64,16 @@ async fn block_by_id(
         Some(json) => json.clone().into_response(),
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// Binds an ephemeral port, serves `app` on it, and returns its base URL.
+async fn serve(app: Router) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
 }
 
 async fn spawn_server() -> String {
@@ -69,15 +95,10 @@ async fn spawn_server() -> String {
     let app = Router::new()
         .route("/info", get(info))
         .route("/blocks/at/{height}", get(blocks_at))
+        .route("/blocks/chainSlice", get(chain_slice))
         .route("/blocks/{id}", get(block_by_id))
         .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    format!("http://{addr}")
+    serve(app).await
 }
 
 #[tokio::test]
@@ -137,13 +158,71 @@ async fn unreachable_base_yields_unavailable_or_http_error() {
     }
 }
 
-/// A node holding competing blocks lists several ids at one height. The source takes the
-/// first — the node's best-chain convention — rather than failing or picking arbitrarily.
+/// A node holding competing blocks lists several ids at `/blocks/at/{h}`, and the orphan can
+/// come first. `chainSlice` names the best-chain header for the height, so that is what the
+/// source must return — taking `/blocks/at`'s first id applied an orphan and wedged the sync.
 #[tokio::test]
-async fn header_id_at_takes_the_first_of_several_ids() {
+async fn header_id_at_prefers_the_chain_slice_header_over_blocks_at() {
+    let orphan = [0x11u8; 32];
+    let best = [0x22u8; 32];
+    let ids = vec![xp_types::hex32(&orphan), xp_types::hex32(&best)];
+    let slice = serde_json::json!([{ "height": 1789057, "id": xp_types::hex32(&best) }]);
+    let app = Router::new()
+        .route(
+            "/blocks/at/{height}",
+            get(move || {
+                let ids = ids.clone();
+                async move { Json(ids) }
+            }),
+        )
+        .route(
+            "/blocks/chainSlice",
+            get(move || {
+                let slice = slice.clone();
+                async move { Json(slice) }
+            }),
+        );
+    let base = serve(app).await;
+
+    let node = RustNode::new(&base);
+    assert_eq!(node.header_id_at(1789057).await.unwrap(), Some(best));
+}
+
+/// `chainSlice` above a node's own tip answers with an empty array — no header, not an error.
+#[tokio::test]
+async fn header_id_at_empty_chain_slice_is_none() {
+    let app = Router::new().route(
+        "/blocks/chainSlice",
+        get(|| async { Json(Vec::<serde_json::Value>::new()) }),
+    );
+    let base = serve(app).await;
+    assert_eq!(RustNode::new(&base).header_id_at(9).await.unwrap(), None);
+}
+
+/// A `chainSlice` that answers with headers but none at the height asked for (a node whose
+/// range semantics differ) is "no header here", not a wrong id from a neighbouring height.
+#[tokio::test]
+async fn header_id_at_ignores_chain_slice_headers_at_other_heights() {
+    let slice = serde_json::json!([{ "height": 41, "id": xp_types::hex32(&[0x33u8; 32]) }]);
+    let app = Router::new().route(
+        "/blocks/chainSlice",
+        get(move || {
+            let slice = slice.clone();
+            async move { Json(slice) }
+        }),
+    );
+    let base = serve(app).await;
+    assert_eq!(RustNode::new(&base).header_id_at(42).await.unwrap(), None);
+}
+
+/// Older nodes have no `chainSlice` endpoint at all. Then — and only then — the source falls
+/// back to `/blocks/at/{h}` and its first-id convention.
+#[tokio::test]
+async fn header_id_at_falls_back_to_blocks_at_when_chain_slice_is_missing() {
     let first = [0x11u8; 32];
     let second = [0x22u8; 32];
     let ids = vec![xp_types::hex32(&first), xp_types::hex32(&second)];
+    // No `/blocks/chainSlice` route: the router answers 404, as an older node would.
     let app = Router::new().route(
         "/blocks/at/{height}",
         get(move || {
@@ -151,12 +230,8 @@ async fn header_id_at_takes_the_first_of_several_ids() {
             async move { Json(ids) }
         }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let base = serve(app).await;
 
-    let node = RustNode::new(&format!("http://{addr}"));
+    let node = RustNode::new(&base);
     assert_eq!(node.header_id_at(1866000).await.unwrap(), Some(first));
 }
