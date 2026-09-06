@@ -18,6 +18,6 @@
 	.row {
 		height: 30px;
 		border-bottom: var(--rule);
-		background: var(--bg-elev);
+		background: var(--surface-solid);
 	}
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import Icon from '$lib/components/Icon.svelte';
 
 	interface Props {
 		/** DOM id for the input (and its label's `for`). Must be unique per instance. */
@@ -8,9 +9,11 @@
 		 * should — the header's — so a second box on the page (e.g. /search's) neither steals
 		 * focus nor registers a duplicate window listener. */
 		globalShortcut?: boolean;
+		/** Sits under the field as a one-line reminder of what can be pasted in. */
+		hint?: string;
 	}
 
-	let { id = 'global-search', globalShortcut = true }: Props = $props();
+	let { id = 'global-search', globalShortcut = true, hint }: Props = $props();
 
 	let q = $state('');
 	let inputEl: HTMLInputElement | undefined;
@@ -61,78 +64,112 @@
 
 <form role="search" class="search" onsubmit={submit}>
 	<label class="visually-hidden" for={id}>Search</label>
-	<input
-		{id}
-		type="search"
-		bind:value={q}
-		bind:this={inputEl}
-		placeholder="Height, block, tx, box or address"
-		autocomplete="off"
-		spellcheck="false"
-		onkeydown={onInputKeydown}
-	/>
-	<button type="submit" class="submit-btn" aria-label="Search">Go</button>
+	<div class="field glass">
+		<span class="lead"><Icon name="search" size={18} /></span>
+		<input
+			{id}
+			type="search"
+			bind:value={q}
+			bind:this={inputEl}
+			placeholder="Search anything…"
+			autocomplete="off"
+			spellcheck="false"
+			onkeydown={onInputKeydown}
+		/>
+		{#if globalShortcut}
+			<!-- The shortcut is shown where it is used, rather than hidden in a help page. -->
+			<kbd title="Press / to jump to the search box">/</kbd>
+		{:else}
+			<button type="submit" class="go" aria-label="Search"
+				><Icon name="arrow-right" size={18} /></button
+			>
+		{/if}
+	</div>
+	{#if hint}<p class="hint">{hint}</p>{/if}
 </form>
 
 <style>
 	.search {
-		display: flex;
-		gap: var(--space-2);
-		max-width: 640px;
-	}
-
-	.search input {
-		flex: 1;
-		width: 100%;
 		min-width: 0;
-		padding: var(--space-1) var(--space-3);
-		height: 30px;
-		background: var(--bg-elev);
-		color: var(--fg);
-		border: var(--rule);
-		border-radius: var(--radius);
-		font: var(--fs-body) / 1.4 var(--font-sans);
 	}
 
-	.search input::placeholder {
+	.field {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		height: 46px;
+		padding: 0 var(--space-2) 0 var(--space-4);
+		border-radius: var(--radius-pill);
+	}
+
+	.field:focus-within {
+		border-color: var(--accent);
+		box-shadow:
+			var(--shadow-lift),
+			0 0 0 3px var(--accent-wash);
+	}
+
+	.lead {
 		color: var(--fg-muted);
 	}
 
-	.search input:focus {
-		outline: 2px solid var(--accent);
-		outline-offset: -1px;
+	input {
+		flex: 1;
+		min-width: 0;
+		background: none;
+		border: 0;
+		padding: 0;
+		color: var(--fg);
+		font: 400 var(--fs-body) / 1.4 var(--font-sans);
 	}
 
-	.submit-btn {
-		flex-shrink: 0;
-		height: 30px;
-		padding: 0 var(--space-4);
-		background: var(--accent);
-		color: var(--accent-fg);
-		border: 1px solid var(--accent);
-		border-radius: var(--radius);
-		font: 600 var(--fs-body) / 1 var(--font-sans);
+	input::placeholder {
+		color: var(--fg-muted);
+	}
+
+	input:focus {
+		outline: none;
+	}
+
+	/* Chrome draws its own clear affordance inside type=search; it fights the kbd badge. */
+	input::-webkit-search-cancel-button {
+		display: none;
+	}
+
+	kbd {
+		display: grid;
+		place-items: center;
+		width: 26px;
+		height: 26px;
+		margin-right: 6px;
+		border-radius: 8px;
+		border: var(--rule);
+		background: var(--bg);
+		color: var(--fg-muted);
+		font: 600 var(--fs-micro) / 1 var(--font-sans);
+	}
+
+	.go {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		border: 0;
+		border-radius: 50%;
+		background: var(--btn-fill);
+		color: var(--btn-fill-fg);
 		cursor: pointer;
 	}
 
-	.submit-btn:hover {
-		filter: brightness(1.08);
+	.go:hover {
+		background: var(--accent-ink);
+		color: #fff;
 	}
 
-	.submit-btn:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
-	.visually-hidden {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
+	.hint {
+		margin-top: var(--space-2);
+		padding-left: var(--space-4);
+		font-size: var(--fs-micro);
+		color: var(--fg-muted);
 	}
 </style>

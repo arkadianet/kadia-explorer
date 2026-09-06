@@ -4,8 +4,10 @@
 	import { page } from '$app/state';
 	import { theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
+	import { health } from '$lib/status/health';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import SearchBox from '$lib/components/SearchBox.svelte';
+	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import { onMount } from 'svelte';
 
 	let { children } = $props();
@@ -18,13 +20,29 @@
 		return s !== null && (s.lag_blocks > 100 || s.halted !== null);
 	});
 
-	const navLinks = [
-		{ href: '/', label: 'Overview' },
-		{ href: '/blocks', label: 'Blocks' },
-		{ href: '/txs', label: 'Transactions' },
-		{ href: '/richlist', label: 'Rich list' },
-		{ href: '/rent', label: 'Rent' },
-		{ href: '/status', label: 'Status' }
+	const h = $derived(health(status.current));
+
+	/** The home page opens with a full-bleed landscape that runs under the floating header;
+	 * every other route starts with a card, so it needs the header's height reserved — and,
+	 * when the index is behind, the banner's too. */
+	const isHome = $derived(page.url.pathname === '/');
+	const hasBanner = $derived(stalledInfo !== null || (showLagBanner && status.current !== null));
+
+	interface NavLink {
+		href: string;
+		label: string;
+		icon: IconName;
+		/** Whether the item earns a slot in the phone's bottom bar (five fit; six do not). */
+		primary?: boolean;
+	}
+
+	const navLinks: NavLink[] = [
+		{ href: '/', label: 'Home', icon: 'home', primary: true },
+		{ href: '/blocks', label: 'Blocks', icon: 'blocks', primary: true },
+		{ href: '/txs', label: 'Transactions', icon: 'txs', primary: true },
+		{ href: '/richlist', label: 'Rich list', icon: 'richlist' },
+		{ href: '/rent', label: 'Storage rent', icon: 'rent-coin', primary: true },
+		{ href: '/status', label: 'Status', icon: 'status', primary: true }
 	];
 
 	function isActive(href: string): boolean {
@@ -43,6 +61,8 @@
 		return SECTION_OF[first] === href;
 	}
 
+	const year = new Date().getFullYear();
+
 	onMount(() => {
 		theme.init();
 		status.start();
@@ -51,102 +71,160 @@
 </script>
 
 <div class="shell">
-	<header class="topbar">
-		<a class="brand" href="/">
-			kadia<span class="brand-dot" aria-hidden="true"></span><span class="brand-sub">explorer</span>
-		</a>
-		<div class="search-slot" data-testid="search-slot">
-			<SearchBox />
-		</div>
-		<div class="status-slot" data-testid="status-slot">
-			<StatusBadge />
-		</div>
-		<button
-			type="button"
-			class="theme-toggle"
-			aria-label="Toggle theme"
-			onclick={() => theme.toggle()}
-		>
-			{#if theme.current === 'dark'}
-				<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-					<path fill="currentColor" d="M13.3 9.9A5.6 5.6 0 0 1 6.1 2.7 5.7 5.7 0 1 0 13.3 9.9Z" />
-				</svg>
-			{:else}
-				<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-					<circle cx="8" cy="8" r="3.1" fill="currentColor" />
-					<g stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
-						<path
-							d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3.1 3.1l1.3 1.3M11.6 11.6l1.3 1.3M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3"
-						/>
-					</g>
-				</svg>
-			{/if}
-		</button>
-	</header>
+	<aside class="rail">
+		<div class="rail-in">
+			<a class="brand" href="/">
+				<span class="mark" aria-hidden="true">Σ</span>
+				<span class="wordmark">
+					<span class="name">Kadia</span>
+					<span class="sub">Ergo Explorer</span>
+				</span>
+			</a>
 
-	{#if stalledInfo}
-		<div class="banner danger" role="alert">
-			Indexer is waiting on block {stalledInfo.height} from the node for {stalledInfo.since_secs}
-			s.
-		</div>
-	{:else if showLagBanner && status.current}
-		<div class="banner warn" role="status">
-			Index is {status.current.lag_blocks} blocks behind the node.
-		</div>
-	{/if}
+			<nav class="nav" aria-label="Primary">
+				<ul>
+					{#each navLinks as link (link.href)}
+						<li>
+							<a
+								href={link.href}
+								class:current={isCurrent(link.href)}
+								aria-current={isActive(link.href) ? 'page' : undefined}
+							>
+								<Icon name={link.icon} size={19} />
+								{link.label}
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</nav>
 
-	<nav class="rail" aria-label="Primary">
-		<ul>
-			{#each navLinks as link (link.href)}
-				<li>
-					<a
-						href={link.href}
-						class:current={isCurrent(link.href)}
-						aria-current={isActive(link.href) ? 'page' : undefined}
-					>
-						{link.label}
-					</a>
-				</li>
-			{/each}
-		</ul>
-	</nav>
+			<div class="rail-foot">
+				<!-- The chain's state, restated where the eye rests between navigations. Every figure
+			     comes from /v1/status; nothing here is estimated. -->
+				<a class="chain" href="/status" title={h.detail}>
+					<span class="chain-head">
+						<span class="dot tone-{h.tone}" aria-hidden="true"></span>
+						Ergo mainnet
+					</span>
+					<span class="chain-row">
+						<span>Indexed height</span>
+						<b>{status.current?.indexed?.toLocaleString('en-US') ?? '—'}</b>
+					</span>
+					<span class="chain-row">
+						<span>Behind the node</span>
+						<b>{status.current ? `${status.current.lag_blocks.toLocaleString('en-US')}` : '—'}</b>
+					</span>
+					<span class="chain-row">
+						<span>Indexer</span>
+						<b>{status.current ? `${h.label.toLowerCase()}, ${status.current.mode}` : '—'}</b>
+					</span>
+				</a>
 
-	<main class="content">
-		{@render children()}
-	</main>
+				<p class="note">
+					Every figure here is read from the chain or computed from it. Hover one to see how.
+				</p>
+			</div>
+		</div>
+	</aside>
+
+	<div class="main">
+		<header class="topbar">
+			<div class="search-slot" data-testid="search-slot">
+				<SearchBox />
+			</div>
+			<div class="status-slot" data-testid="status-slot">
+				<StatusBadge />
+			</div>
+			<button
+				type="button"
+				class="theme-toggle"
+				aria-label="Toggle theme"
+				onclick={() => theme.toggle()}
+			>
+				<Icon name={theme.current === 'dark' ? 'sun' : 'moon'} size={18} />
+			</button>
+		</header>
+
+		{#if stalledInfo}
+			<div class="banner danger" role="alert">
+				Indexer is waiting on block {stalledInfo.height} from the node for {stalledInfo.since_secs}
+				s.
+			</div>
+		{:else if showLagBanner && status.current}
+			<div class="banner warn" role="status">
+				Index is {status.current.lag_blocks} blocks behind the node.
+			</div>
+		{/if}
+
+		<main class="content" class:banner-space={hasBanner && !isHome}>
+			{@render children()}
+		</main>
+
+		<footer class="foot">
+			<div class="foot-in">
+				<a class="brand small" href="/">
+					<span class="mark" aria-hidden="true">Σ</span>
+					<span class="wordmark"><span class="name">Kadia</span></span>
+				</a>
+				<p class="foot-line">Open source, built for a fairer and more open future.</p>
+				<nav class="foot-links" aria-label="Footer">
+					<a href="/v1/status">API</a>
+					<a href="/status">Status</a>
+					<a href="https://github.com/arkadianet" rel="noreferrer">GitHub</a>
+				</nav>
+				<span class="pill mainnet"><span class="dot tone-{h.tone}"></span>Ergo mainnet</span>
+			</div>
+			<p class="copy">© {year} Kadia</p>
+		</footer>
+	</div>
 </div>
+
+<nav class="tabbar" aria-label="Primary">
+	{#each navLinks.filter((l) => l.primary) as link (link.href)}
+		<a
+			href={link.href}
+			class:current={isCurrent(link.href)}
+			aria-current={isActive(link.href) ? 'page' : undefined}
+		>
+			<Icon name={link.icon} size={20} />
+			<span
+				>{link.label === 'Transactions'
+					? 'Txs'
+					: link.label === 'Storage rent'
+						? 'Rent'
+						: link.label}</span
+			>
+		</a>
+	{/each}
+</nav>
 
 <style>
 	.shell {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: auto auto 1fr auto;
-		grid-template-areas:
-			'topbar'
-			'banner'
-			'content'
-			'rail';
 		min-height: 100vh;
 	}
 
-	.topbar {
-		grid-area: topbar;
+	/* ------------------------------------------------------------------------- the rail */
+	/* The dark column paints the whole grid row; only its contents stick, so the panel never
+	   stops halfway down a long page. */
+	.rail {
+		background: var(--ink-panel);
+		color: var(--ink-fg);
+	}
+
+	.rail-in {
 		display: flex;
-		align-items: center;
-		gap: var(--space-4);
-		height: 52px;
-		padding: 0 var(--space-4);
-		border-bottom: var(--rule);
+		flex-direction: column;
+		gap: var(--space-6);
+		padding: var(--space-5) var(--space-4);
 	}
 
 	.brand {
-		display: inline-flex;
-		align-items: baseline;
-		gap: var(--space-2);
-		font-weight: 600;
-		font-size: var(--fs-title);
-		letter-spacing: -0.01em;
-		white-space: nowrap;
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		padding: 0 var(--space-2);
 	}
 
 	.brand:hover,
@@ -154,169 +232,411 @@
 		color: inherit;
 	}
 
-	.brand-dot {
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--accent);
-		align-self: center;
+	.mark {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		flex: none;
+		border-radius: 11px;
+		background: var(--ink-fg);
+		color: var(--ink-panel);
+		font-size: 19px;
+		font-weight: 700;
+		line-height: 1;
 	}
 
-	.brand-sub {
-		font-weight: 400;
+	.wordmark {
+		display: flex;
+		flex-direction: column;
+		line-height: 1.15;
+		min-width: 0;
+	}
+
+	.name {
+		font-size: var(--fs-title);
+		font-weight: 700;
+		letter-spacing: -0.02em;
+	}
+
+	.sub {
+		font-size: 11px;
+		font-weight: 500;
+		color: var(--ink-fg-muted);
+	}
+
+	.nav ul {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.nav a {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		height: 42px;
+		padding: 0 var(--space-3);
+		border-radius: var(--radius-control);
 		font-size: var(--fs-body);
-		color: var(--fg-muted);
+		font-weight: 500;
+		color: var(--ink-fg-muted);
+	}
+
+	.nav a:hover,
+	.nav a:focus-visible {
+		color: var(--ink-fg);
+		background: rgba(233, 238, 234, 0.06);
+	}
+
+	/* The active item is a filled pill, the only light shape in a dark column. */
+	.nav a.current {
+		color: var(--ink-panel);
+		background: var(--ink-fg);
+		font-weight: 600;
+	}
+
+	.rail-foot {
+		margin-top: auto;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-4);
+	}
+
+	.chain {
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
+		padding: var(--space-4);
+		border-radius: var(--radius-card);
+		background: rgba(233, 238, 234, 0.05);
+		border: 1px solid var(--ink-hairline);
+		font-size: var(--fs-micro);
+		color: var(--ink-fg-muted);
+	}
+
+	.chain:hover,
+	.chain:focus-visible {
+		color: var(--ink-fg-muted);
+		border-color: rgba(233, 238, 234, 0.24);
+	}
+
+	.chain-head {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		color: var(--ink-fg);
+		font-size: var(--fs-label);
+		font-weight: 600;
+		margin-bottom: 2px;
+	}
+
+	.chain-row {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: var(--space-3);
+	}
+
+	.chain-row b {
+		color: var(--ink-fg);
+		font-weight: 600;
+	}
+
+	.tone-ok {
+		color: var(--accent);
+	}
+	.tone-warn {
+		color: var(--warn);
+	}
+	.tone-danger {
+		color: var(--danger);
+	}
+	.tone-neutral {
+		color: var(--ink-fg-muted);
+	}
+
+	.note {
+		padding: 0 var(--space-2);
+		font-size: 11.5px;
+		line-height: 1.5;
+		color: var(--ink-fg-muted);
+	}
+
+	/* ------------------------------------------------------------------------ the main column */
+	.main {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		position: relative;
+	}
+
+	/* The header floats over whatever the page opens with — on the home page that is the
+	   landscape, so the search pill sits on the sky rather than on a bar of its own. */
+	.topbar {
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 30;
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		height: var(--topbar-h);
+		padding: 0 var(--gutter);
 	}
 
 	.search-slot {
 		flex: 1;
 		min-width: 0;
-	}
-
-	/* Under 720 px there is no room for a usable search field beside the wordmark, so it takes
-	   a line of its own rather than being squeezed to a stub. */
-	@media (max-width: 719px) {
-		.topbar {
-			height: auto;
-			flex-wrap: wrap;
-			gap: var(--space-2) var(--space-3);
-			padding: var(--space-2) var(--space-4);
-		}
-
-		.search-slot {
-			order: 3;
-			flex: 1 0 100%;
-			max-width: none;
-		}
-
-		.status-slot {
-			margin-left: auto;
-		}
+		max-width: 560px;
 	}
 
 	.status-slot {
-		flex-shrink: 0;
+		margin-left: auto;
+		flex: none;
 	}
 
 	.theme-toggle {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		flex-shrink: 0;
-		background: transparent;
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		flex: none;
+		background: var(--surface-solid);
 		border: var(--rule);
-		border-radius: var(--radius);
+		border-radius: 50%;
 		color: var(--fg-muted);
+		box-shadow: var(--shadow-hair);
 		cursor: pointer;
 	}
 
 	.theme-toggle:hover {
 		color: var(--fg);
-		background: var(--bg-hover);
+		border-color: var(--fg-muted);
 	}
 
-	/* A rule-bounded strip rather than a boxed alert: the index being behind is a condition of
-	   the whole page, not a message sitting inside it. */
+	/* An overlay ribbon rather than a row in the flow: the index being behind is a caveat on
+	   the page, and it must not push the page's opening image out of shape. */
 	.banner {
-		grid-area: banner;
-		padding: var(--space-2) var(--space-4);
+		position: absolute;
+		top: calc(var(--topbar-h) - var(--space-1));
+		left: var(--gutter);
+		right: var(--gutter);
+		z-index: 25;
+		max-width: 1240px;
+		padding: var(--space-3) var(--space-4);
+		border-radius: var(--radius-control);
 		font-size: var(--fs-data);
-		border-top: 1px solid currentcolor;
-		border-bottom: 1px solid currentcolor;
+		font-weight: 500;
 	}
 
 	.banner.warn {
+		backdrop-filter: blur(10px);
+		box-shadow: var(--shadow-rest);
 		color: var(--warn-ink);
+		background: rgba(255, 250, 238, 0.92);
+		border: 1px solid rgba(201, 138, 0, 0.3);
 	}
 
 	.banner.danger {
+		backdrop-filter: blur(10px);
+		box-shadow: var(--shadow-rest);
 		color: var(--danger-ink);
+		background: rgba(255, 244, 244, 0.94);
+		border: 1px solid rgba(210, 75, 75, 0.3);
 	}
 
-	.rail {
-		grid-area: rail;
-		align-self: start;
-		min-width: 0;
-		border-top: var(--rule);
-		background: var(--bg);
+	:global(:root[data-theme='dark']) .banner.warn {
+		background: rgba(34, 28, 14, 0.9);
+		border-color: rgba(217, 164, 65, 0.35);
 	}
 
-	.rail ul {
-		display: flex;
-		overflow-x: auto;
+	:global(:root[data-theme='dark']) .banner.danger {
+		background: rgba(38, 20, 20, 0.9);
+		border-color: rgba(224, 112, 112, 0.35);
 	}
 
-	.rail a {
-		display: block;
-		padding: var(--space-3) var(--space-4);
-		color: var(--fg-muted);
-		white-space: nowrap;
-		border-top: 3px solid transparent;
-	}
-
-	.rail a:hover {
-		color: var(--fg);
-	}
-
-	.rail a.current {
-		color: var(--fg);
-		border-top-color: var(--accent);
+	.content.banner-space {
+		padding-top: calc(var(--topbar-h) + 62px);
 	}
 
 	.content {
-		grid-area: content;
-		max-width: 1280px;
-		margin: 0 auto;
-		width: 100%;
-		/* Grid children default to min-width:auto; without this a wide table or the block strip
-		   would push the whole shell into a horizontal scroll. */
+		flex: 1;
 		min-width: 0;
-		padding: var(--space-6) var(--space-4);
+		width: 100%;
+		max-width: 1240px;
+		padding: calc(var(--topbar-h) + var(--space-2)) var(--gutter) var(--space-16);
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-8);
+		gap: var(--space-10);
 	}
 
 	.content > :global(*) {
 		min-width: 0;
 	}
 
-	@media (min-width: 1024px) {
+	/* ---------------------------------------------------------------------------- the foot */
+	.foot {
+		border-top: var(--rule);
+		padding: var(--space-6) var(--gutter);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+		max-width: 1240px;
+		width: 100%;
+	}
+
+	.foot-in {
+		display: flex;
+		align-items: center;
+		gap: var(--space-5);
+		flex-wrap: wrap;
+	}
+
+	.brand.small .mark {
+		width: 26px;
+		height: 26px;
+		border-radius: 9px;
+		font-size: 15px;
+		background: var(--fg);
+		color: var(--bg);
+	}
+
+	.brand.small {
+		padding: 0;
+	}
+
+	.brand.small .name {
+		font-size: var(--fs-body);
+	}
+
+	.foot-line {
+		font-size: var(--fs-data);
+		color: var(--fg-muted);
+	}
+
+	.foot-links {
+		display: flex;
+		gap: var(--space-5);
+		margin-left: auto;
+		font-size: var(--fs-data);
+		font-weight: 500;
+		color: var(--fg-muted);
+	}
+
+	.mainnet {
+		border: var(--rule);
+		color: var(--fg-muted);
+	}
+
+	.copy {
+		font-size: var(--fs-micro);
+		color: var(--fg-muted);
+	}
+
+	/* -------------------------------------------------------------------- phone navigation */
+	.tabbar {
+		position: fixed;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		z-index: 40;
+		display: flex;
+		background: var(--ink-panel);
+		color: var(--ink-fg-muted);
+		padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+	}
+
+	.tabbar a {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 3px;
+		padding: 6px 2px;
+		border-radius: var(--radius-control);
+		font-size: 10.5px;
+		font-weight: 600;
+		color: inherit;
+	}
+
+	.tabbar a.current {
+		color: var(--accent);
+	}
+
+	@media (min-width: 900px) {
 		.shell {
-			grid-template-columns: 200px minmax(0, 1fr);
-			grid-template-rows: auto auto 1fr;
-			grid-template-areas:
-				'topbar topbar'
-				'banner banner'
-				'rail content';
+			grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
 		}
 
-		.rail {
-			border-top: none;
-			border-right: var(--rule);
-			padding-top: var(--space-4);
-			min-height: 100%;
+		.tabbar {
+			display: none;
 		}
 
-		.rail ul {
-			display: block;
-			overflow-x: visible;
+		.rail-in {
+			position: sticky;
+			top: 0;
+			height: 100vh;
+		}
+	}
+
+	/* Under 900 px the dark column becomes a dark strip: brand and chain height only, with
+	   navigation moved to the thumb at the bottom of the screen. */
+	@media (max-width: 899px) {
+		.rail-in {
+			flex-direction: row;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-3);
+			padding: var(--space-3) var(--gutter);
 		}
 
-		.rail a {
-			padding: var(--space-2) var(--space-4);
-			border-top: 0;
-			border-left: 3px solid transparent;
+		.nav,
+		.note {
+			display: none;
 		}
 
-		.rail a.current {
-			border-left-color: var(--accent);
+		.rail-foot {
+			margin: 0;
+		}
+
+		.chain {
+			flex-direction: row;
+			align-items: center;
+			gap: var(--space-3);
+			padding: 6px var(--space-3);
+			background: none;
+			border: 0;
+		}
+
+		.chain-row,
+		.chain-head {
+			margin: 0;
+		}
+
+		.chain-row:not(:first-of-type) {
+			display: none;
+		}
+
+		.chain-row {
+			gap: 6px;
+		}
+
+		.chain-row span {
+			display: none;
 		}
 
 		.content {
-			padding: var(--space-6);
+			padding-bottom: 96px;
+		}
+
+		.foot {
+			padding-bottom: 96px;
+		}
+
+		.foot-links {
+			margin-left: 0;
 		}
 	}
 </style>

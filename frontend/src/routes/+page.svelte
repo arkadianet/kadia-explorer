@@ -1,21 +1,37 @@
 <script lang="ts">
-	import Panel from '$lib/components/Panel.svelte';
+	import Backdrop from '$lib/components/Backdrop.svelte';
+	import Icon from '$lib/components/Icon.svelte';
+	import Sparkline from '$lib/components/Sparkline.svelte';
 	import Table from '$lib/components/Table.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import Age from '$lib/components/Age.svelte';
-	import BlockStrip from '$lib/components/BlockStrip.svelte';
 	import MinerChip from '$lib/components/MinerChip.svelte';
 	import { relTime } from '$lib/format/time';
+	import { formatErg } from '$lib/format/amount';
+	import { truncateMiddle } from '$lib/format/hash';
+	import { api } from '$lib/api/endpoints';
 	import { status as statusStore } from '$lib/status/status.svelte';
+	import { health } from '$lib/status/health';
+	import { txKind } from '$lib/tx/kind';
+	import {
+		buckets,
+		chainWindow,
+		formatHashrate,
+		hashrateHs,
+		HOUR_MS,
+		sumNano,
+		TARGET_BLOCK_SECONDS
+	} from '$lib/home/series';
+	import type { TxDto } from '$lib/api/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	// Prefer the layout's live-polled status once it has a value, so the countdown reflects the
-	// same 5 s-fresh state as the header badge instead of going stale after the initial load.
+	// same 5 s-fresh state as the header pill instead of going stale after the initial load.
 	// The lag/stalled banner lives in +layout.svelte, so every route shows it.
 	const status = $derived(statusStore.current ?? data.status.data);
 
@@ -23,8 +39,10 @@
 	// `claimable_at_tip` is measured against the indexed tip too — using the node's `best`
 	// would make the countdown disagree with every other page by the current lag.
 	const tip = $derived(status?.indexed ?? null);
+	const h = $derived(health(status ?? null));
 
-	const blocks = $derived(data.blocks.data?.items ?? []);
+	const blocks = $derived(data.blocks.data ?? []);
+	const latest = $derived(blocks[0] ?? null);
 
 	let now = $state(Date.now());
 	$effect(() => {
@@ -32,57 +50,238 @@
 		return () => clearInterval(id);
 	});
 
-	const latestAge = $derived(blocks.length > 0 ? relTime(blocks[0]!.timestamp, now) : '—');
+	const latestAge = $derived(latest ? relTime(latest.timestamp, now) : '—');
 
-	// Counted from the blocks already on screen, so it costs no extra request. If the whole
-	// loaded window is younger than an hour the count is a floor, and says so.
-	const lastHour = $derived.by(() => {
-		if (blocks.length === 0) return null;
-		const cutoff = blocks[0]!.timestamp - 3_600_000;
-		const n = blocks.filter((b) => b.timestamp > cutoff).length;
-		return { n, partial: n === blocks.length };
+	// ---------------------------------------------------------------- windows and series
+	const day = $derived(chainWindow(blocks, 24 * HOUR_MS));
+	/** True while the loaded chain is shorter than the window the figures claim. */
+	const dayPartial = $derived(
+		blocks.length > 0 && blocks[0]!.timestamp - blocks[blocks.length - 1]!.timestamp < 24 * HOUR_MS
+	);
+	const dayNote = $derived(
+		dayPartial
+			? `Only ${blocks.length} blocks are indexed above this point, so this covers the whole indexed stretch rather than a full day.`
+			: ''
+	);
+
+	const dayTxs = $derived(day.reduce((n, b) => n + b.tx_count, 0));
+	const txPerHour = $derived(buckets(day, HOUR_MS, 24, (b) => b.tx_count));
+	const blocksPerHour = $derived(buckets(day, HOUR_MS, 24));
+	const dayReward = $derived(sumNano(day, 'reward'));
+	const rewardPerHour = $derived(
+		buckets(day, HOUR_MS, 24, (b) => Number(BigInt(b.reward) / 1_000_000n) / 1000)
+	);
+
+	/** Blocks per 10-minute bucket across the six hours below the indexed tip. */
+	const heroSeries = $derived(buckets(blocks, 600_000, 36));
+
+	const hashrate = $derived(latest ? formatHashrate(hashrateHs(latest.difficulty)) : '—');
+
+	const rentItems = $derived(data.rent.data ?? []);
+	const rentDue = $derived(rentItems.reduce((t, i) => t + BigInt(i.box.rent.due_nano), 0n));
+
+	const recentBlocks = $derived(blocks.slice(0, 6));
+
+	// ------------------------------------------------------------------ live transactions
+	// The list follows the tip: when the status poll reports a new indexed height, the newest
+	// transactions are pulled again. Nothing else on the page refetches, so a catching-up
+	// indexer cannot turn the page into a request loop.
+	// `null` until the first tip-driven refresh, so the server-loaded list stays the source
+	// of truth for the first paint rather than being copied into state.
+	let liveTxs = $state<TxDto[] | null>(null);
+	let lastSeenTip = $state<number | null>(null);
+	let refreshing = false;
+
+	$effect(() => {
+		const t = statusStore.current?.indexed ?? null;
+		if (t === null || t === lastSeenTip || refreshing) return;
+		lastSeenTip = t;
+		refreshing = true;
+		void api
+			.txs(undefined, 12)
+			.then((page) => (liveTxs = page.items))
+			.catch(() => undefined)
+			.finally(() => (refreshing = false));
 	});
+
+	const shownTxs = $derived((liveTxs ?? data.txs.data?.items ?? []).slice(0, 6));
+
+	const tools = [
+		{
+			href: '/blocks',
+			icon: 'blocks' as const,
+			title: 'Browse blocks',
+			sub: 'Every header, miner and reward'
+		},
+		{
+			href: '/txs',
+			icon: 'txs' as const,
+			title: 'Follow transactions',
+			sub: 'Inputs, outputs and the boxes between'
+		},
+		{
+			href: '/rent',
+			icon: 'rent-coin' as const,
+			title: 'Analyse storage rent',
+			sub: 'What is claimable, and what matures next'
+		},
+		{
+			href: '/richlist',
+			icon: 'richlist' as const,
+			title: 'Trace an address',
+			sub: 'Start from the largest holders'
+		},
+		{
+			href: '/search',
+			icon: 'search' as const,
+			title: 'Search the chain',
+			sub: 'A height, an id or an address'
+		}
+	];
 </script>
 
 <svelte:head>
-	<title>Ergo Explorer</title>
+	<title>Kadia — Ergo Explorer</title>
+	<meta
+		name="description"
+		content="An Ergo blockchain explorer: blocks, transactions, boxes, addresses and storage rent, read straight from an indexed node."
+	/>
 </svelte:head>
 
-{#if blocks.length > 0}
-	<div class="head">
-		<BlockStrip {blocks} />
+<!-- ------------------------------------------------------------------------------- hero -->
+<section class="hero">
+	<Backdrop variant="hero" />
+	<div class="hero-in">
+		<div class="hero-copy">
+			<h1>Transparent<br />by design.</h1>
+			<p class="lede">Explore, understand, and build on Ergo.</p>
+			<div class="cta">
+				<a class="btn btn-fill" href="/blocks">
+					Explore blocks
+					<Icon name="arrow-right" size={18} />
+				</a>
+				<a class="btn btn-ghost" href="/rent">
+					Storage rent
+					<Icon name="arrow-right" size={18} />
+				</a>
+			</div>
+		</div>
 
-		<dl class="stats">
-			<div class="stat">
-				<dt>Indexed height</dt>
-				<dd class="mono">{tip ?? '—'}</dd>
+		{#if latest}
+			<div class="tipcard">
+				<div class="tipcard-head">
+					<Icon name="box" size={20} />
+					<span>Indexed height</span>
+				</div>
+				<p class="tipcard-height">{latest.height.toLocaleString('en-US')}</p>
+				<p class="tipcard-age">{latestAge}</p>
+				<Sparkline
+					values={heroSeries}
+					kind="bars"
+					color="var(--accent)"
+					height={40}
+					title="Blocks per 10-minute bucket over the six hours of chain below the indexed tip, counted from the loaded block timestamps."
+				/>
+				<p
+					class="tipcard-foot"
+					title={`Difficulty ${latest.difficulty} divided by Ergo's ${TARGET_BLOCK_SECONDS} s target block time — the hashrate that would produce this difficulty on average.`}
+				>
+					<span>blocks per 10 min, 6 h</span>
+					<b>{hashrate}</b>
+				</p>
 			</div>
-			<div class="stat">
-				<dt>Behind the node</dt>
-				<dd>
-					<span class="mono">{status ? status.lag_blocks : '—'}</span>
-					<span class="unit">blocks</span>
-				</dd>
-			</div>
-			<div class="stat">
-				<dt>Latest block</dt>
-				<dd>{latestAge}</dd>
-			</div>
-			<div class="stat">
-				<dt>Blocks in the last hour</dt>
-				<dd class="mono">{lastHour ? `${lastHour.n}${lastHour.partial ? '+' : ''}` : '—'}</dd>
-			</div>
-		</dl>
+		{/if}
 	</div>
-{/if}
+</section>
 
-<div class="grid">
-	<Panel title="Latest blocks">
+<!-- ------------------------------------------------------------------------------ stats -->
+<section class="stats" aria-label="Chain in the last 24 hours">
+	<div class="stat glass">
+		<p class="stat-label"><Icon name="txs" size={16} />Transactions</p>
+		<p
+			class="stat-value"
+			title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
+		>
+			{dayTxs.toLocaleString('en-US')}
+		</p>
+		<Sparkline
+			values={txPerHour}
+			kind="bars"
+			title="Transactions per hour across the last 24 hours of indexed chain."
+		/>
+		<p class="stat-foot">last 24 h of chain</p>
+	</div>
+
+	<div class="stat glass">
+		<p class="stat-label"><Icon name="blocks" size={16} />Blocks</p>
+		<p
+			class="stat-value"
+			title={`Blocks whose timestamp falls in the 24 hours below the indexed tip. ${dayNote}`}
+		>
+			{day.length.toLocaleString('en-US')}
+		</p>
+		<Sparkline
+			values={blocksPerHour}
+			kind="line"
+			title="Blocks per hour across the last 24 hours of indexed chain."
+		/>
+		<p class="stat-foot" title="Ergo targets one block every 120 seconds.">720 at target</p>
+	</div>
+
+	<div class="stat glass">
+		<p class="stat-label"><Icon name="spark" size={16} />Miner rewards</p>
+		<p
+			class="stat-value"
+			title={`Sum of the reward field over the ${day.length} indexed blocks in this window. ${dayNote}`}
+		>
+			{formatErg(dayReward, { maxFrac: 0 })}<span class="unit">ERG</span>
+		</p>
+		<Sparkline
+			values={rewardPerHour}
+			kind="line"
+			title="Reward paid per hour, in ERG, across the last 24 hours of indexed chain."
+		/>
+		<p class="stat-foot">paid to miners</p>
+	</div>
+
+	<div class="stat glass">
+		<p class="stat-label"><Icon name="rent-coin" size={16} />Storage rent</p>
+		<p
+			class="stat-value"
+			title="Boxes whose storage-rent maturity falls within the next 720 blocks, from /v1/rent/upcoming."
+		>
+			{rentItems.length.toLocaleString('en-US')}
+		</p>
+		<p class="stat-sub">
+			<Amount nano={rentDue.toString()} maxFrac={3} /> due
+		</p>
+		<p class="stat-foot">maturing in 720 blocks</p>
+	</div>
+
+	<div class="stat glass">
+		<p class="stat-label"><Icon name="status" size={16} />Indexer</p>
+		<p class="stat-value tone-{h.tone}" title={h.detail}>{h.label}</p>
+		<p class="stat-sub">
+			{status ? `${status.lag_blocks.toLocaleString('en-US')} blocks behind` : '—'}
+		</p>
+		<p class="stat-foot">{status ? `${status.mode} mode` : ''}</p>
+	</div>
+</section>
+
+<!-- ----------------------------------------------------------------------------- panels -->
+<div class="panels">
+	<section class="panel card">
+		<div class="card-head">
+			<h2 class="card-title">Recent blocks</h2>
+			<a class="more" href="/blocks">View all<Icon name="chevron-right" size={14} /></a>
+		</div>
 		{#if data.blocks.error}
-			<ErrorState error={data.blocks.error} />
-		{:else if data.blocks.data && data.blocks.data.items.length === 0}
-			<EmptyState message="Blocks will appear here as the indexer catches up with the node." />
-		{:else if data.blocks.data}
+			<div class="pad"><ErrorState error={data.blocks.error} /></div>
+		{:else if recentBlocks.length === 0}
+			<div class="pad">
+				<EmptyState message="Blocks will appear here as the indexer catches up with the node." />
+			</div>
+		{:else}
 			<Table>
 				{#snippet head()}
 					<tr>
@@ -93,10 +292,10 @@
 						<th>Miner</th>
 					</tr>
 				{/snippet}
-				{#each data.blocks.data.items as block (block.id)}
+				{#each recentBlocks as block (block.id)}
 					<tr>
-						<td class="mono"><a href={`/blocks/${block.height}`}>{block.height}</a></td>
-						<td><Age ms={block.timestamp} /></td>
+						<td><a class="height" href={`/blocks/${block.height}`}>{block.height}</a></td>
+						<td class="muted"><Age ms={block.timestamp} /></td>
 						<td class="num mono">{block.tx_count}</td>
 						<td class="num"><Amount nano={block.reward} maxFrac={3} /></td>
 						<td><MinerChip minerPk={block.miner_pk} /></td>
@@ -104,42 +303,89 @@
 				{/each}
 			</Table>
 		{/if}
-	</Panel>
+	</section>
 
-	<Panel title="Latest transactions">
+	<section class="panel live ink">
+		<div class="card-head">
+			<h2 class="card-title">Live transactions</h2>
+			<span class="pill live-pill tone-{h.tone}"><span class="dot"></span>{h.live}</span>
+		</div>
 		{#if data.txs.error}
-			<ErrorState error={data.txs.error} />
-		{:else if data.txs.data && data.txs.data.items.length === 0}
-			<EmptyState message="Transactions will appear here as the indexer catches up." />
-		{:else if data.txs.data}
-			<Table>
-				{#snippet head()}
-					<tr>
-						<th>Id</th>
-						<th>Age</th>
-						<th class="num">Fee</th>
-						<th class="num">Outputs</th>
-					</tr>
-				{/snippet}
-				{#each data.txs.data.items as tx (tx.id)}
-					<tr>
-						<td><Hash value={tx.id} href={`/tx/${tx.id}`} copy={false} /></td>
-						<td><Age ms={tx.timestamp} /></td>
-						<td class="num"><Amount nano={tx.fee} maxFrac={3} /></td>
-						<td class="num mono">{tx.outputs.length}</td>
-					</tr>
+			<div class="pad"><ErrorState error={data.txs.error} /></div>
+		{:else if shownTxs.length === 0}
+			<div class="pad">
+				<EmptyState message="Transactions will appear here as the indexer catches up." />
+			</div>
+		{:else}
+			<ul class="txlist">
+				{#each shownTxs as tx (tx.id)}
+					{@const kind = txKind(tx)}
+					<li>
+						<a href={`/tx/${tx.id}`}>
+							<span class="kind {kind.kind}" title={kind.why}>
+								<Icon
+									name={kind.kind === 'rent'
+										? 'rent-coin'
+										: kind.kind === 'token'
+											? 'layers'
+											: 'txs'}
+									size={18}
+								/>
+							</span>
+							<span class="tx-main">
+								<span class="tx-kind">{kind.label}</span>
+								<span class="tx-id mono">{truncateMiddle(tx.id)}</span>
+							</span>
+							<span class="tx-age"><Age ms={tx.timestamp} /></span>
+							<span class="tx-value">
+								{formatErg(
+									tx.outputs.reduce((t, o) => t + BigInt(o.value), 0n),
+									{ maxFrac: 2 }
+								)}<span class="unit">ERG</span>
+							</span>
+						</a>
+					</li>
 				{/each}
-			</Table>
+			</ul>
+			<div class="live-foot">
+				<span
+					title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
+				>
+					{dayTxs.toLocaleString('en-US')} transactions in the last 24 hours of chain
+				</span>
+				<span class="live-spark">
+					<Sparkline
+						values={txPerHour}
+						kind="bars"
+						height={26}
+						color="var(--accent)"
+						title="Transactions per hour across the last 24 hours of indexed chain."
+					/>
+				</span>
+			</div>
 		{/if}
-	</Panel>
+	</section>
+</div>
 
-	<Panel title="Rent maturing soon">
+<!-- ------------------------------------------------------------------ rent and richlist -->
+<div class="panels">
+	<section class="panel card">
+		<div class="card-head">
+			<h2 class="card-title">Rent maturing soon</h2>
+			<a class="more" href="/rent">All rent<Icon name="chevron-right" size={14} /></a>
+		</div>
 		{#if data.rent.error}
-			<ErrorState error={data.rent.error} />
-		{:else if data.rent.data && data.rent.data.length === 0}
-			<EmptyState message="No box is within a day of its storage-rent maturity." />
-		{:else if data.rent.data}
-			<Table>
+			<div class="pad"><ErrorState error={data.rent.error} /></div>
+		{:else if rentItems.length === 0}
+			<div class="pad">
+				<EmptyState message="No box reaches its storage-rent maturity in the next 720 blocks." />
+			</div>
+		{:else}
+			<p class="summary">
+				<b>{rentItems.length.toLocaleString('en-US')}</b> boxes mature in the next 720 blocks, owing
+				<b><Amount nano={rentDue.toString()} maxFrac={3} /></b> between them.
+			</p>
+			<Table dense>
 				{#snippet head()}
 					<tr>
 						<th class="num">Value</th>
@@ -148,11 +394,11 @@
 						<th>Address</th>
 					</tr>
 				{/snippet}
-				{#each data.rent.data as item (item.box.id)}
+				{#each rentItems.slice(0, 5) as item (item.box.id)}
 					<tr>
 						<td class="num"><Amount nano={item.box.value} maxFrac={3} /></td>
 						<td class="num"><Amount nano={item.box.rent.due_nano} maxFrac={3} /></td>
-						<td class="mono">
+						<td class="mono muted">
 							{tip !== null ? `${item.maturity_height - tip} blocks` : `at ${item.maturity_height}`}
 						</td>
 						<td>
@@ -166,80 +412,529 @@
 				{/each}
 			</Table>
 		{/if}
-	</Panel>
+	</section>
+
+	<section class="panel card">
+		<div class="card-head">
+			<h2 class="card-title">Largest holders</h2>
+			<a class="more" href="/richlist">Rich list<Icon name="chevron-right" size={14} /></a>
+		</div>
+		{#if data.richlist.error}
+			<div class="pad"><ErrorState error={data.richlist.error} /></div>
+		{:else if (data.richlist.data ?? []).length === 0}
+			<div class="pad"><EmptyState message="The richlist is still being built." /></div>
+		{:else}
+			<ol class="holders">
+				{#each data.richlist.data ?? [] as item, i (item.tree_hash)}
+					<li>
+						<span class="rank">{i + 1}</span>
+						{#if item.address}
+							<a class="mono holder-id" href={`/address/${item.address}`}>
+								{truncateMiddle(item.address)}
+							</a>
+						{:else}
+							<span class="mono holder-id" title={item.tree_hash}>
+								{truncateMiddle(item.tree_hash)}
+							</span>
+						{/if}
+						<span class="holder-bal"><Amount nano={item.nano} maxFrac={0} /></span>
+					</li>
+				{/each}
+			</ol>
+		{/if}
+	</section>
 </div>
 
+<!-- -------------------------------------------------------------------------- go deeper -->
+<section class="deeper">
+	<Backdrop variant="band" uid="band" />
+	<div class="deeper-in">
+		<div class="deeper-head">
+			<h2>Go deeper</h2>
+			<p>Five ways into the same chain, depending on what you already know.</p>
+		</div>
+		<div class="tools">
+			{#each tools as tool (tool.href)}
+				<a class="tool" href={tool.href}>
+					<span class="tool-icon"><Icon name={tool.icon} size={22} /></span>
+					<span class="tool-title">{tool.title}</span>
+					<span class="tool-sub">{tool.sub}</span>
+				</a>
+			{/each}
+		</div>
+	</div>
+</section>
+
 <style>
-	.head {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
+	/* Full-bleed sections cancel the content column's gutter and, for the hero, its top
+	   padding as well — the landscape has to run under the floating header. */
+	.hero,
+	.deeper {
+		position: relative;
+		isolation: isolate;
+		margin-inline: calc(var(--gutter) * -1);
+		overflow: hidden;
 	}
 
-	/* Label/value pairs on one line, separated by hairlines — the numbers are context for the
-	   strip above, not headline statistics, so none of them is set large. */
-	.stats {
+	.hero {
+		margin-top: calc((var(--topbar-h) + var(--space-2)) * -1);
+		border-radius: 0 0 var(--radius-card) var(--radius-card);
+	}
+
+	.hero-in {
+		position: relative;
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: var(--space-8);
+		padding: calc(var(--topbar-h) + var(--space-12)) var(--gutter) var(--space-10);
+		min-height: 420px;
+	}
+
+	.hero-copy {
+		max-width: 480px;
+	}
+
+	/* The one loud element on the page: a light, very large display line. Nothing else here
+	   competes with it, which is why the buttons underneath are small and quiet. */
+	h1 {
+		font-size: var(--fs-display);
+		font-weight: 300;
+		line-height: 1.02;
+		letter-spacing: -0.028em;
+		color: #14201b;
+	}
+
+	.lede {
+		margin-top: var(--space-4);
+		font-size: 18px;
+		color: #2f4038;
+	}
+
+	:global(:root[data-theme='dark']) .hero h1 {
+		color: #f2f6f3;
+	}
+
+	:global(:root[data-theme='dark']) .hero .lede {
+		color: #c3d0c8;
+	}
+
+	.cta {
 		display: flex;
 		flex-wrap: wrap;
-		margin: 0;
-		border-top: var(--rule);
-		border-bottom: var(--rule);
+		gap: var(--space-3);
+		margin-top: var(--space-6);
+	}
+
+	/* The tip card: the single number a returning visitor came for, floating over the valley. */
+	.tipcard {
+		flex: none;
+		width: 250px;
+		padding: var(--space-4) var(--space-5) var(--space-5);
+		border-radius: var(--radius-card);
+		background: var(--ink-panel-soft);
+		backdrop-filter: blur(16px) saturate(1.2);
+		-webkit-backdrop-filter: blur(16px) saturate(1.2);
+		border: 1px solid rgba(233, 238, 234, 0.16);
+		box-shadow: var(--shadow-lift);
+		color: var(--ink-fg);
+	}
+
+	.tipcard-head {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--fs-micro);
+		font-weight: 600;
+		color: var(--ink-fg-muted);
+	}
+
+	.tipcard-height {
+		margin-top: var(--space-2);
+		font-size: var(--fs-key);
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		line-height: 1.1;
+	}
+
+	.tipcard-age {
+		font-size: var(--fs-micro);
+		color: var(--ink-fg-muted);
+		margin-bottom: var(--space-3);
+	}
+
+	.tipcard-foot {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		margin-top: var(--space-2);
+		font-size: var(--fs-micro);
+		color: var(--ink-fg-muted);
+	}
+
+	.tipcard-foot b {
+		color: var(--ink-fg);
+		font-weight: 600;
+	}
+
+	/* ---------------------------------------------------------------------------- stats */
+	.stats {
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: var(--space-4);
+		margin-top: calc(var(--space-10) * -1 - 28px);
+		position: relative;
+		z-index: 5;
 	}
 
 	.stat {
+		padding: var(--space-4) var(--space-4) var(--space-3);
 		display: flex;
-		align-items: baseline;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-4);
-		border-left: var(--rule);
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.stat-label {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: var(--fs-micro);
+		font-weight: 600;
+		color: var(--fg-muted);
+	}
+
+	.stat-value {
+		font-size: 26px;
+		font-weight: 600;
+		letter-spacing: -0.03em;
+		line-height: 1.2;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.stat-value .unit {
+		font-size: 13px;
+		font-weight: 500;
+		color: var(--fg-muted);
+		margin-left: 4px;
+	}
+
+	.stat-sub {
 		font-size: var(--fs-data);
-	}
-
-	.stat:first-child {
-		border-left: 0;
-		padding-left: 0;
-	}
-
-	@media (max-width: 719px) {
-		.stats {
-			display: block;
-		}
-		.stat {
-			padding: var(--space-2) 0;
-			border-left: 0;
-			border-top: var(--rule);
-		}
-		.stat:first-child {
-			border-top: 0;
-		}
-	}
-
-	.stat dt {
 		color: var(--fg-muted);
 	}
 
-	.stat dd {
-		margin: 0;
-		color: var(--fg);
-	}
-
-	.stat .unit {
+	.stat-foot {
+		margin-top: auto;
+		padding-top: var(--space-2);
+		font-size: 11.5px;
 		color: var(--fg-muted);
 	}
 
-	.grid {
+	.tone-ok {
+		color: var(--ok-ink);
+	}
+	.tone-warn {
+		color: var(--warn-ink);
+	}
+	.tone-danger {
+		color: var(--danger-ink);
+	}
+
+	/* --------------------------------------------------------------------------- panels */
+	.panels {
 		display: grid;
-		gap: var(--space-8);
-		grid-template-columns: minmax(0, 1fr);
+		grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+		gap: var(--space-5);
+		align-items: start;
 	}
 
-	@media (min-width: 1024px) {
-		.grid {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			gap: var(--space-8) var(--space-6);
+	.panel {
+		overflow: hidden;
+		min-width: 0;
+	}
+
+	.pad {
+		padding: var(--space-6) var(--space-5);
+	}
+
+	.summary {
+		padding: var(--space-4) var(--space-5);
+		font-size: var(--fs-data);
+		color: var(--fg-muted);
+		border-bottom: var(--rule);
+	}
+
+	.summary b {
+		color: var(--fg);
+		font-weight: 600;
+	}
+
+	.height {
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.muted {
+		color: var(--fg-muted);
+	}
+
+	/* ------------------------------------------------------------- live transaction list */
+	.live .card-head {
+		border-bottom-color: var(--ink-hairline);
+	}
+
+	.live-pill {
+		height: 26px;
+		background: rgba(233, 238, 234, 0.1);
+		color: var(--ink-fg-muted);
+	}
+
+	.live-pill.tone-ok {
+		background: rgba(31, 181, 107, 0.16);
+		color: #6fdca7;
+	}
+
+	.live-pill.tone-warn {
+		background: rgba(201, 138, 0, 0.18);
+		color: #e8be6a;
+	}
+
+	.live-pill.tone-danger {
+		background: rgba(210, 75, 75, 0.18);
+		color: #f0a0a0;
+	}
+
+	.txlist li + li {
+		border-top: 1px solid var(--ink-hairline);
+	}
+
+	.txlist a {
+		display: grid;
+		grid-template-columns: 34px minmax(0, 1fr) auto auto;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-5);
+	}
+
+	.txlist a:hover {
+		background: rgba(233, 238, 234, 0.05);
+		color: var(--ink-fg);
+	}
+
+	.kind {
+		display: grid;
+		place-items: center;
+		width: 34px;
+		height: 34px;
+		border-radius: 10px;
+		background: rgba(233, 238, 234, 0.08);
+		color: var(--ink-fg-muted);
+	}
+
+	.kind.rent {
+		background: rgba(31, 181, 107, 0.16);
+		color: #6fdca7;
+	}
+
+	.kind.token {
+		background: rgba(201, 138, 0, 0.18);
+		color: #e8be6a;
+	}
+
+	.tx-main {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+	}
+
+	.tx-kind {
+		font-size: var(--fs-data);
+		font-weight: 600;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.tx-id {
+		font-size: 11.5px;
+		color: var(--ink-fg-muted);
+	}
+
+	.tx-age {
+		font-size: var(--fs-micro);
+		color: var(--ink-fg-muted);
+		white-space: nowrap;
+	}
+
+	.tx-value {
+		font-size: var(--fs-data);
+		font-weight: 600;
+		white-space: nowrap;
+	}
+
+	.tx-value .unit {
+		font-size: 10.5px;
+		font-weight: 500;
+		color: var(--ink-fg-muted);
+		margin-left: 3px;
+	}
+
+	.live-foot {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-4);
+		padding: var(--space-3) var(--space-5);
+		border-top: 1px solid var(--ink-hairline);
+		font-size: var(--fs-micro);
+		color: var(--ink-fg-muted);
+	}
+
+	.live-spark {
+		width: 96px;
+		flex: none;
+	}
+
+	/* -------------------------------------------------------------------------- holders */
+	.holders li {
+		display: grid;
+		grid-template-columns: 22px minmax(0, 1fr) auto;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-5);
+	}
+
+	.holders li + li {
+		border-top: var(--rule);
+	}
+
+	.rank {
+		font-size: var(--fs-micro);
+		font-weight: 600;
+		color: var(--fg-muted);
+	}
+
+	.holder-id {
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.holder-bal {
+		font-size: var(--fs-data);
+		font-weight: 600;
+	}
+
+	/* ------------------------------------------------------------------------ go deeper */
+	.deeper {
+		border-radius: var(--radius-card);
+		margin-inline: calc(var(--gutter) * -1);
+	}
+
+	.deeper-in {
+		position: relative;
+		padding: var(--space-10) var(--gutter) var(--space-12);
+		color: var(--ink-fg);
+	}
+
+	.deeper-head h2 {
+		font-size: 34px;
+		font-weight: 300;
+		letter-spacing: -0.025em;
+	}
+
+	.deeper-head p {
+		margin-top: var(--space-2);
+		font-size: var(--fs-body);
+		color: var(--ink-fg-muted);
+		max-width: 46ch;
+	}
+
+	.tools {
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: var(--space-4);
+		margin-top: var(--space-8);
+	}
+
+	.tool {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		padding: var(--space-5) var(--space-4);
+		border-radius: var(--radius-card);
+		background: rgba(12, 20, 15, 0.55);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
+		border: 1px solid rgba(233, 238, 234, 0.13);
+		color: var(--ink-fg);
+		min-height: 148px;
+	}
+
+	.tool:hover,
+	.tool:focus-visible {
+		color: var(--ink-fg);
+		border-color: var(--accent);
+		background: rgba(12, 20, 15, 0.72);
+	}
+
+	.tool-icon {
+		color: var(--accent);
+		margin-bottom: var(--space-3);
+	}
+
+	.tool-title {
+		font-size: var(--fs-body);
+		font-weight: 600;
+		letter-spacing: -0.01em;
+	}
+
+	.tool-sub {
+		font-size: var(--fs-micro);
+		line-height: 1.45;
+		color: var(--ink-fg-muted);
+	}
+
+	/* ------------------------------------------------------------------------ responsive */
+	@media (max-width: 1180px) {
+		.stats {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
 		}
-		.grid > :global(:last-child) {
-			grid-column: 1 / -1;
+		.tools {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 980px) {
+		.panels {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.hero-in {
+			flex-direction: column;
+			align-items: stretch;
+			gap: var(--space-8);
+			padding-top: calc(var(--topbar-h) + var(--space-8));
+			min-height: 0;
+		}
+		.tipcard {
+			width: 100%;
+		}
+	}
+
+	@media (max-width: 700px) {
+		.stats {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.tools {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.stats {
+			margin-top: var(--space-2);
+		}
+		.hero {
+			border-radius: 0;
 		}
 	}
 </style>

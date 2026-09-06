@@ -24,7 +24,7 @@
 		line-height: 18px;
 		white-space: nowrap;
 		color: var(--fg-muted);
-		background: var(--bg-hover);
+		background: var(--surface-hover);
 	}
 	.ok {
 		color: var(--ok-ink);

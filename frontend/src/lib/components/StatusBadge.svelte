@@ -1,72 +1,53 @@
 <script lang="ts">
 	import { status } from '$lib/status/status.svelte';
+	import { health } from '$lib/status/health';
 
-	const tone = $derived.by((): 'ok' | 'warn' | 'danger' | 'neutral' => {
-		const s = status.current;
-		if (!s) return 'neutral';
-		if (s.halted !== null || s.stalled !== null) return 'danger';
-		if (s.lag_blocks > 100) return 'danger';
-		if (s.lag_blocks > 3) return 'warn';
-		return 'ok';
-	});
-
-	const label = $derived(status.current ? `${status.current.indexed ?? 0}` : '…');
-
-	const title = $derived.by((): string => {
-		const s = status.current;
-		if (!s) return status.error ? 'Status unavailable' : 'Loading status…';
-		if (s.stalled) {
-			return `Stalled at height ${s.stalled.height} for ${s.stalled.since_secs}s: ${s.stalled.reason}`;
-		}
-		if (s.halted) return `Halted: ${s.halted}`;
-		return `Indexed ${s.indexed ?? 0} / best ${s.best} (lag ${s.lag_blocks})`;
-	});
+	const h = $derived(health(status.current));
+	const title = $derived(status.error && !status.current ? 'Status unavailable' : h.detail);
 </script>
 
-<a href="/status" class="tip {tone}" {title} aria-live="polite">
+<!-- The one piece of state that qualifies everything else on the page: is what you are
+     reading current? It links to /status, where the same numbers are set out in full. -->
+<a href="/status" class="live pill {h.tone}" {title} aria-live="polite">
 	<span class="dot" aria-hidden="true"></span>
-	<span class="mono height">{label}</span>
+	{h.live}
 </a>
 
 <style>
-	/* The indexed tip, always on screen: a health dot plus the height itself. It is the one
-	   number that tells you whether anything else on the page is current. */
-	.tip {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: 0 var(--space-2);
-		height: 28px;
+	.live {
+		background: var(--surface-solid);
 		border: var(--rule);
-		border-radius: var(--radius);
-		color: var(--fg-muted);
+		box-shadow: var(--shadow-hair);
+		color: var(--fg);
+		height: 34px;
+		padding: 0 var(--space-4);
 	}
 
-	.tip:hover,
-	.tip:focus-visible {
+	.live:hover,
+	.live:focus-visible {
 		color: var(--fg);
-		background: var(--bg-hover);
+		border-color: var(--fg-muted);
 	}
 
-	.height {
-		color: var(--fg);
+	.ok .dot,
+	.ok.dot {
+		color: var(--ok);
 	}
 
 	.dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		background: var(--fg-muted);
-		flex-shrink: 0;
+		color: var(--fg-muted);
 	}
 
 	.ok .dot {
-		background: var(--ok);
+		color: var(--ok);
+		box-shadow: 0 0 0 3px var(--accent-wash);
 	}
+
 	.warn .dot {
-		background: var(--warn);
+		color: var(--warn);
 	}
+
 	.danger .dot {
-		background: var(--danger);
+		color: var(--danger);
 	}
 </style>

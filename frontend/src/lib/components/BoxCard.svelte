@@ -82,10 +82,16 @@
 </article>
 
 <style>
-	/* No box: a 2 px rule on the left marks the row and carries its state. */
+	/* A light card whose left edge carries the box's state: green for value still on the
+	   chain, hairline for value already spent (and for every input, which is spent by
+	   definition). */
 	.box {
-		border-left: 2px solid var(--border);
-		padding: var(--space-2) 0 var(--space-2) var(--space-3);
+		border: var(--rule);
+		border-left: 3px solid var(--hairline);
+		border-radius: var(--radius-control);
+		background: var(--surface-solid);
+		box-shadow: var(--shadow-hair);
+		padding: var(--space-3) var(--space-4);
 	}
 	.box.live {
 		border-left-color: var(--ok);

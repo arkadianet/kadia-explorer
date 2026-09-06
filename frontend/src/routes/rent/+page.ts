@@ -4,7 +4,7 @@ import type { RentItemDto } from '$lib/api/types';
 import type { PageLoad } from './$types';
 
 /** Default N (in blocks) for the Upcoming tab's rent-maturity horizon. */
-export const DEFAULT_UPCOMING_BLOCKS = 720;
+const DEFAULT_UPCOMING_BLOCKS = 720;
 
 /**
  * The Upcoming seed is returned as data rather than thrown: the Eligible tab is served by a

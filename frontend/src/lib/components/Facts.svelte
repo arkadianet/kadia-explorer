@@ -13,12 +13,18 @@
 <dl class="facts">{@render children?.()}</dl>
 
 <style>
+	/* One card, two columns of label/value rows: the entity's facts belong together, so they
+	   share a surface rather than floating on the page ground. */
 	.facts {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
 		gap: 0 var(--space-8);
 		margin: 0;
-		border-top: var(--rule);
+		padding: var(--space-2) var(--space-5) var(--space-3);
+		background: var(--surface-solid);
+		border: var(--rule);
+		border-radius: var(--radius-card);
+		box-shadow: var(--shadow-rest);
 	}
 
 	@media (min-width: 900px) {

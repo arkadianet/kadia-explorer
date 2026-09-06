@@ -1,68 +1,84 @@
-/* Design tokens — "dark data-terminal".
+/* Design tokens — "light, photographic product page" (design v2).
  *
- * Dark is the product's default; light is a secondary theme reached through the header
- * toggle (see src/app.html and $lib/theme/theme.svelte.ts — no saved preference means dark,
- * regardless of prefers-color-scheme).
+ * Light is the product's primary theme; dark is the same layout with the surfaces inverted.
+ * Neither is forced: `prefers-color-scheme` decides, and the header toggle overrides it and
+ * persists the choice as `xp-theme` (see src/app.html and $lib/theme/theme.svelte.ts).
  *
  * Two families of tone colour exist on purpose:
- *   --ok / --warn / --danger / --accent   fills, rules, bars, dots, badge washes
+ *   --ok / --warn / --danger / --accent   fills, rules, bars, dots, primary buttons
  *   --*-ink                               the same tone used as TEXT
- * In dark they are identical; in light the ink is darkened so tone text still clears 4.5:1
- * on the badge's 15 %-alpha wash of its own tone. Never set text to a non-ink tone.
+ * Ergo green at full saturation (#1fb56b) is a 2.2:1 fill, never a text colour — that is what
+ * the ink pair is for. Never set text to a non-ink tone.
  *
- * Contrast (WCAG 2.x sRGB relative luminance, computed with a node script; the "chip" column
- * is the tone ink over a 15 %-alpha wash of the tone itself on --bg / --bg-elev / --bg-hover):
+ * Contrast (WCAG 2.x sRGB relative luminance; measured with scripts noted in the design
+ * report). Every text pairing below clears 4.5:1.
  *
- *   DARK   on --bg / --bg-elev / --bg-hover        chip (bg / elev / hover)
- *     --fg          15.08  13.89  12.59
- *     --fg-muted     6.69   6.16   5.58
- *     --accent-ink   6.30   5.80   5.26           5.18  4.90  4.72
- *     --ok-ink       7.18   6.61   5.99           5.61  5.31  5.11
- *     --warn-ink     9.32   8.58   7.78           7.00  6.63  6.38
- *     --danger-ink   6.12   5.64   5.11           5.02  4.76  4.58
- *     --accent-fg on --accent: 6.70
+ *   LIGHT   on --bg #f5f6f4   on --surface-solid #ffffff
+ *     --fg          #14201b        14.99            15.86
+ *     --fg-muted    #5f6d66         5.05             5.34
+ *     --accent-ink  #0d7a4c         5.29             5.60
+ *     --warn-ink    #8a5d00         5.32             5.63
+ *     --danger-ink  #b23434         5.24             5.55
+ *     --fg on --accent #1fb56b: 5.65   (dark ink on the green pill)
+ *     white on --btn #14201b: 15.86
  *
- *   LIGHT  on --bg / --bg-elev / --bg-hover        chip (bg / elev / hover)
- *     --fg          15.41  16.52  14.58
- *     --fg-muted     5.10   5.46   4.82
- *     --accent-ink   5.75   6.17   5.44           4.76  5.07  4.52
- *     --ok-ink       6.68   7.16   6.32           5.47  5.83  5.20
- *     --warn-ink     7.31   7.83   6.91           5.93  6.33  5.64
- *     --danger-ink   6.57   7.05   6.22           5.26  5.61  5.00
- *     --accent-fg on --accent: 4.63
- *
- * Every text ratio is >= 4.5:1 in both themes. The neutral badge deliberately has no wash —
- * it sits on --bg-hover with --fg-muted (5.58 dark / 4.82 light).
+ *   DARK    on --bg #0f1512   on --surface-solid #16201b
+ *     --fg          #e9eeea        15.09            13.82
+ *     --fg-muted    #93a49a         6.13             5.62
+ *     --accent-ink  #43d492         9.55             8.75
+ *     --warn-ink    #e6b455        10.28             9.42
+ *     --danger-ink  #f08b8b         8.05             7.38
  */
 
 :root {
-	color-scheme: dark;
+	color-scheme: light;
 
-	--bg: #101820;
-	--bg-elev: #16202a;
-	--bg-hover: #1c2836;
-	--border: #263241;
-	--fg: #e8ecf1;
-	--fg-muted: #8fa0b3;
+	/* Page ground and the two surface weights: glass (over the backdrop) and solid (over the
+	   page ground, where blur would only cost paint time). */
+	--bg: #f5f6f4;
+	--bg-sunk: #eceeea;
+	--surface: rgba(255, 255, 255, 0.72);
+	--surface-solid: #ffffff;
+	--surface-hover: #f2f4f1;
+	/* The dark panel used for the sidebar, the live-transaction panel and the go-deeper band. */
+	--ink-panel: #0f1512;
+	--ink-panel-soft: rgba(20, 28, 24, 0.66);
+	--ink-fg: #e9eeea;
+	--ink-fg-muted: #93a49a;
+	--ink-hairline: rgba(233, 238, 234, 0.12);
 
-	--accent: #ff6b2c;
-	--accent-ink: #ff6b2c;
-	--accent-fg: #1a0d05;
-	--ok: #2fb7a3;
-	--ok-ink: #2fb7a3;
-	--warn: #e8b339;
-	--warn-ink: #e8b339;
-	--danger: #f26d6d;
-	--danger-ink: #f26d6d;
+	--fg: #14201b;
+	--fg-muted: #5f6d66;
+	--hairline: #e3e8e4;
 
-	--rule: 1px solid var(--border);
-	/* Alpha of a tone behind its own badge text. */
-	--wash: 0.15;
+	--accent: #1fb56b;
+	--accent-ink: #0d7a4c;
+	--accent-wash: rgba(31, 181, 107, 0.12);
+	--ok: #1fb56b;
+	--ok-ink: #0d7a4c;
+	--warn: #c98a00;
+	--warn-ink: #8a5d00;
+	--danger: #d24b4b;
+	--danger-ink: #b23434;
 
-	/* Controls get a small radius, tiles a slightly larger one; tables, sections and rules
-	   get none — the grid is meant to read as a terminal, not as a card deck. */
-	--radius: 4px;
-	--radius-tile: 6px;
+	/* Buttons: the filled one is near-black with white text, as in the reference. */
+	--btn-fill: #14201b;
+	--btn-fill-fg: #ffffff;
+
+	--rule: 1px solid var(--hairline);
+	/* Alpha of a tone behind its own badge text (Badge.svelte). */
+	--wash: 0.14;
+
+	/* Three radii, three jobs: cards, controls, pills. Nothing else gets a radius. */
+	--radius-card: 14px;
+	--radius-control: 10px;
+	--radius-pill: 999px;
+
+	/* Shadows are layered and deliberately unequal: a hero card lifts, a list card barely
+	   leaves the page. A single grey drop under everything is the tell of a template. */
+	--shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(20, 32, 27, 0.08);
+	--shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 12px rgba(20, 32, 27, 0.05);
+	--shadow-hair: 0 1px 1px rgba(20, 32, 27, 0.04);
 
 	--space-1: 4px;
 	--space-2: 8px;
@@ -71,36 +87,69 @@
 	--space-5: 20px;
 	--space-6: 24px;
 	--space-8: 32px;
+	--space-10: 40px;
+	--space-12: 56px;
+	--space-16: 80px;
 
+	--fs-micro: 12px;
 	--fs-data: 13px;
-	--fs-body: 14px;
-	--fs-title: 16px;
-	--fs-page: 20px;
-	--fs-key: 28px;
+	--fs-label: 13px;
+	--fs-body: 15px;
+	--fs-title: 17px;
+	--fs-page: 24px;
+	--fs-key: 30px;
+	--fs-display: 64px;
 
-	--font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
+	--gutter: 32px;
+	--sidebar-w: 232px;
+	--topbar-h: 72px;
+
+	--font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
+	/* Ids and hashes still need a fixed advance width; Manrope has no mono cut. */
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-:root[data-theme='light'] {
-	color-scheme: light;
+:root[data-theme='dark'] {
+	color-scheme: dark;
 
-	--bg: #f6f7f9;
-	--bg-elev: #ffffff;
-	--bg-hover: #eef1f5;
-	--border: #d9dee6;
-	--fg: #14202b;
-	--fg-muted: #5b6b7d;
+	--bg: #0f1512;
+	--bg-sunk: #0b100d;
+	--surface: rgba(24, 33, 28, 0.72);
+	--surface-solid: #16201b;
+	--surface-hover: #1d2822;
+	--ink-panel: #0b100d;
+	--ink-panel-soft: rgba(11, 16, 13, 0.72);
+	--ink-fg: #e9eeea;
+	--ink-fg-muted: #93a49a;
+	--ink-hairline: rgba(233, 238, 234, 0.1);
 
-	--accent: #d9501a;
-	--accent-ink: #ab3d0e;
-	--accent-fg: #1a0d05;
-	--ok: #157a68;
-	--ok-ink: #106354;
-	--warn: #8a5a00;
-	--warn-ink: #714a00;
-	--danger: #c0343f;
-	--danger-ink: #a52a34;
+	--fg: #e9eeea;
+	--fg-muted: #93a49a;
+	--hairline: #26312b;
+
+	--accent: #2ec27e;
+	--accent-ink: #43d492;
+	--accent-wash: rgba(46, 194, 126, 0.16);
+	--ok: #2ec27e;
+	--ok-ink: #43d492;
+	--warn: #d9a441;
+	--warn-ink: #e6b455;
+	--danger: #e07070;
+	--danger-ink: #f08b8b;
+
+	--btn-fill: #e9eeea;
+	--btn-fill-fg: #0f1512;
+
+	--shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.45);
+	--shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 16px rgba(0, 0, 0, 0.28);
+	--shadow-hair: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 900px) {
+	:root {
+		--gutter: 18px;
+		--fs-display: 40px;
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {

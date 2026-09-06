@@ -131,7 +131,7 @@
 	.load {
 		background: transparent;
 		border: var(--rule);
-		border-radius: var(--radius);
+		border-radius: var(--radius-control);
 		padding: var(--space-1) var(--space-4);
 		height: 28px;
 		font-size: var(--fs-data);

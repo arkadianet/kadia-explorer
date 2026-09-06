@@ -11,7 +11,7 @@
 <style>
 	.empty {
 		color: var(--fg-muted);
-		padding: var(--space-5) 0;
+		padding: var(--space-3) 0;
 		max-width: 62ch;
 	}
 </style>

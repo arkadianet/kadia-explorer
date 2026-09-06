@@ -41,8 +41,8 @@
 	.tile {
 		flex: 1 1 0;
 		min-width: 86px;
-		background: var(--bg-elev);
-		border-radius: var(--radius-tile);
+		background: var(--surface-solid);
+		border-radius: var(--radius-control);
 		overflow: hidden;
 		padding-bottom: var(--space-2);
 		display: flex;
@@ -52,7 +52,7 @@
 
 	.tile:hover,
 	.tile:focus-visible {
-		background: var(--bg-hover);
+		background: var(--surface-hover);
 		color: inherit;
 	}
 

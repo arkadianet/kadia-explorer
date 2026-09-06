@@ -169,10 +169,10 @@
 	.hex {
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
-		background: var(--bg-elev);
+		background: var(--surface-solid);
 		padding: var(--space-3);
 		margin: 0;
-		border-radius: var(--radius);
+		border-radius: var(--radius-control);
 	}
 	.rent-status {
 		margin-top: var(--space-3);

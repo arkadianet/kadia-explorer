@@ -20,9 +20,16 @@
 		align-items: baseline;
 		justify-content: space-between;
 		gap: var(--space-4);
-		padding: var(--space-2) 0;
+		padding: var(--space-3) 0;
 		border-bottom: var(--rule);
 		font-size: var(--fs-data);
+	}
+
+	/* The last row in each column keeps its rule only when a row follows it, so a card never
+	   ends on a hairline. */
+	.fact:last-child,
+	.fact:nth-last-child(2):nth-child(odd) {
+		border-bottom: 0;
 	}
 
 	.label {

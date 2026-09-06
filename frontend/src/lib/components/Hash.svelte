@@ -61,12 +61,12 @@
 		padding: 0 var(--space-1);
 		color: var(--fg-muted);
 		cursor: pointer;
-		border-radius: var(--radius);
+		border-radius: var(--radius-control);
 		line-height: 1;
 	}
 	.copy:hover {
 		color: var(--fg);
-		background: var(--bg-hover);
+		background: var(--surface-hover);
 	}
 	.copied {
 		color: var(--ok-ink);

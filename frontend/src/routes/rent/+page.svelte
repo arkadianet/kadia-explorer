@@ -234,9 +234,9 @@
 	.controls select {
 		font: inherit;
 		color: var(--fg);
-		background: var(--bg-elev);
+		background: var(--surface-solid);
 		border: var(--rule);
-		border-radius: var(--radius);
+		border-radius: var(--radius-control);
 		padding: var(--space-1) var(--space-2);
 	}
 	.sum {

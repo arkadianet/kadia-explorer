@@ -115,7 +115,7 @@
 		gap: var(--space-3);
 	}
 	.box.unknown {
-		border-left: 2px dashed var(--border);
+		border-left: 2px dashed var(--hairline);
 		padding: var(--space-2) 0 var(--space-2) var(--space-3);
 		display: flex;
 		flex-direction: column;

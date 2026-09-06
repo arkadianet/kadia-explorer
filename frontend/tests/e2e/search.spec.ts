@@ -58,7 +58,7 @@ test('a well-formed but unknown id reports not found', async ({ page }) => {
 
 test('pressing "/" focuses the search input', async ({ page }) => {
 	await page.goto('/');
-	await expect(page.getByRole('heading', { name: 'Latest blocks' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
 	await page.locator('body').click();
 	await page.keyboard.press('/');
 	await expect(page.getByRole('searchbox')).toBeFocused();

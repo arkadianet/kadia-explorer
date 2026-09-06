@@ -3,7 +3,7 @@
 
 	interface Props {
 		title?: string;
-		/** Optional controls shown on the title's baseline, e.g. a horizon selector. */
+		/** Optional controls shown beside the title, e.g. a horizon selector or a link. */
 		actions?: Snippet;
 		children?: Snippet;
 	}
@@ -11,12 +11,12 @@
 	let { title, actions, children }: Props = $props();
 </script>
 
-<!-- A section, not a card: a title, a hairline under it, and space around it do the grouping.
-     Nothing here draws a box — see the design brief's "Surfaces". -->
-<section class="panel">
+<!-- The card every inner page is built from: a solid surface, a hairline head, and a body
+     that lets tables run edge to edge while prose keeps the card's own margin. -->
+<section class="panel card">
 	{#if title || actions}
-		<div class="panel-head">
-			{#if title}<h2 class="panel-title">{title}</h2>{/if}
+		<div class="panel-head card-head">
+			{#if title}<h2 class="panel-title card-title">{title}</h2>{/if}
 			{#if actions}<div class="panel-actions">{@render actions()}</div>{/if}
 		</div>
 	{/if}
@@ -24,37 +24,30 @@
 </section>
 
 <style>
-	/* No margin of its own: the page container (or the page's own grid) sets the rhythm, so a
-	   panel keeps its position in a two-column layout instead of drifting down. */
 	.panel {
 		min-width: 0;
+		overflow: hidden;
 	}
 
 	.panel-head {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: var(--space-4);
 		flex-wrap: wrap;
-		padding-bottom: var(--space-2);
-		border-bottom: var(--rule);
-		margin-bottom: var(--space-3);
-	}
-
-	.panel-title {
-		font-size: var(--fs-title);
-		font-weight: 600;
-		color: var(--fg);
 	}
 
 	.panel-body {
 		min-width: 0;
+		padding: var(--space-4) var(--space-5);
+	}
+
+	/* A table is the card's full width; only its cells carry the inset, so column rules line
+	   up with the card edge instead of floating inside a second margin. */
+	.panel-body :global(.table-wrap) {
+		margin: calc(var(--space-4) * -1) calc(var(--space-5) * -1);
 	}
 
 	.panel-actions {
 		display: flex;
 		align-items: center;
-		gap: var(--space-2);
+		gap: var(--space-3);
 		font-size: var(--fs-data);
 		color: var(--fg-muted);
 	}

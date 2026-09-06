@@ -28,7 +28,7 @@
 
 <style>
 	.error {
-		padding: var(--space-4) 0;
+		padding: var(--space-2) 0;
 		max-width: 62ch;
 	}
 	.title {
@@ -42,15 +42,17 @@
 	.retry {
 		margin-top: var(--space-3);
 		background: transparent;
-		border: 1px solid var(--accent);
-		color: var(--accent-ink);
-		border-radius: var(--radius);
-		padding: var(--space-1) var(--space-4);
-		height: 28px;
+		border: 1px solid var(--hairline);
+		color: var(--fg);
+		border-radius: var(--radius-pill);
+		padding: 0 var(--space-4);
+		height: 32px;
 		font-size: var(--fs-data);
+		font-weight: 600;
 		cursor: pointer;
 	}
 	.retry:hover {
-		background: color-mix(in srgb, var(--accent) 12%, transparent);
+		border-color: var(--accent);
+		color: var(--accent-ink);
 	}
 </style>
