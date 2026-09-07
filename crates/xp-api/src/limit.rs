@@ -23,9 +23,15 @@ pub struct TokenBucket {
 
 impl TokenBucket {
     pub fn new(burst: u32) -> TokenBucket {
+        TokenBucket::new_at(burst, Instant::now())
+    }
+
+    /// [`new`](TokenBucket::new) with the clock injected, so callers that already hold a
+    /// request timestamp (and tests) never read the clock twice.
+    pub fn new_at(burst: u32, now: Instant) -> TokenBucket {
         TokenBucket {
             tokens: burst as f64,
-            last: Instant::now(),
+            last: now,
         }
     }
 
@@ -180,9 +186,17 @@ pub fn client_key(peer: IpAddr, forwarded_for: Option<&str>, trusted: &Allowlist
 const SWEEP_EVERY: Duration = Duration::from_secs(60);
 const IDLE_FOR: Duration = Duration::from_secs(60);
 
+/// Hard ceiling on tracked buckets, so a source-address rotation flood cannot grow the map
+/// without bound. At roughly 56 bytes per entry a full map is a few megabytes. Once a sweep
+/// cannot get back under the cap the whole map is cleared: that refills every client's bucket,
+/// which is the safe direction (a brief under-limit, never an over-limit or an OOM).
+const MAX_BUCKETS: usize = 100_000;
+
 struct Shared {
     per_second: f64,
     burst: u32,
+    /// [`MAX_BUCKETS`] in production; tests set it small.
+    max_buckets: usize,
     allowlist: Allowlist,
     trusted: Allowlist,
     counters: Arc<Counters>,
@@ -196,9 +210,14 @@ pub struct RateLimit(Arc<Shared>);
 
 impl RateLimit {
     pub fn new(cfg: &ApiConfig, counters: Arc<Counters>) -> RateLimit {
+        RateLimit::with_max_buckets(cfg, counters, MAX_BUCKETS)
+    }
+
+    fn with_max_buckets(cfg: &ApiConfig, counters: Arc<Counters>, max_buckets: usize) -> RateLimit {
         RateLimit(Arc::new(Shared {
             per_second: f64::from(cfg.per_second),
             burst: cfg.burst.max(1),
+            max_buckets,
             allowlist: cfg.allowlist.clone(),
             trusted: cfg.trusted_proxies.clone(),
             counters,
@@ -217,11 +236,19 @@ impl RateLimit {
         // whole API down with it.
         let mut guard = s.buckets.lock().unwrap_or_else(|e| e.into_inner());
         let (map, last_sweep) = &mut *guard;
-        if now.saturating_duration_since(*last_sweep) >= SWEEP_EVERY {
+        let due = now.saturating_duration_since(*last_sweep) >= SWEEP_EVERY;
+        if due || map.len() >= s.max_buckets {
             map.retain(|_, b| !b.is_idle(now, s.per_second, s.burst, IDLE_FOR));
             *last_sweep = now;
+            // Still over the cap: every tracked bucket is live, so there is nothing to evict
+            // selectively that would not be arbitrary. Drop the lot (see [`MAX_BUCKETS`]).
+            if map.len() >= s.max_buckets {
+                map.clear();
+            }
         }
-        let bucket = map.entry(key).or_insert_with(|| TokenBucket::new(s.burst));
+        let bucket = map
+            .entry(key)
+            .or_insert_with(|| TokenBucket::new_at(s.burst, now));
         match bucket.try_take(now, s.per_second, s.burst) {
             Ok(()) => Ok(()),
             Err(wait) => {
@@ -265,18 +292,26 @@ where
     }
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
-        // Requests without ConnectInfo (tests via `oneshot`) share one key; production always
-        // has it because main serves with `into_make_service_with_connect_info`.
+        // `bin/explorer` serves the router through
+        // `into_make_service_with_connect_info::<SocketAddr>()`, so in production the peer
+        // address is always present. The fallback is for direct `oneshot` calls (tests), which
+        // carry no `ConnectInfo`: they all share the unspecified key rather than panicking.
         let peer = req
             .extensions()
             .get::<ConnectInfo<std::net::SocketAddr>>()
             .map(|c| c.0.ip())
             .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+        // All `X-Forwarded-For` lines, in order, joined into one list. Reading only the first
+        // line would let a client that sends its own header outrank the hop the trusted proxy
+        // appends, and so choose its own rate-limit key.
         let xff = req
             .headers()
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
+            .get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(",");
+        let xff = if xff.is_empty() { None } else { Some(xff) };
         let key = client_key(peer, xff.as_deref(), &self.limit.0.trusted);
         match self.limit.check(key, Instant::now()) {
             Ok(()) => {
@@ -352,6 +387,29 @@ mod tests {
         let t0 = Instant::now();
         let b = TokenBucket::new(3);
         assert!(b.is_idle(t0, 0.0, 3, Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn bucket_map_is_capped_and_cleared_under_a_rotation_flood() {
+        let cfg = ApiConfig {
+            per_second: 1,
+            burst: 1,
+            ..ApiConfig::default()
+        };
+        let limit = RateLimit::with_max_buckets(&cfg, Arc::new(Counters::default()), 4);
+        let t0 = Instant::now();
+        // Every key is fresh, so no sweep can evict anything: the map must still stay capped.
+        for i in 0..50u32 {
+            let key = IpAddr::V4(std::net::Ipv4Addr::from(0x0b00_0000 + i));
+            assert!(limit.check(key, t0).is_ok());
+            let len = limit.0.buckets.lock().unwrap().0.len();
+            assert!(len <= 4, "map grew to {len} past the cap");
+        }
+        // Limiting still works below the cap: a fresh limiter, one key, two takes.
+        let limit = RateLimit::with_max_buckets(&cfg, Arc::new(Counters::default()), 4);
+        let key = IpAddr::V4(std::net::Ipv4Addr::new(11, 1, 1, 1));
+        assert!(limit.check(key, t0).is_ok());
+        assert_eq!(limit.check(key, t0), Err(1));
     }
 
     #[test]

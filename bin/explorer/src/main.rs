@@ -167,12 +167,17 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
     let mut server_fut: std::pin::Pin<
         Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>,
     > = Box::pin(
-        axum::serve(listener, app)
-            .with_graceful_shutdown({
-                let shutdown = shutdown.clone();
-                async move { shutdown.cancelled().await }
-            })
-            .into_future(),
+        // `into_make_service_with_connect_info` is what puts the peer address in each
+        // request's extensions; without it the rate limiter would key every client alike.
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown({
+            let shutdown = shutdown.clone();
+            async move { shutdown.cancelled().await }
+        })
+        .into_future(),
     );
 
     // Race the server against the ingest task so a halt (ingest returning Err while the

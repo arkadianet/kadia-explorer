@@ -105,10 +105,20 @@ async fn get_from(
     peer: &str,
     xff: Option<&str>,
 ) -> (StatusCode, HeaderMap, Value) {
+    get_from_lines(app, path, peer, xff.as_slice()).await
+}
+
+/// As [`get_from`], but sends one `X-Forwarded-For` header *line* per entry of `xff`.
+async fn get_from_lines(
+    app: &Router,
+    path: &str,
+    peer: &str,
+    xff: &[&str],
+) -> (StatusCode, HeaderMap, Value) {
     let peer: SocketAddr = format!("{peer}:4000").parse().unwrap();
     let mut builder = Request::builder().uri(path);
-    if let Some(x) = xff {
-        builder = builder.header("x-forwarded-for", x);
+    for x in xff {
+        builder = builder.header("x-forwarded-for", *x);
     }
     let mut req = builder.body(Body::empty()).unwrap();
     req.extensions_mut().insert(ConnectInfo(peer));
@@ -199,6 +209,35 @@ async fn forwarded_for_is_honoured_only_from_a_trusted_proxy() {
     );
     assert_eq!(
         get_from(&app, "/v1/status", "203.0.113.5", Some("4.4.4.4"))
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+/// A client that sends its own `X-Forwarded-For` gets a *second* header line appended by the
+/// proxy; only the last entry across all lines is the proxy's word, so reading just the first
+/// line would let the client pick its own rate-limit key.
+#[tokio::test]
+async fn every_forwarded_for_line_is_considered_not_just_the_first() {
+    let (_d, app) = app_with(limited(1, 1, &[]), None);
+    // Spoofed first line, proxy-appended second line: the key must be 1.1.1.1.
+    assert_eq!(
+        get_from_lines(&app, "/v1/status", "127.0.0.1", &["6.6.6.6", "1.1.1.1"])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    // A different *last* hop is a different client: still allowed.
+    assert_eq!(
+        get_from_lines(&app, "/v1/status", "127.0.0.1", &["6.6.6.6", "2.2.2.2"])
+            .await
+            .0,
+        StatusCode::OK
+    );
+    // The same last hop again is the same client: limited.
+    assert_eq!(
+        get_from_lines(&app, "/v1/status", "127.0.0.1", &["6.6.6.6", "1.1.1.1"])
             .await
             .0,
         StatusCode::TOO_MANY_REQUESTS
