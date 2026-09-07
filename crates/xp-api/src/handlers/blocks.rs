@@ -1,6 +1,6 @@
 use crate::dto::{
-    block_dto, parse_dir, parse_limit, parse_u64_cursor, tx_dto, BlockDto, ListParams, PageDto,
-    TxDto,
+    block_dto, enrich_txs, parse_dir, parse_limit, parse_u64_cursor, tx_dto, BlockDto, ListParams,
+    PageDto, TxDto,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
@@ -82,10 +82,13 @@ pub async fn block_txs(
             return Err(ApiError::NotFound);
         }
         let tip = rd.indexed_height()?;
-        rd.txs_in_block(height)?
+        let mut items = rd
+            .txs_in_block(height)?
             .iter()
             .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Result<Vec<_>, _>>()?;
+        enrich_txs(rd, items.iter_mut())?;
+        Ok(items)
     })
     .await?;
     Ok(Json(out))

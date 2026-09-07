@@ -16,8 +16,8 @@ fn looks_like_address(q: &str) -> bool {
         && q.chars().all(|c| BASE58.contains(c))
 }
 
-/// Resolution order for a 64-hex term is header id, then tx id, then box id — the same order
-/// the spec lists, and the order of decreasing cardinality on chain.
+/// Resolution order for a 64-hex term is header id, tx id, box id, token id, then template
+/// hash — the same order the spec lists, and the order of decreasing cardinality on chain.
 pub async fn search(
     State(state): State<AppState>,
     Query(p): Query<SearchParams>,
@@ -52,6 +52,18 @@ pub async fn search(
             }
             if rd.box_by_id(&id)?.is_some() {
                 return Ok(SearchDto { kind: "box", id: q });
+            }
+            if rd.token(&id)?.is_some() {
+                return Ok(SearchDto {
+                    kind: "token",
+                    id: q,
+                });
+            }
+            if rd.template(&id)?.is_some() {
+                return Ok(SearchDto {
+                    kind: "template",
+                    id: q,
+                });
             }
             return Err(ApiError::NotFound);
         }

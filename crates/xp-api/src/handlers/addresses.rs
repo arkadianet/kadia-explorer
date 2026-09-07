@@ -1,6 +1,7 @@
 use crate::dto::{
-    address_dto, box_dto_from_reader, parse_bool_param, parse_dir, parse_limit, parse_u64_cursor,
-    tx_dto, AddrBoxParams, AddressDto, AddressRentDto, BoxDto, ListParams, PageDto, TxDto,
+    address_dto, box_dto_from_reader, enrich_balance, enrich_boxes, enrich_txs, parse_bool_param,
+    parse_dir, parse_limit, parse_u64_cursor, tx_dto, AddrBoxParams, AddressDto, AddressRentDto,
+    BoxDto, ListParams, PageDto, TxDto,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
@@ -34,7 +35,9 @@ pub async fn get_one(
             .map(|row| row.address)
             .unwrap_or_else(|| addr.clone());
         let bal = rd.balance(&tree)?;
-        Ok(address_dto(canonical, &tree, bal.as_ref()))
+        let mut dto = address_dto(canonical, &tree, bal.as_ref());
+        enrich_balance(rd, &mut dto.balance)?;
+        Ok(dto)
     })
     .await?;
     Ok(Json(dto))
@@ -54,11 +57,12 @@ pub async fn boxes(
         let tree = tree_of(rd, &addr)?;
         let tip = rd.indexed_height()?;
         let page = rd.tree_boxes(&tree, unspent, cursor, limit, dir)?;
-        let items = page
+        let mut items = page
             .items
             .iter()
             .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
+        enrich_boxes(rd, items.iter_mut())?;
         Ok(PageDto {
             items,
             next_cursor: page.next_cursor.map(|c| c.to_string()),
@@ -81,11 +85,12 @@ pub async fn txs(
         let tree = tree_of(rd, &addr)?;
         let tip = rd.indexed_height()?;
         let page = rd.tree_txs(&tree, cursor, limit, dir)?;
-        let items = page
+        let mut items = page
             .items
             .iter()
             .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
+        enrich_txs(rd, items.iter_mut())?;
         Ok(PageDto {
             items,
             next_cursor: page.next_cursor.map(|c| c.to_string()),
@@ -122,10 +127,11 @@ pub async fn rent(
             }
         }
         rows.sort_by_key(|(_, row)| maturity_height(row.creation_height));
-        let items = rows
+        let mut items = rows
             .iter()
             .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
             .collect::<Result<Vec<_>, _>>()?;
+        enrich_boxes(rd, items.iter_mut())?;
         Ok(AddressRentDto { items, truncated })
     })
     .await?;

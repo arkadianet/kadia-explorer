@@ -1,4 +1,4 @@
-use crate::dto::{box_dto_from_reader, parse_id, rent_dto, BoxDto, BoxRentDto};
+use crate::dto::{box_dto_from_reader, enrich_boxes, parse_id, rent_dto, BoxDto, BoxRentDto};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, State};
 use axum::Json;
@@ -13,7 +13,9 @@ pub async fn get_one(
         let id = parse_id(&raw)?;
         let row = rd.box_by_id(&id)?.ok_or(ApiError::NotFound)?;
         let tip = rd.indexed_height()?;
-        box_dto_from_reader(rd, &id, &row, tip, emission.as_ref())
+        let mut dto = box_dto_from_reader(rd, &id, &row, tip, emission.as_ref())?;
+        enrich_boxes(rd, std::iter::once(&mut dto))?;
+        Ok(dto)
     })
     .await?;
     Ok(Json(dto))

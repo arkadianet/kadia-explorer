@@ -1,5 +1,5 @@
 use crate::dto::{
-    format_rich_cursor, parse_limit, parse_rich_cursor, ListParams, PageDto, RichlistItemDto,
+    format_u64_id_cursor, parse_limit, parse_u64_id_cursor, ListParams, PageDto, RichlistItemDto,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
@@ -12,7 +12,7 @@ pub async fn list(
     Query(p): Query<ListParams>,
 ) -> Result<Json<PageDto<RichlistItemDto>>, ApiError> {
     let limit = parse_limit(p.limit.as_deref())?;
-    let cursor = parse_rich_cursor(p.cursor.as_deref())?;
+    let cursor = parse_u64_id_cursor(p.cursor.as_deref())?;
     let page = blocking(&state, move |rd| {
         let (rows, next) = rd.richlist(cursor, limit)?;
         let mut items = Vec::with_capacity(rows.len());
@@ -25,7 +25,7 @@ pub async fn list(
         }
         Ok(PageDto {
             items,
-            next_cursor: next.map(|(nano, tree)| format_rich_cursor(nano, &tree)),
+            next_cursor: next.map(|(nano, tree)| format_u64_id_cursor(nano, &tree)),
         })
     })
     .await?;

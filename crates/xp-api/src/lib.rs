@@ -63,6 +63,19 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/addresses/{addr}/txs", get(handlers::addresses::txs))
         .route("/v1/addresses/{addr}/rent", get(handlers::addresses::rent))
+        .route("/v1/tokens", get(handlers::tokens::list))
+        .route("/v1/tokens/{id}", get(handlers::tokens::get_one))
+        .route("/v1/tokens/{id}/holders", get(handlers::tokens::holders))
+        .route("/v1/tokens/{id}/boxes", get(handlers::tokens::boxes))
+        .route("/v1/templates/{hash}", get(handlers::templates::get_one))
+        .route(
+            "/v1/templates/{hash}/boxes",
+            get(handlers::templates::boxes),
+        )
+        .route(
+            "/v1/registers/{reg}/{value}/boxes",
+            get(handlers::registers::boxes),
+        )
         .route("/v1/richlist", get(handlers::richlist::list))
         .route("/v1/rent/upcoming", get(handlers::rent::upcoming))
         .route("/v1/rent/eligible", get(handlers::rent::eligible))

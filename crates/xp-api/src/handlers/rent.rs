@@ -1,6 +1,6 @@
 use crate::dto::{
-    box_dto_from_reader, format_rent_cursor, parse_limit, parse_rent_cursor, parse_u32_param,
-    ListParams, PageDto, RentItemDto, RentUpcomingParams,
+    box_dto_from_reader, enrich_boxes, format_rent_cursor, parse_limit, parse_rent_cursor,
+    parse_u32_param, ListParams, PageDto, RentItemDto, RentUpcomingParams,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
@@ -17,7 +17,7 @@ fn items_of(
     tip: Option<u32>,
     emission: Option<&Hash32>,
 ) -> Result<Vec<RentItemDto>, ApiError> {
-    let mut out = Vec::with_capacity(rows.len());
+    let mut out: Vec<RentItemDto> = Vec::with_capacity(rows.len());
     for (maturity_height, box_id) in rows {
         // A `RENT_MATURES` entry always points at a live box row; a missing one is store
         // corruption, not a client-visible condition.
@@ -29,6 +29,7 @@ fn items_of(
             box_: box_dto_from_reader(rd, &box_id, &row, tip, emission)?,
         });
     }
+    enrich_boxes(rd, out.iter_mut().map(|i| &mut i.box_))?;
     Ok(out)
 }
 

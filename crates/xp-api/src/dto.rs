@@ -15,8 +15,9 @@
 
 use crate::error::ApiError;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use xp_store::read::Dir;
-use xp_store::rows::{BalanceRow, BoxRow, HeaderRow, TreeRow, TxRow};
+use xp_store::rows::{BalanceRow, BoxRow, HeaderRow, TemplateRow, TokenRow, TreeRow, TxRow};
 use xp_store::Reader;
 use xp_types::rent::{maturity_height, rent_due};
 use xp_types::{hex32, parse_hex32, Gidx, Hash32};
@@ -45,6 +46,57 @@ pub struct AddrBoxParams {
 pub struct RentUpcomingParams {
     pub blocks: Option<String>,
     pub limit: Option<String>,
+}
+
+/// `/v1/tokens`: cursor/limit plus the `sort` selector (there is no `dir` — both orderings
+/// are descending by construction).
+#[derive(Debug, Default, Deserialize)]
+pub struct TokensListParams {
+    pub cursor: Option<String>,
+    pub limit: Option<String>,
+    pub sort: Option<String>,
+}
+
+/// How `/v1/tokens` orders its page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenSort {
+    /// Newest mint first, cursored by mint gidx.
+    Newest,
+    /// Most holders first, cursored by `"<count>:<token id>"`.
+    Holders,
+}
+
+/// `sort` defaults to `newest`; anything but the two known values is a 400 rather than a
+/// silent fallback, so a client never gets an ordering it did not ask for.
+pub fn parse_token_sort(raw: Option<&str>) -> Result<TokenSort, ApiError> {
+    match raw {
+        None | Some("newest") => Ok(TokenSort::Newest),
+        Some("holders") => Ok(TokenSort::Holders),
+        Some(other) => Err(ApiError::BadRequest(format!(
+            "sort must be 'newest' or 'holders', got {other:?}"
+        ))),
+    }
+}
+
+/// `{reg}` of `/v1/registers/{reg}/{valueHex}/boxes`: `R4`..`R9`, case-insensitive. The `R`
+/// is required — a bare digit is rejected so the path segment can only ever mean a register.
+pub fn parse_register(raw: &str) -> Result<u8, ApiError> {
+    let bad = || ApiError::BadRequest(format!("register must be R4..R9, got {raw:?}"));
+    let digit = raw.strip_prefix(['R', 'r']).ok_or_else(bad)?;
+    match digit.parse::<u8>() {
+        Ok(n) if digit.len() == 1 && (4..=9).contains(&n) => Ok(n),
+        _ => Err(bad()),
+    }
+}
+
+/// `{valueHex}` of the register route: the serialised sigma constant, as even-length hex.
+/// The handler hashes the decoded bytes exactly as the indexer does.
+pub fn parse_register_value(raw: &str) -> Result<Vec<u8>, ApiError> {
+    hex::decode(raw).map_err(|_| {
+        ApiError::BadRequest(format!(
+            "register value must be even-length hex, got {raw:?}"
+        ))
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,10 +165,12 @@ pub fn parse_id(raw: &str) -> Result<Hash32, ApiError> {
         .map_err(|_| ApiError::BadRequest(format!("expected 32-byte hex id, got {raw:?}")))
 }
 
-/// `"<nano>:<tree hex>"` — the richlist's composite cursor. Inverse of
-/// [`parse_rich_cursor`].
-pub fn format_rich_cursor(nano: u64, tree: &Hash32) -> String {
-    format!("{nano}:{}", hex32(tree))
+/// `"<n>:<32-byte hex>"` — the composite cursor shared by every route ordered by a
+/// non-unique u64 with a hash as tie-breaker: the richlist (`<nano>:<tree>`), token holders
+/// (`<amount>:<tree>`) and `/v1/tokens?sort=holders` (`<count>:<token id>`). Inverse of
+/// [`parse_u64_id_cursor`].
+pub fn format_u64_id_cursor(n: u64, id: &Hash32) -> String {
+    format!("{n}:{}", hex32(id))
 }
 
 /// `"<maturity height>:<gidx>"` — the rent-eligible cursor. Inverse of
@@ -125,16 +179,16 @@ pub fn format_rent_cursor(height: u32, gidx: Gidx) -> String {
     format!("{height}:{gidx}")
 }
 
-/// `"<nano>:<tree hex>"` — the richlist's composite cursor.
-pub fn parse_rich_cursor(raw: Option<&str>) -> Result<Option<(u64, Hash32)>, ApiError> {
+/// `"<n>:<32-byte hex>"` — see [`format_u64_id_cursor`].
+pub fn parse_u64_id_cursor(raw: Option<&str>) -> Result<Option<(u64, Hash32)>, ApiError> {
     let Some(s) = raw else { return Ok(None) };
-    let (nano, tree) = s.split_once(':').ok_or_else(|| {
-        ApiError::BadRequest(format!("cursor must be '<nano>:<tree>', got {s:?}"))
-    })?;
-    let nano = nano
+    let (n, id) = s
+        .split_once(':')
+        .ok_or_else(|| ApiError::BadRequest(format!("cursor must be '<n>:<hex>', got {s:?}")))?;
+    let n = n
         .parse::<u64>()
-        .map_err(|_| ApiError::BadRequest(format!("cursor nano must be a number, got {nano:?}")))?;
-    Ok(Some((nano, parse_id(tree)?)))
+        .map_err(|_| ApiError::BadRequest(format!("cursor count must be a number, got {n:?}")))?;
+    Ok(Some((n, parse_id(id)?)))
 }
 
 /// `"<maturity height>:<gidx>"` — the rent-eligible cursor.
@@ -218,10 +272,16 @@ pub fn block_dto(height: u32, h: &HeaderRow) -> BlockDto {
     }
 }
 
+/// A token held by a box or a balance. `name`/`decimals` are filled in by the one-batch
+/// [`enrich_boxes`]/[`enrich_txs`]/[`enrich_balance`] pass a handler runs over its finished
+/// DTOs; they stay `null` for a token the store has no mint row for (legitimate on a store
+/// seeded above the mint height).
 #[derive(Debug, Serialize)]
 pub struct TokenDto {
     pub id: String,
     pub amount: String,
+    pub name: Option<String>,
+    pub decimals: Option<u8>,
 }
 
 fn token_dtos(tokens: &[(Hash32, u64)]) -> Vec<TokenDto> {
@@ -230,8 +290,75 @@ fn token_dtos(tokens: &[(Hash32, u64)]) -> Vec<TokenDto> {
         .map(|(id, amount)| TokenDto {
             id: hex32(id),
             amount: amount.to_string(),
+            name: None,
+            decimals: None,
         })
         .collect()
+}
+
+/// Fills `name`/`decimals` on every listed token with **one** `token_names` batch. Ids are
+/// re-parsed from the DTOs (they were rendered from `Hash32`s, so they always parse) and
+/// looked up through a map, never positionally: `token_names` skips unknown ids and does not
+/// deduplicate.
+fn fill_token_names(rd: &Reader, tokens: Vec<&mut TokenDto>) -> Result<(), ApiError> {
+    if tokens.is_empty() {
+        return Ok(());
+    }
+    let ids = tokens
+        .iter()
+        .map(|t| parse_id(&t.id))
+        .collect::<Result<Vec<Hash32>, _>>()?;
+    let known: HashMap<Hash32, (String, Option<u8>)> = rd
+        .token_names(&ids)?
+        .into_iter()
+        .map(|(id, name, decimals)| (id, (name, decimals)))
+        .collect();
+    for (dto, id) in tokens.into_iter().zip(ids) {
+        if let Some((name, decimals)) = known.get(&id) {
+            dto.name = Some(name.clone());
+            dto.decimals = *decimals;
+        }
+    }
+    Ok(())
+}
+
+/// One `token_names` batch over every token of every listed box.
+pub fn enrich_boxes<'a>(
+    rd: &Reader,
+    boxes: impl IntoIterator<Item = &'a mut BoxDto>,
+) -> Result<(), ApiError> {
+    fill_token_names(
+        rd,
+        boxes
+            .into_iter()
+            .flat_map(|b| b.tokens.iter_mut())
+            .collect(),
+    )
+}
+
+/// One `token_names` batch over every token of every listed tx — outputs and resolved inputs
+/// alike.
+pub fn enrich_txs<'a>(
+    rd: &Reader,
+    txs: impl IntoIterator<Item = &'a mut TxDto>,
+) -> Result<(), ApiError> {
+    fill_token_names(
+        rd,
+        txs.into_iter()
+            .flat_map(|t| {
+                t.inputs
+                    .iter_mut()
+                    .filter_map(|i| i.box_.as_mut())
+                    .chain(t.outputs.iter_mut())
+            })
+            .flat_map(|b| b.tokens.iter_mut())
+            .collect(),
+    )
+}
+
+/// One `token_names` batch over an address balance's token list.
+pub fn enrich_balance(rd: &Reader, balance: &mut BalanceDto) -> Result<(), ApiError> {
+    fill_token_names(rd, balance.tokens.iter_mut().collect())
 }
 
 #[derive(Debug, Serialize)]
@@ -404,6 +531,8 @@ pub struct AddressDto {
     pub tree_hash: String,
     pub balance: BalanceDto,
     pub box_count: u64,
+    /// Distinct transactions that credited or debited this address.
+    pub tx_count: u64,
     pub first_seen: u32,
     pub last_seen: u32,
 }
@@ -417,6 +546,7 @@ pub fn address_dto(address: String, tree: &Hash32, bal: Option<&BalanceRow>) -> 
             tokens: bal.map(|b| token_dtos(&b.tokens)).unwrap_or_default(),
         },
         box_count: bal.map(|b| b.box_count).unwrap_or(0),
+        tx_count: bal.map(|b| b.tx_count).unwrap_or(0),
         first_seen: bal.map(|b| b.first_seen).unwrap_or(0),
         last_seen: bal.map(|b| b.last_seen).unwrap_or(0),
     }
@@ -461,6 +591,106 @@ pub struct SearchDto {
     pub id: String,
 }
 
+/// EIP-4's R7 `Coll[Byte]` type tag, as stored on [`TokenRow::token_type`] (hex of the
+/// constant's payload), mapped to a client-facing label. Anything unrecognised — including
+/// an absent R7 — is a plain `"token"`.
+pub fn token_kind(token_type: Option<&str>) -> &'static str {
+    match token_type {
+        Some("0101") => "nft-picture",
+        Some("0102") => "nft-audio",
+        Some("0103") => "nft-video",
+        Some("0201") => "membership",
+        _ => "token",
+    }
+}
+
+/// A holder's share of the circulating supply, in percent with two decimals (`"12.34"`).
+/// A zero supply — every minted unit burned — has no meaningful share, so it renders
+/// `"0.00"` rather than dividing by zero.
+pub fn share_pct(amount: u64, supply: u64) -> String {
+    if supply == 0 {
+        return "0.00".to_owned();
+    }
+    // Basis points in u128: `amount * 10_000` overflows u64 for large supplies.
+    let bp = u128::from(amount) * 10_000 / u128::from(supply);
+    format!("{}.{:02}", bp / 100, bp % 100)
+}
+
+#[derive(Debug, Serialize)]
+pub struct TokenInfoDto {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub decimals: Option<u8>,
+    /// The raw R7 hex as indexed; `kind` is its interpretation.
+    pub token_type: Option<String>,
+    pub kind: &'static str,
+    pub emission: String,
+    pub burned: String,
+    /// `emission - burned`, saturating: a store seeded above the mint can see burns it never
+    /// saw minted.
+    pub supply: String,
+    pub holder_count: u64,
+    pub box_count: u64,
+    pub mint_tx: String,
+    pub mint_box: String,
+    pub mint_height: u32,
+}
+
+pub fn token_info_dto(id: &Hash32, row: &TokenRow) -> TokenInfoDto {
+    TokenInfoDto {
+        id: hex32(id),
+        name: row.name.clone(),
+        description: row.description.clone(),
+        decimals: row.decimals,
+        kind: token_kind(row.token_type.as_deref()),
+        token_type: row.token_type.clone(),
+        emission: row.emission.to_string(),
+        burned: row.burned.to_string(),
+        supply: row.emission.saturating_sub(row.burned).to_string(),
+        holder_count: row.holder_count,
+        box_count: row.box_count,
+        mint_tx: hex32(&row.mint_tx),
+        mint_box: hex32(&row.mint_box),
+        mint_height: row.mint_height,
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct TokenHolderDto {
+    /// `null` when the store has no tree row for the holder — the same convention the
+    /// richlist uses.
+    pub address: Option<String>,
+    pub tree_hash: String,
+    pub amount: String,
+    pub share_pct: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TemplateDto {
+    pub hash: String,
+    pub box_count: u64,
+    pub unspent_count: u64,
+    pub first_seen: u32,
+    /// The address of one tree using this template, as an example of its parameterisation;
+    /// `null` if that tree row is missing.
+    pub example_address: Option<String>,
+}
+
+pub fn template_dto(
+    hash: &Hash32,
+    row: &TemplateRow,
+    example_address: Option<String>,
+) -> TemplateDto {
+    TemplateDto {
+        hash: hex32(hash),
+        box_count: row.box_count,
+        unspent_count: row.unspent_count,
+        first_seen: row.first_seen,
+        example_address,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,23 +732,23 @@ mod tests {
     }
 
     #[test]
-    fn rich_cursor_round_trips_including_extremes() {
+    fn u64_id_cursor_round_trips_including_extremes() {
         for (nano, tree) in [(0u64, [0u8; 32]), (1, [0x11; 32]), (u64::MAX, [0xff; 32])] {
-            let s = format_rich_cursor(nano, &tree);
-            assert_eq!(parse_rich_cursor(Some(&s)).unwrap(), Some((nano, tree)));
+            let s = format_u64_id_cursor(nano, &tree);
+            assert_eq!(parse_u64_id_cursor(Some(&s)).unwrap(), Some((nano, tree)));
         }
-        assert_eq!(parse_rich_cursor(None).unwrap(), None);
+        assert_eq!(parse_u64_id_cursor(None).unwrap(), None);
         // A well-formed pair with a bad hash, and a pair with no separator, are both 400s.
         assert!(matches!(
-            parse_rich_cursor(Some("12:zz")),
+            parse_u64_id_cursor(Some("12:zz")),
             Err(ApiError::BadRequest(_))
         ));
         assert!(matches!(
-            parse_rich_cursor(Some("12")),
+            parse_u64_id_cursor(Some("12")),
             Err(ApiError::BadRequest(_))
         ));
         assert!(matches!(
-            parse_rich_cursor(Some("x:00")),
+            parse_u64_id_cursor(Some("x:00")),
             Err(ApiError::BadRequest(_))
         ));
     }
