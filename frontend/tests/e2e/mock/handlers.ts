@@ -23,8 +23,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { BoxDto, PageDto, TxDto } from '../../../src/lib/api/types.ts';
-import { buildDataset, type Dataset } from './fixtures.ts';
+import type { BoxDto, PageDto, TokenHolderDto, TxDto } from '../../../src/lib/api/types.ts';
+import { buildDataset, registerKey, type Dataset } from './fixtures.ts';
 
 /** Items per page, small enough that the app's 50-item requests still paginate. */
 export const PAGE_SIZE = 5;
@@ -82,6 +82,28 @@ function page<T>(items: T[], cursor: string | null, limit: number): PageDto<T> {
 	return { items: slice, next_cursor: next < items.length ? String(next) : null };
 }
 
+/**
+ * Holders page. Unlike every other list here the real endpoint's cursor is the last row's
+ * `"<amount>:<treehex>"` rather than an offset — a keyset cursor over the descending amount
+ * order — so the mock reproduces that shape, and a cursor for a row that no longer exists
+ * yields an empty last page rather than restarting from the top.
+ */
+function holderPage(
+	items: TokenHolderDto[],
+	cursor: string | null,
+	limit: number
+): PageDto<TokenHolderDto> {
+	let from = 0;
+	if (cursor !== null) {
+		const at = items.findIndex((h) => `${h.amount}:${h.tree_hash}` === cursor);
+		from = at < 0 ? items.length : at + 1;
+	}
+	const slice = items.slice(from, from + Math.min(limit, PAGE_SIZE));
+	const last = slice[slice.length - 1];
+	const more = last !== undefined && from + slice.length < items.length;
+	return { items: slice, next_cursor: more ? `${last.amount}:${last.tree_hash}` : null };
+}
+
 function limitOf(url: URL, fallback = PAGE_SIZE): number {
 	const raw = url.searchParams.get('limit');
 	if (raw === null) return fallback;
@@ -124,6 +146,21 @@ function boxesOfTree(d: Dataset, tree: string, unspentOnly: boolean): BoxDto[] {
 		return b ? [b] : [];
 	});
 	return unspentOnly ? boxes.filter((b) => b.spent_by === null) : boxes;
+}
+
+/**
+ * Resolves an index's box-id list to boxes, applying the `unspent` and `dir` parameters the
+ * token, template and register box endpoints all share.
+ */
+function boxesOfIds(d: Dataset, ids: string[], url: URL): BoxDto[] {
+	const boxes = ids.flatMap((id) => {
+		const b = d.boxById.get(id);
+		return b ? [b] : [];
+	});
+	const filtered =
+		url.searchParams.get('unspent') === 'true' ? boxes.filter((b) => b.spent_by === null) : boxes;
+	// The indexes are newest first, so `dir=asc` is that order reversed.
+	return url.searchParams.get('dir') === 'asc' ? filtered.reverse() : filtered;
 }
 
 function txsOfTree(d: Dataset, tree: string): TxDto[] {
@@ -266,6 +303,70 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		}
 	}
 
+	// --- tokens ------------------------------------------------------------------------
+	if (path === '/v1/tokens') {
+		const sort = url.searchParams.get('sort');
+		if (sort !== null && sort !== 'newest' && sort !== 'holders') {
+			return badRequest(res, `sort must be "newest" or "holders", not ${JSON.stringify(sort)}`);
+		}
+		sendJson(res, 200, page(sort === 'holders' ? d.tokensByHolders : d.tokens, cursor, limit));
+		return;
+	}
+
+	const token = /^\/v1\/tokens\/([^/]+)(\/holders|\/boxes)?$/.exec(path);
+	if (token) {
+		const id = decodeURIComponent(token[1]).toLowerCase();
+		const info = d.tokenById.get(id);
+		if (info === undefined) return notFound(res);
+		switch (token[2]) {
+			case '/holders':
+				sendJson(res, 200, holderPage(d.tokenHolders.get(id) ?? [], cursor, limit));
+				return;
+			case '/boxes':
+				sendJson(res, 200, page(boxesOfIds(d, d.boxIdsByToken.get(id) ?? [], url), cursor, limit));
+				return;
+			default:
+				sendJson(res, 200, info);
+				return;
+		}
+	}
+
+	// --- templates ---------------------------------------------------------------------
+	const template = /^\/v1\/templates\/([^/]+)(\/boxes)?$/.exec(path);
+	if (template) {
+		const hash = decodeURIComponent(template[1]).toLowerCase();
+		const info = d.templates.get(hash);
+		if (info === undefined) return notFound(res);
+		if (template[2] === '/boxes') {
+			sendJson(
+				res,
+				200,
+				page(boxesOfIds(d, d.boxIdsByTemplate.get(hash) ?? [], url), cursor, limit)
+			);
+			return;
+		}
+		sendJson(res, 200, info);
+		return;
+	}
+
+	// --- register lookup -----------------------------------------------------------------
+	// A register that is not R4–R9 and a value that is not whole bytes of hex are both 400s,
+	// as on the real endpoint; a *well-formed* value nothing carries is an empty 200, since
+	// "no box has this" is an answer, not an error.
+	const register = /^\/v1\/registers\/([^/]+)\/([^/]+)\/boxes$/.exec(path);
+	if (register) {
+		const reg = decodeURIComponent(register[1]).toUpperCase();
+		if (!/^R[4-9]$/.test(reg)) return badRequest(res, `${reg} is not one of R4..R9`);
+		const value = decodeURIComponent(register[2]);
+		if (!/^[0-9a-fA-F]+$/.test(value)) return badRequest(res, 'the register value must be hex');
+		if (value.length % 2 !== 0) {
+			return badRequest(res, 'the register value must be a whole number of bytes');
+		}
+		const ids = d.boxIdsByRegister.get(registerKey(reg, value)) ?? [];
+		sendJson(res, 200, page(boxesOfIds(d, ids, url), cursor, limit));
+		return;
+	}
+
 	// --- richlist / rent -------------------------------------------------------------
 	if (path === '/v1/richlist') {
 		sendJson(res, 200, page(d.richlist, cursor, limit));
@@ -296,6 +397,10 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 			if (d.blockById.has(id)) return sendJson(res, 200, { kind: 'block', id });
 			if (d.txById.has(id)) return sendJson(res, 200, { kind: 'tx', id });
 			if (d.boxById.has(id)) return sendJson(res, 200, { kind: 'box', id });
+			// Token and template come last: an id that is also a box id is the box, which is
+			// the order the real resolver tries them in.
+			if (d.tokenById.has(id)) return sendJson(res, 200, { kind: 'token', id });
+			if (d.templates.has(id)) return sendJson(res, 200, { kind: 'template', id });
 			return notFound(res);
 		}
 		if (d.treeByAddress.has(q)) return sendJson(res, 200, { kind: 'address', id: q });

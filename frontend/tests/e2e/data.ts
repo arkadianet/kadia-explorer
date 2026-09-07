@@ -3,7 +3,7 @@
  * serves — so a change to the fixtures can never leave a hard-coded id behind.
  */
 
-import { buildDataset, FIXTURE_HEIGHTS, MOCK_ADDRESS } from './mock/fixtures.ts';
+import { buildDataset, FIXTURE_HEIGHTS, MOCK_ADDRESS, SYNTHETIC_TOKEN } from './mock/fixtures.ts';
 
 const d = buildDataset();
 
@@ -44,3 +44,47 @@ export const newestTx = d.txs[0];
 /** A well-formed but unknown 64-hex id and address, for the not-found paths. */
 export const UNKNOWN_HEX = 'f'.repeat(64);
 export const UNKNOWN_ADDRESS = '9unknownAddressNeverSeenQqWweeRrTtYyUuPpAaSsDdFf';
+
+// ------------------------------------------------------------------ tokens and templates
+
+export { SYNTHETIC_TOKEN };
+
+/** Every token the mock serves, so the /tokens spec knows how far the list can scroll. */
+export const tokenCount = d.tokens.length;
+
+/**
+ * The first row under each sort. The synthetic token is minted into the newest block, so it
+ * heads `newest`; a fixture token held by several trees heads `holders` — the two differ,
+ * which is what makes the sort toggle observable.
+ */
+export const newestToken = d.tokens[0];
+export const mostHeldToken = d.tokensByHolders[0];
+
+/** Holder rows of `mostHeldToken`, amount descending, as the holders tab lists them. */
+export const tokenHolders = d.tokenHolders.get(mostHeldToken.id)!;
+
+/** Boxes carrying `mostHeldToken` — all of them, and the unspent ones the tab defaults to. */
+const heldBoxes = (d.boxIdsByToken.get(mostHeldToken.id) ?? []).map((id) => d.boxById.get(id)!);
+export const tokenBoxCount = heldBoxes.length;
+export const tokenUnspentBoxCount = heldBoxes.filter((b) => b.spent_by === null).length;
+
+/**
+ * The one template with a resolvable example address (the richest tree's), so the template
+ * page's "Example address" fact has something to link to.
+ */
+export const template = [...d.templates.values()].find((t) => t.example_address !== null)!;
+
+/**
+ * A register lookup that returns boxes: the R4 value carried by the most boxes, capped at
+ * one mock page so the whole result is on screen without scrolling. Sorted by key first, so
+ * the choice does not depend on Map insertion order.
+ */
+export const registerLookup = (() => {
+	const [key, ids] = [...d.boxIdsByRegister.entries()]
+		.filter(([k, v]) => k.startsWith('R4:') && v.length <= 5)
+		.sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))[0];
+	return { reg: 'R4', value: key.slice('R4:'.length), boxIds: ids };
+})();
+
+/** A well-formed register value no fixture box carries — the empty-result path. */
+export const UNKNOWN_REGISTER_VALUE = '0e08' + 'ab'.repeat(8);

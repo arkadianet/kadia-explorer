@@ -32,6 +32,23 @@
  *    every input box was created inside the three fixture blocks; otherwise it is 0. A
  *    block's `reward` is the second output of its first transaction (the miner's share of
  *    the emission spend) and its `fees` the sum of its tx fees.
+ *  - **Tokens.** The blocks that *minted* the fixtures' tokens are far behind the fixture
+ *    range, so there is no EIP-4 mint box to read a name, description or R7 type tag out of.
+ *    Every observed token therefore gets an unnamed `TokenInfoDto` (`kind: 'token'`) whose
+ *    "mint" is the oldest box in the fixtures that carries it, and exactly one synthetic
+ *    EIP-4 token (`SYNTHETIC_TOKEN`) is minted into an unspent box of the richest tree so
+ *    that a named, decimal-scaled token is on screen somewhere. `emission` is every unit
+ *    ever seen, `supply` is what unspent boxes still hold, and `burned` is the difference —
+ *    which makes the holders' `share_pct` add up to 100.
+ *  - **Templates.** A real template hash is the ergo tree with its constants stripped; the
+ *    frontend cannot strip constants, so a box's `template_hash` is a stable sha256 of its
+ *    whole tree. Template and tree are therefore 1:1 here, where the real store maps many
+ *    trees onto one template.
+ *  - **Registers.** `/v1/registers/{reg}/{value}/boxes` keys on blake2b-256 of the raw
+ *    register bytes server-side, and this Node build has no blake2b-256 (`getHashes()` lists
+ *    only blake2b512/blake2s256). The frontend never hashes — it passes the raw hex from the
+ *    URL straight through — so the mock indexes by that raw hex instead, which makes the
+ *    same request URL resolve to the same boxes without a hash implementation in the mock.
  */
 
 import { createHash } from 'node:crypto';
@@ -44,6 +61,9 @@ import type {
 	RentItemDto,
 	RichlistItemDto,
 	StatusDto,
+	TemplateDto,
+	TokenHolderDto,
+	TokenInfoDto,
 	TxDto
 } from '../../../src/lib/api/types.ts';
 
@@ -63,6 +83,20 @@ const ELIGIBLE_COUNT = 8;
  * `0OIl`, long enough for `classify()`'s address rule and the server's `looks_like_address`.
  */
 export const MOCK_ADDRESS = '9mockAddressRichestTreeQqWweeRrTtYyUuPpAaSsDdFfGg';
+
+/**
+ * The one named, decimal-carrying token in the dataset. Minted (by fiat) into an unspent box
+ * of the richest tree, so the address page, the box card and the token page all have a token
+ * whose name and decimal point are visible rather than an id and a raw integer.
+ */
+export const SYNTHETIC_TOKEN = {
+	id: sha256Hex('synthetic-token:mock-explorer'),
+	name: 'Mock Explorer Token',
+	description: 'A synthetic EIP-4 token minted by the e2e mock so names and decimals show up.',
+	decimals: 2,
+	/** 123456 at 2 decimals — "1,234.56" once `formatTokenAmount` has scaled it. */
+	amount: '123456'
+} as const;
 
 // ---------------------------------------------------------------------------- node JSON
 
@@ -136,6 +170,16 @@ function rentDue(size: number, value: bigint): bigint {
  * per-box size, and this feeds both the box page's "Size" fact and the rent due, so it only
  * has to be stable and plausible — it is not the store's exact byte count.
  */
+/**
+ * A holder's share of a token's supply, as the decimal string the API sends: two decimals,
+ * computed in BigInt (an amount can exceed 2^53) via hundredths of a percent. A supply of
+ * zero — every unit burned or spent out of the fixture range — has no shares to divide.
+ */
+function sharePct(amount: bigint, supply: bigint): string {
+	if (supply <= 0n) return '0.00';
+	return (Number((amount * 10_000n) / supply) / 100).toFixed(2);
+}
+
 function boxSize(out: NodeOutput): number {
 	return Math.ceil(out.ergoTree.length / 2) + 40 + out.assets.length * 40;
 }
@@ -164,6 +208,25 @@ export interface Dataset {
 	rentUpcoming: RentItemDto[];
 	rentEligible: RentItemDto[];
 	addresses: Map<string, AddressDto>;
+	/** Every token seen in a fixture box, `sort=newest` order (mint height descending). */
+	tokens: TokenInfoDto[];
+	/** The same tokens in `sort=holders` order (holder count descending). */
+	tokensByHolders: TokenInfoDto[];
+	tokenById: Map<string, TokenInfoDto>;
+	/** Holders per token, amount descending — one row per ergo tree with an unspent box. */
+	tokenHolders: Map<string, TokenHolderDto[]>;
+	/** Box ids per token, newest first. */
+	boxIdsByToken: Map<string, string[]>;
+	templates: Map<string, TemplateDto>;
+	/** Box ids per script template hash, newest first. */
+	boxIdsByTemplate: Map<string, string[]>;
+	/** Box ids per `${reg}:${rawValueHex}`, newest first. See the register note above. */
+	boxIdsByRegister: Map<string, string[]>;
+}
+
+/** Key into `boxIdsByRegister`. The value hex is lower-cased, as the frontend sends it. */
+export function registerKey(reg: string, valueHex: string): string {
+	return `${reg.toUpperCase()}:${valueHex.toLowerCase()}`;
 }
 
 export function buildDataset(): Dataset {
@@ -371,6 +434,26 @@ export function buildDataset(): Dataset {
 		if (b) b.address = MOCK_ADDRESS;
 	}
 
+	// Mint the one synthetic EIP-4 token into an unspent box of the richest tree, before the
+	// balances below are read off, so it shows up on the address page as well as the box.
+	const syntheticHost = (boxIdsByTree.get(richestTree) ?? [])
+		.map((id) => boxById.get(id))
+		.find((b): b is BoxDto => b !== undefined && b.spent_by === null);
+	if (syntheticHost) {
+		syntheticHost.tokens = [
+			...syntheticHost.tokens,
+			{
+				id: SYNTHETIC_TOKEN.id,
+				amount: SYNTHETIC_TOKEN.amount,
+				name: SYNTHETIC_TOKEN.name,
+				decimals: SYNTHETIC_TOKEN.decimals
+			}
+		];
+		const bag = tokensByTree.get(richestTree) ?? new Map<string, bigint>();
+		bag.set(SYNTHETIC_TOKEN.id, BigInt(SYNTHETIC_TOKEN.amount));
+		tokensByTree.set(richestTree, bag);
+	}
+
 	const richlist: RichlistItemDto[] = byBalance.map(([tree, nano]) => ({
 		address: addressByTree.get(tree) ?? null,
 		tree_hash: tree,
@@ -395,6 +478,160 @@ export function buildDataset(): Dataset {
 			last_seen: seen?.last ?? 0
 		});
 	}
+
+	// --- tokens, templates, registers --------------------------------------------------
+	// One newest-first pass over every output builds all three indexes at once, so each of
+	// them lists boxes in the same order the address and richlist views use.
+	interface TokenAcc {
+		/** Every unit ever seen in a fixture box. */
+		emission: bigint;
+		/** Units still sitting in an unspent box — the token's `supply`. */
+		unspent: bigint;
+		boxCount: number;
+		/** Unspent amount per ergo tree; the tree count is the holder count. */
+		holders: Map<string, bigint>;
+		mintTx: string;
+		mintBox: string;
+		mintHeight: number;
+	}
+	interface TemplateAcc {
+		boxes: number;
+		unspent: number;
+		first: number;
+		address: string | null;
+	}
+
+	const tokenAcc = new Map<string, TokenAcc>();
+	const templateAcc = new Map<string, TemplateAcc>();
+	const boxIdsByToken = new Map<string, string[]>();
+	const boxIdsByTemplate = new Map<string, string[]>();
+	const boxIdsByRegister = new Map<string, string[]>();
+
+	const push = (map: Map<string, string[]>, key: string, id: string) => {
+		const list = map.get(key) ?? [];
+		list.push(id);
+		map.set(key, list);
+	};
+
+	for (const tx of txs) {
+		for (const out of tx.outputs) {
+			for (const t of out.tokens) {
+				const amount = BigInt(t.amount);
+				const acc = tokenAcc.get(t.id);
+				if (acc === undefined) {
+					tokenAcc.set(t.id, {
+						emission: amount,
+						unspent: out.spent_by === null ? amount : 0n,
+						boxCount: 1,
+						holders:
+							out.spent_by === null
+								? new Map([[out.tree_hash, amount]])
+								: new Map<string, bigint>(),
+						mintTx: tx.id,
+						mintBox: out.id,
+						mintHeight: out.creation_height
+					});
+				} else {
+					acc.emission += amount;
+					acc.boxCount += 1;
+					if (out.spent_by === null) {
+						acc.unspent += amount;
+						acc.holders.set(out.tree_hash, (acc.holders.get(out.tree_hash) ?? 0n) + amount);
+					}
+					// The scan runs newest first, so anything at or below the height recorded so far
+					// is the older box — and the oldest one stands in for the mint.
+					if (out.creation_height <= acc.mintHeight) {
+						acc.mintTx = tx.id;
+						acc.mintBox = out.id;
+						acc.mintHeight = out.creation_height;
+					}
+				}
+				push(boxIdsByToken, t.id, out.id);
+			}
+
+			if (out.template_hash) {
+				push(boxIdsByTemplate, out.template_hash, out.id);
+				const acc = templateAcc.get(out.template_hash);
+				if (acc === undefined) {
+					templateAcc.set(out.template_hash, {
+						boxes: 1,
+						unspent: out.spent_by === null ? 1 : 0,
+						first: tx.height,
+						address: out.address
+					});
+				} else {
+					acc.boxes += 1;
+					if (out.spent_by === null) acc.unspent += 1;
+					acc.first = Math.min(acc.first, tx.height);
+					acc.address ??= out.address;
+				}
+			}
+
+			for (const [reg, value] of Object.entries(out.registers ?? {})) {
+				if (!/^R[4-9]$/.test(reg) || typeof value !== 'string' || value === '') continue;
+				push(boxIdsByRegister, registerKey(reg, value), out.id);
+			}
+		}
+	}
+
+	const tokens: TokenInfoDto[] = [...tokenAcc.entries()].map(([id, acc]) => {
+		const synthetic = id === SYNTHETIC_TOKEN.id;
+		return {
+			id,
+			// Nothing but the synthetic token has a mint box in range to read a name out of.
+			name: synthetic ? SYNTHETIC_TOKEN.name : '',
+			description: synthetic ? SYNTHETIC_TOKEN.description : '',
+			decimals: synthetic ? SYNTHETIC_TOKEN.decimals : null,
+			token_type: synthetic ? 'EIP-004' : null,
+			kind: 'token',
+			emission: acc.emission.toString(),
+			burned: (acc.emission - acc.unspent).toString(),
+			supply: acc.unspent.toString(),
+			holder_count: acc.holders.size,
+			box_count: acc.boxCount,
+			mint_tx: acc.mintTx,
+			mint_box: acc.mintBox,
+			mint_height: acc.mintHeight
+		};
+	});
+	const tokenById = new Map(tokens.map((t) => [t.id, t]));
+
+	const tokenHolders = new Map<string, TokenHolderDto[]>();
+	for (const [id, acc] of tokenAcc) {
+		const rows = [...acc.holders.entries()]
+			.sort((a, b) => (b[1] > a[1] ? 1 : b[1] < a[1] ? -1 : 0) || a[0].localeCompare(b[0]))
+			.map(([tree, amount]) => ({
+				address: addressByTree.get(tree) ?? null,
+				tree_hash: tree,
+				amount: amount.toString(),
+				share_pct: sharePct(amount, acc.unspent)
+			}));
+		tokenHolders.set(id, rows);
+	}
+
+	// The store joins a mint row onto every token amount it serves; only the synthetic token
+	// has one, so everything else keeps the null name/decimals the UI falls back on.
+	const label = (id: string) => {
+		const info = tokenById.get(id);
+		return { name: info && info.name !== '' ? info.name : null, decimals: info?.decimals ?? null };
+	};
+	for (const b of boxById.values()) b.tokens = b.tokens.map((t) => ({ ...t, ...label(t.id) }));
+	for (const info of addresses.values()) {
+		info.balance.tokens = info.balance.tokens.map((t) => ({ ...t, ...label(t.id) }));
+	}
+
+	const templates = new Map<string, TemplateDto>(
+		[...templateAcc.entries()].map(([hash, acc]) => [
+			hash,
+			{
+				hash,
+				box_count: acc.boxes,
+				unspent_count: acc.unspent,
+				first_seen: acc.first,
+				example_address: acc.address
+			}
+		])
+	);
 
 	// --- rent --------------------------------------------------------------------------
 	const unspent = [...boxById.values()].filter((b) => b.spent_by === null);
@@ -439,6 +676,16 @@ export function buildDataset(): Dataset {
 		richlist,
 		rentUpcoming,
 		rentEligible,
-		addresses
+		addresses,
+		tokens: [...tokens].sort((a, b) => b.mint_height - a.mint_height || a.id.localeCompare(b.id)),
+		tokensByHolders: [...tokens].sort(
+			(a, b) => b.holder_count - a.holder_count || a.id.localeCompare(b.id)
+		),
+		tokenById,
+		tokenHolders,
+		boxIdsByToken,
+		templates,
+		boxIdsByTemplate,
+		boxIdsByRegister
 	};
 }
