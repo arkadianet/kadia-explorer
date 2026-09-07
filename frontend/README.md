@@ -3,6 +3,26 @@
 The SvelteKit single-page app for the standalone Ergo explorer. It talks to `xp-api` over
 `/v1` and ships as a static bundle (`@sveltejs/adapter-static`, `ssr = false`).
 
+## Routes
+
+| Route | Purpose |
+|---|---|
+| `/` | Home — status panels, latest blocks/txs, and a "Top tokens" card |
+| `/blocks`, `/blocks/[id]` | Block list and detail |
+| `/txs`, `/tx/[id]` | Transaction list and detail |
+| `/box/[id]` | Box detail, including the rent panel |
+| `/address/[addr]` | Address balance, boxes, txs and rent tabs |
+| `/richlist` | Richlist |
+| `/rent` | Upcoming/eligible rent tabs |
+| `/status` | Indexer status, including the stall callout |
+| `/search` | Resolves a height/tx/box/block id, address, token id or template hash; also a register-value box lookup (`?reg=R4&value=<hex>`) |
+| `/tokens` | All indexed tokens, with a `?sort=newest\|holders` toggle |
+| `/token/[id]` | One token's facts, plus holders and boxes tabs |
+| `/template/[hash]` | One script template's facts, plus an unspent/all box tab |
+
+Token names/decimals are also surfaced outside these routes: on box and address pages
+wherever a box carries a token.
+
 ## Developing
 
 Install dependencies with `npm install`, then start the dev server:

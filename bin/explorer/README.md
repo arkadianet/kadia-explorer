@@ -77,8 +77,9 @@ An unrecognized `source.kind` is rejected at startup with a clear error naming t
 ## API
 
 See `xp-api` for the full `/v1` route tree (`/v1/status`, `/v1/blocks`, `/v1/txs`,
-`/v1/boxes`, `/v1/addresses`, ...). `/v1/status` reports `{ indexed, best, mode, source,
-halted, lag_blocks, stalled }` and is the quickest way to watch progress:
+`/v1/boxes`, `/v1/addresses`, `/v1/tokens`, `/v1/templates`, `/v1/registers`, ...).
+`/v1/status` reports `{ indexed, best, mode, source, halted, lag_blocks, stalled }` and is
+the quickest way to watch progress:
 
 ```bash
 curl -s 127.0.0.1:8090/v1/status
@@ -101,6 +102,36 @@ curl -s 127.0.0.1:8090/v1/status
 ```
 
 `stalled` is `null` whenever ingest is progressing or merely idle at the tip.
+
+## Tokens, templates and register search
+
+Schema v2 adds token, script-template and register-value indexing. New routes:
+
+- `GET /v1/tokens?sort=newest|holders&cursor&limit` — all indexed tokens, newest mint first
+  or most-held first. `newest` cursors on the mint's global index; `holders` cursors on
+  `<holder_count>:<token_id_hex>`.
+- `GET /v1/tokens/{id}` — one token's facts (name, description, decimals, `kind`, emission,
+  burned, supply, holder/box counts). 404 if the id was never minted.
+- `GET /v1/tokens/{id}/holders?cursor&limit` — current holders by amount held, descending.
+  Cursor is `<amount>:<treehex>`.
+- `GET /v1/tokens/{id}/boxes?unspent&cursor&limit&dir` — boxes carrying the token.
+- `GET /v1/templates/{hash}` — a script template's box/unspent-box counts. 404 if unseen.
+- `GET /v1/templates/{hash}/boxes?unspent&cursor&limit&dir` — boxes on that template.
+- `GET /v1/registers/{R4..R9}/{valueHex}/boxes?cursor&limit&dir` — boxes whose register holds
+  exactly that serialised sigma constant. The server hashes `valueHex` with blake2b-256 the
+  same way the indexer keys the register table; an unindexed value is an empty page, not a
+  404 (there is no row asserting the value ever existed).
+- `/v1/search` also resolves a 64-hex term as a token id or template hash, tried after
+  header id, tx id and box id, in that order.
+
+Token `kind` is derived from the EIP-4 `R7` type tag: `0101` → `nft-picture`, `0102` →
+`nft-audio`, `0103` → `nft-video`, `0201` → `membership`, anything else (including no `R7`
+at all) → `token`. Burns are tracked per transaction and token as `burned += max(0, in −
+out)` on the token's total input/output amounts for that tx.
+
+`AddressDto` also gained `tx_count`, and `BoxDto.tokens[]` entries gained `name`/`decimals`
+(both `null` when the token's mint predates the store's start height — see the upgrade note
+below).
 
 ## Stalls and the fallback source
 
@@ -176,3 +207,23 @@ Nothing about the store format changed and the schema version is unchanged, so s
 opens and keeps indexing normally — but its historical rows are not backfilled. **Re-sync to
 get correct fees for already-indexed heights**; blocks applied after the upgrade are correct
 either way.
+
+### Note on upgrading to schema v2 (tokens, templates, registers)
+
+`SCHEMA_VERSION` is now `2` (`crates/xp-store/src/lib.rs`). Unlike the two notes above, this
+*is* a table-layout change: new tables back the token/template/register-search endpoints.
+There is no in-place migration path. `Store::open` compares the store's recorded version
+against `SCHEMA_VERSION` and refuses to open a mismatch:
+
+```text
+corrupt: schema version mismatch
+```
+
+To upgrade: stop the service, delete `data/explorer.redb`, and start it again — it resyncs
+from genesis, this time populating the new tables as it goes. There is no way to add the new
+tables to an existing v1 store short of a full reindex.
+
+Because indexing starts fresh, tokens minted before a *partially* re-synced store's current
+height simply have no token row yet (the mint block hasn't been reached). Readers tolerate
+this: `BoxDto.tokens[].name`/`decimals` come back `null` and `/v1/tokens/{id}` 404s for such
+a token until ingest catches up to its mint height.
