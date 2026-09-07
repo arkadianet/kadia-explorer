@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatErg, formatNano, sumNano } from '$lib/format/amount';
+import { formatErg, formatNano, formatTokenAmount, sumNano } from '$lib/format/amount';
 
 describe('formatErg', () => {
 	it('handles zero and one nanoERG exactly', () => {
@@ -24,6 +24,25 @@ describe('formatErg', () => {
 
 describe('formatNano', () => {
 	it('groups', () => expect(formatNano('1250000')).toBe('1,250,000'));
+});
+
+describe('formatTokenAmount', () => {
+	it('inserts the decimal point', () => {
+		expect(formatTokenAmount('12345', 2)).toBe('123.45');
+	});
+	it('pads a fraction shorter than the decimals count', () => {
+		expect(formatTokenAmount('5', 3)).toBe('0.005');
+	});
+	it('falls back to a grouped integer when decimals is null', () => {
+		expect(formatTokenAmount('1250000', null)).toBe('1,250,000');
+	});
+	it('trims trailing zeros in the fraction', () => {
+		expect(formatTokenAmount('1500', 2)).toBe('15');
+		expect(formatTokenAmount('1250', 2)).toBe('12.5');
+	});
+	it('treats zero decimals like a grouped integer', () => {
+		expect(formatTokenAmount('42000', 0)).toBe('42,000');
+	});
 });
 
 describe('sumNano', () => {

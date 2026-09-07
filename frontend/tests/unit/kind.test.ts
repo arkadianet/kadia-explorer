@@ -65,7 +65,9 @@ describe('txKind', () => {
 	});
 
 	it('calls it a token transfer when a token moves', () => {
-		const result = txKind(tx({ outputs: [box({ tokens: [{ id: 'token', amount: '5' }] })] }));
+		const result = txKind(
+			tx({ outputs: [box({ tokens: [{ id: 'token', amount: '5', name: null, decimals: null }] })] })
+		);
 		expect(result.kind).toBe('token');
 	});
 

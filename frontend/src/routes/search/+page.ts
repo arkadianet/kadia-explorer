@@ -6,7 +6,10 @@ import type { PageLoad } from './$types';
 
 export type NotFoundReason = 'empty' | 'unknown-format' | 'not-found';
 
-function destinationFor(kind: 'block' | 'tx' | 'box' | 'address', id: string): string {
+function destinationFor(
+	kind: 'block' | 'tx' | 'box' | 'address' | 'token' | 'template',
+	id: string
+): string {
 	switch (kind) {
 		case 'block':
 			return `/blocks/${id}`;
@@ -16,6 +19,10 @@ function destinationFor(kind: 'block' | 'tx' | 'box' | 'address', id: string): s
 			return `/box/${id}`;
 		case 'address':
 			return `/address/${id}`;
+		case 'token':
+			return `/token/${id}`;
+		case 'template':
+			return `/template/${id}`;
 	}
 }
 

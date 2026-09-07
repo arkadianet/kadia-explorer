@@ -39,6 +39,8 @@ export interface BlockDto {
 export interface TokenDto {
 	id: string;
 	amount: string;
+	name: string | null;
+	decimals: number | null;
 }
 
 export interface RentDto {
@@ -92,6 +94,7 @@ export interface AddressDto {
 	tree_hash: string;
 	balance: BalanceDto;
 	box_count: number;
+	tx_count: number;
 	first_seen: number;
 	last_seen: number;
 }
@@ -119,6 +122,41 @@ export interface RichlistItemDto {
 }
 
 export interface SearchDto {
-	kind: 'block' | 'tx' | 'box' | 'address';
+	kind: 'block' | 'tx' | 'box' | 'address' | 'token' | 'template';
 	id: string;
+}
+
+/** EIP-4's R7 type-tag classification, as interpreted by `token_kind` on the backend. */
+export type TokenKind = 'nft-picture' | 'nft-audio' | 'nft-video' | 'membership' | 'token';
+
+export interface TokenInfoDto {
+	id: string;
+	name: string;
+	description: string;
+	decimals: number | null;
+	token_type: string | null;
+	kind: TokenKind;
+	emission: string;
+	burned: string;
+	supply: string;
+	holder_count: number;
+	box_count: number;
+	mint_tx: string;
+	mint_box: string;
+	mint_height: number;
+}
+
+export interface TokenHolderDto {
+	address: string | null;
+	tree_hash: string;
+	amount: string;
+	share_pct: string;
+}
+
+export interface TemplateDto {
+	hash: string;
+	box_count: number;
+	unspent_count: number;
+	first_seen: number;
+	example_address: string | null;
 }

@@ -10,6 +10,9 @@ import type {
 	RichlistItemDto,
 	SearchDto,
 	StatusDto,
+	TemplateDto,
+	TokenHolderDto,
+	TokenInfoDto,
 	TxDto
 } from './types';
 
@@ -69,5 +72,63 @@ export const api = {
 	rentEligible: (cursor?: string, limit = 50, f?: Fetch) =>
 		apiGet<PageDto<RentItemDto>>('/rent/eligible', { cursor, limit }, f),
 
-	search: (q: string, f?: Fetch) => apiGet<SearchDto>('/search', { q }, f)
+	search: (q: string, f?: Fetch) => apiGet<SearchDto>('/search', { q }, f),
+
+	tokens: (sort?: 'newest' | 'holders', cursor?: string, limit = 50, f?: Fetch) =>
+		apiGet<PageDto<TokenInfoDto>>('/tokens', { sort, cursor, limit }, f),
+
+	token: (id: string, f?: Fetch) =>
+		apiGet<TokenInfoDto>(`/tokens/${encodeURIComponent(id)}`, undefined, f),
+
+	tokenHolders: (id: string, cursor?: string, limit = 50, f?: Fetch) =>
+		apiGet<PageDto<TokenHolderDto>>(
+			`/tokens/${encodeURIComponent(id)}/holders`,
+			{ cursor, limit },
+			f
+		),
+
+	tokenBoxes: (
+		id: string,
+		unspent?: boolean,
+		cursor?: string,
+		limit = 50,
+		dir?: 'asc' | 'desc',
+		f?: Fetch
+	) =>
+		apiGet<PageDto<BoxDto>>(
+			`/tokens/${encodeURIComponent(id)}/boxes`,
+			{ unspent, cursor, limit, dir },
+			f
+		),
+
+	template: (hash: string, f?: Fetch) =>
+		apiGet<TemplateDto>(`/templates/${encodeURIComponent(hash)}`, undefined, f),
+
+	templateBoxes: (
+		hash: string,
+		unspent?: boolean,
+		cursor?: string,
+		limit = 50,
+		dir?: 'asc' | 'desc',
+		f?: Fetch
+	) =>
+		apiGet<PageDto<BoxDto>>(
+			`/templates/${encodeURIComponent(hash)}/boxes`,
+			{ unspent, cursor, limit, dir },
+			f
+		),
+
+	boxesByRegister: (
+		reg: string,
+		valueHex: string,
+		cursor?: string,
+		limit = 50,
+		dir?: 'asc' | 'desc',
+		f?: Fetch
+	) =>
+		apiGet<PageDto<BoxDto>>(
+			`/registers/${encodeURIComponent(reg)}/${encodeURIComponent(valueHex)}/boxes`,
+			{ cursor, limit, dir },
+			f
+		)
 };

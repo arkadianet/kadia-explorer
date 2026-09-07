@@ -39,6 +39,28 @@ export function formatNano(nano: string | bigint): string {
 	return `${negative ? '-' : ''}${groupInt(abs.toString())}`;
 }
 
+/** Grouped token amount, dividing by `10^decimals` and inserting the decimal point, e.g.
+ * `("12345", 2)` -> "123.45". `decimals: null` (the store has no mint row for the token) or
+ * `0` both fall back to a grouped integer, since there is no fractional part to show. */
+export function formatTokenAmount(amount: string, decimals: number | null): string {
+	const n = toBigInt(amount);
+	if (!decimals) return formatNano(n);
+
+	const negative = n < 0n;
+	const abs = negative ? -n : n;
+	const divisor = 10n ** BigInt(decimals);
+	const whole = abs / divisor;
+	const frac = abs % divisor;
+	const sign = negative ? '-' : '';
+	const wholeStr = groupInt(whole.toString());
+
+	if (frac === 0n) return `${sign}${wholeStr}`;
+
+	const fracStr = frac.toString().padStart(decimals, '0').replace(/0+$/, '');
+
+	return fracStr === '' ? `${sign}${wholeStr}` : `${sign}${wholeStr}.${fracStr}`;
+}
+
 /** Sums decimal nanoERG amounts via BigInt, e.g. summing a tx's output values. */
 export function sumNano(values: string[]): bigint {
 	return values.reduce((total, v) => total + BigInt(v), 0n);
