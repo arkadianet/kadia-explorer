@@ -12,3 +12,12 @@ bulk_batch = 64
 bulk_concurrency = 8
 durable_every = 256
 tip_lag_for_bulk = 64
+# Optional: public API rate limiting, trusted proxies, and bounded blocking reads. All
+# fields shown at their defaults; the whole section may be omitted.
+# [api]
+# max_inflight_reads = 32
+# trusted_proxies = ["127.0.0.1", "::1"]
+# [api.rate_limit]
+# per_second = 10
+# burst = 30
+# allowlist = []

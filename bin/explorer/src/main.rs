@@ -88,6 +88,9 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         .with_context(|| format!("reading config file {}", config_path.display()))?;
     let cfg = Config::parse(&text)
         .with_context(|| format!("parsing config file {}", config_path.display()))?;
+    // Validated up front so a bad allowlist/CIDR exits 1 like any other config error,
+    // before we touch the store or bind a socket.
+    let api_cfg = xp_api::ApiConfig::try_from(&cfg.api).map_err(|e| anyhow::anyhow!(e))?;
 
     std::fs::create_dir_all(&cfg.data_dir)
         .with_context(|| format!("creating data_dir {}", cfg.data_dir.display()))?;
@@ -143,8 +146,13 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         shutdown.clone(),
     ));
 
-    // Task 5 replaces these defaults with the `[api]` TOML section.
-    let api_cfg = xp_api::ApiConfig::default();
+    info!(
+        per_second = api_cfg.per_second,
+        burst = api_cfg.burst,
+        max_inflight_reads = api_cfg.max_inflight_reads,
+        allowlist = cfg.api.rate_limit.allowlist.len(),
+        "api limits"
+    );
     let app_state = xp_api::AppState {
         store: store.clone(),
         status: status_rx,

@@ -26,6 +26,59 @@ pub struct Config {
     pub source: SourceConfig,
     #[serde(default)]
     pub ingest: IngestSection,
+    #[serde(default)]
+    pub api: ApiSection,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ApiSection {
+    pub max_inflight_reads: u32,
+    pub trusted_proxies: Vec<String>,
+    pub rate_limit: RateLimitSection,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct RateLimitSection {
+    pub per_second: u32,
+    pub burst: u32,
+    pub allowlist: Vec<String>,
+}
+
+impl Default for ApiSection {
+    fn default() -> ApiSection {
+        ApiSection {
+            max_inflight_reads: 32,
+            trusted_proxies: vec!["127.0.0.1".into(), "::1".into()],
+            rate_limit: RateLimitSection::default(),
+        }
+    }
+}
+
+impl Default for RateLimitSection {
+    fn default() -> RateLimitSection {
+        RateLimitSection {
+            per_second: 10,
+            burst: 30,
+            allowlist: Vec::new(),
+        }
+    }
+}
+
+impl TryFrom<&ApiSection> for xp_api::ApiConfig {
+    type Error = String;
+    fn try_from(s: &ApiSection) -> Result<xp_api::ApiConfig, String> {
+        Ok(xp_api::ApiConfig {
+            per_second: s.rate_limit.per_second,
+            burst: s.rate_limit.burst,
+            allowlist: xp_api::Allowlist::parse(&s.rate_limit.allowlist)
+                .map_err(|e| format!("[api.rate_limit] allowlist: {e}"))?,
+            trusted_proxies: xp_api::Allowlist::parse(&s.trusted_proxies)
+                .map_err(|e| format!("[api] trusted_proxies: {e}"))?,
+            max_inflight_reads: s.max_inflight_reads.max(1),
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,6 +200,71 @@ mod tests {
             cfg.source.fallback_url.as_deref(),
             Some("https://node.ergo.watch")
         );
+    }
+
+    #[test]
+    fn api_section_defaults_when_absent() {
+        let cfg = Config::parse(
+            r#"
+        data_dir = "/tmp/x"
+        bind = "127.0.0.1:1"
+        [source]
+        kind = "rust_node"
+        url = "http://127.0.0.1:9053"
+    "#,
+        )
+        .unwrap();
+        let api = xp_api::ApiConfig::try_from(&cfg.api).unwrap();
+        assert_eq!(
+            (api.per_second, api.burst, api.max_inflight_reads),
+            (10, 30, 32)
+        );
+        assert!(api.trusted_proxies.contains("127.0.0.1".parse().unwrap()));
+        assert!(!api.allowlist.contains("1.1.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn api_section_parses_and_rejects_bad_cidr() {
+        let good = Config::parse(
+            r#"
+        data_dir = "/tmp/x"
+        bind = "127.0.0.1:1"
+        [source]
+        kind = "rust_node"
+        url = "http://127.0.0.1:9053"
+        [api]
+        max_inflight_reads = 4
+        trusted_proxies = ["10.0.0.1"]
+        [api.rate_limit]
+        per_second = 2
+        burst = 5
+        allowlist = ["203.0.113.0/24", "2001:db8::/32"]
+    "#,
+        )
+        .unwrap();
+        let api = xp_api::ApiConfig::try_from(&good.api).unwrap();
+        assert_eq!(
+            (api.per_second, api.burst, api.max_inflight_reads),
+            (2, 5, 4)
+        );
+        assert!(api.allowlist.contains("203.0.113.9".parse().unwrap()));
+        assert!(api.trusted_proxies.contains("10.0.0.1".parse().unwrap()));
+        assert!(!api.trusted_proxies.contains("127.0.0.1".parse().unwrap()));
+
+        let bad = Config::parse(
+            r#"
+        data_dir = "/tmp/x"
+        bind = "127.0.0.1:1"
+        [source]
+        kind = "rust_node"
+        url = "http://127.0.0.1:9053"
+        [api.rate_limit]
+        allowlist = ["1.2.3.4/40"]
+    "#,
+        )
+        .unwrap();
+        let err = xp_api::ApiConfig::try_from(&bad.api).unwrap_err();
+        assert!(err.contains("1.2.3.4/40"), "{err}");
     }
 
     #[test]
