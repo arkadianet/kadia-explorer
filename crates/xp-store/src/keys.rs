@@ -15,6 +15,16 @@ pub fn k_hash_gidx(h: &Hash32, g: Gidx) -> [u8; 40] {
     k
 }
 
+/// `prefix ++ gidx u64 BE` for a prefix of any width: the 32-byte hash of a
+/// `k_hash_gidx` key, or the 33-byte `(reg, value_hash)` head of a `k_register` one. Used by
+/// the readers' generic pager, which must build a bound key without knowing the width.
+pub fn k_prefix_gidx(prefix: &[u8], g: Gidx) -> Vec<u8> {
+    let mut k = Vec::with_capacity(prefix.len() + 8);
+    k.extend_from_slice(prefix);
+    k.extend_from_slice(&g.to_be_bytes());
+    k
+}
+
 pub fn k_rich(nano: u64, tree: &Hash32) -> [u8; 40] {
     let mut k = [0u8; 40];
     k[..8].copy_from_slice(&nano.to_be_bytes());
@@ -121,6 +131,18 @@ mod tests {
                 "composite key shorter than 8 bytes"
             ))
         ));
+    }
+
+    #[test]
+    fn prefix_gidx_matches_the_fixed_width_key_builders() {
+        let h = [7u8; 32];
+        assert_eq!(k_prefix_gidx(&h, 42), k_hash_gidx(&h, 42).to_vec());
+        let mut head = vec![4u8];
+        head.extend_from_slice(&[3u8; 32]);
+        assert_eq!(
+            k_prefix_gidx(&head, 42),
+            k_register(4, &[3u8; 32], 42).to_vec()
+        );
     }
 
     #[test]
