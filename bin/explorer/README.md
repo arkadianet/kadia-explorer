@@ -210,13 +210,13 @@ either way.
 
 ### Note on upgrading to schema v2 (tokens, templates, registers)
 
-`SCHEMA_VERSION` is now `2` (`crates/xp-store/src/lib.rs`). Unlike the two notes above, this
+`SCHEMA_VERSION` is now `2` (`crates/xp-store/src/tables.rs`). Unlike the two notes above, this
 *is* a table-layout change: new tables back the token/template/register-search endpoints.
 There is no in-place migration path. `Store::open` compares the store's recorded version
 against `SCHEMA_VERSION` and refuses to open a mismatch:
 
 ```text
-corrupt: schema version mismatch
+corrupt row: schema version mismatch
 ```
 
 To upgrade: stop the service, delete `data/explorer.redb`, and start it again — it resyncs
