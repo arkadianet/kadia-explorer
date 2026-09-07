@@ -48,6 +48,14 @@ pub struct RentUpcomingParams {
     pub limit: Option<String>,
 }
 
+/// Cursor/limit with no `dir`, for routes whose ordering is fixed by the index they read:
+/// `/v1/tokens/{id}/holders` is always largest-balance-first.
+#[derive(Debug, Default, Deserialize)]
+pub struct CursorParams {
+    pub cursor: Option<String>,
+    pub limit: Option<String>,
+}
+
 /// `/v1/tokens`: cursor/limit plus the `sort` selector (there is no `dir` — both orderings
 /// are descending by construction).
 #[derive(Debug, Default, Deserialize)]
@@ -658,8 +666,10 @@ pub fn token_info_dto(id: &Hash32, row: &TokenRow) -> TokenInfoDto {
 
 #[derive(Debug, Serialize)]
 pub struct TokenHolderDto {
-    /// `null` when the store has no tree row for the holder — the same convention the
-    /// richlist uses.
+    /// The holder's encoded address — mainnet P2PK for a key, P2S for a contract, so a
+    /// non-P2PK holder is a long base58 string rather than a `null`. `null` only when the
+    /// store has no tree row at all, which its own invariants rule out; the option matches
+    /// the richlist's convention rather than describing a reachable state.
     pub address: Option<String>,
     pub tree_hash: String,
     pub amount: String,
@@ -672,8 +682,10 @@ pub struct TemplateDto {
     pub box_count: u64,
     pub unspent_count: u64,
     pub first_seen: u32,
-    /// The address of one tree using this template, as an example of its parameterisation;
-    /// `null` if that tree row is missing.
+    /// The address of one tree using this template, as an example of its parameterisation.
+    /// Contract templates encode as P2S, so this is normally a long base58 string, not
+    /// `null`; `null` means the example tree has no row, which the store's invariants rule
+    /// out.
     pub example_address: Option<String>,
 }
 
@@ -772,6 +784,24 @@ mod tests {
             parse_rent_cursor(Some("nope:100")),
             Err(ApiError::BadRequest(_))
         ));
+    }
+
+    /// Every EIP-4 R7 type tag we recognise, plus the two ways a token can fail to declare
+    /// one. The tag is the hex of R7's `Coll[Byte]` payload, exactly as `TokenRow` stores it.
+    #[test]
+    fn token_kind_maps_every_eip4_type_tag() {
+        assert_eq!(token_kind(Some("0101")), "nft-picture");
+        assert_eq!(token_kind(Some("0102")), "nft-audio");
+        assert_eq!(token_kind(Some("0103")), "nft-video");
+        assert_eq!(token_kind(Some("0201")), "membership");
+        // No R7 at all, and an R7 carrying something we do not know, are both plain tokens.
+        assert_eq!(token_kind(None), "token");
+        assert_eq!(token_kind(Some("0104")), "token");
+        assert_eq!(token_kind(Some("")), "token");
+        assert_eq!(token_kind(Some("deadbeef")), "token");
+        // The mapping is on the exact payload: no prefix or case folding.
+        assert_eq!(token_kind(Some("0101ff")), "token");
+        assert_eq!(token_kind(Some("0E0101")), "token");
     }
 
     /// `kind` labels a box by the contract it sits on: the miner-fee contract, the chain's

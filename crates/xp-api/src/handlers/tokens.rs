@@ -1,7 +1,7 @@
 use crate::dto::{
     box_dto_from_reader, enrich_boxes, format_u64_id_cursor, parse_bool_param, parse_dir, parse_id,
     parse_limit, parse_token_sort, parse_u64_cursor, parse_u64_id_cursor, share_pct,
-    token_info_dto, AddrBoxParams, BoxDto, ListParams, PageDto, TokenHolderDto, TokenInfoDto,
+    token_info_dto, AddrBoxParams, BoxDto, CursorParams, PageDto, TokenHolderDto, TokenInfoDto,
     TokenSort, TokensListParams,
 };
 use crate::{blocking, ApiError, AppState};
@@ -72,10 +72,13 @@ pub async fn get_one(
 }
 
 /// The token's holders, largest balance first. The cursor is `"<amount>:<tree hex>"`.
+///
+/// The ordering is the `TOKEN_HOLDERS` index's own, so there is no `dir`: the params struct
+/// omits it rather than accepting one and ignoring it.
 pub async fn holders(
     State(state): State<AppState>,
     Path(raw): Path<String>,
-    Query(p): Query<ListParams>,
+    Query(p): Query<CursorParams>,
 ) -> Result<Json<PageDto<TokenHolderDto>>, ApiError> {
     let limit = parse_limit(p.limit.as_deref())?;
     let cursor = parse_u64_id_cursor(p.cursor.as_deref())?;

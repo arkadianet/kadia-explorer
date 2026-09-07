@@ -1064,3 +1064,145 @@ async fn box_tokens_carry_names_when_the_mint_is_indexed() {
         .expect("the mint output holds SigUSD");
     assert_eq!(out_named["name"], "SigUSD");
 }
+
+/// The burn path: the synthetic block spends the whole 10^13 SigUSD mint into outputs that
+/// keep only 5 units, so `burned` is non-zero and `supply` is *not* `emission`. Without this
+/// the `supply = emission - burned` rule is indistinguishable from `supply = emission`.
+#[tokio::test]
+async fn supply_is_emission_minus_burned_and_shares_use_it() {
+    let (_d, app, _) = app_two_tokens();
+    let (st, v) = get(&app, &format!("/v1/tokens/{SIGUSD}")).await;
+    assert_eq!(st, StatusCode::OK);
+
+    // The mint emitted 10_000_000_000_001 units; the spend rewrote only 3 + 2 into outputs.
+    assert_eq!(v["emission"], "10000000000001");
+    assert_eq!(v["burned"], "9999999999996");
+    assert_eq!(v["supply"], "5");
+    let emission: u64 = v["emission"].as_str().unwrap().parse().unwrap();
+    let burned: u64 = v["burned"].as_str().unwrap().parse().unwrap();
+    assert!(burned > 0, "the burn must actually be exercised");
+    assert_ne!(
+        v["supply"].as_str().unwrap(),
+        v["emission"].as_str().unwrap(),
+        "supply must differ from emission once units are burned"
+    );
+    assert_eq!(v["supply"], (emission - burned).to_string());
+    // SigUSD declares no EIP-4 R7, so the raw tag is null and the kind falls back.
+    assert!(v["token_type"].is_null());
+    assert_eq!(v["kind"], "token");
+
+    // Shares are of the *circulating* supply (5), not of the emission: 3/5 and 2/5. Against
+    // emission both would round to "0.00", so this pins the denominator.
+    let (st, h) = get(&app, &format!("/v1/tokens/{SIGUSD}/holders?limit=10")).await;
+    assert_eq!(st, StatusCode::OK);
+    let items = h["items"].as_array().unwrap();
+    assert_eq!(items[0]["amount"], "3");
+    assert_eq!(items[0]["share_pct"], "60.00");
+    assert_eq!(items[1]["amount"], "2");
+    assert_eq!(items[1]["share_pct"], "40.00");
+}
+
+/// `/v1/tokens/{id}/holders` has one fixed ordering, so it takes no `dir` — and, like every
+/// other route, an unknown query parameter is ignored rather than rejected.
+#[tokio::test]
+async fn holders_and_tokens_ignore_unknown_query_params_alike() {
+    let (_d, app, _) = app_two_tokens();
+
+    let (st, plain) = get(&app, &format!("/v1/tokens/{SIGUSD}/holders?limit=10")).await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, with_dir) = get(
+        &app,
+        &format!("/v1/tokens/{SIGUSD}/holders?limit=10&dir=asc"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "holders has no dir to reject");
+    assert_eq!(with_dir["items"], plain["items"], "dir must not reorder");
+
+    // Same treatment on /v1/tokens, which also has no dir.
+    let (st, tokens) = get(&app, "/v1/tokens?limit=10").await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, tokens_dir) = get(&app, "/v1/tokens?limit=10&dir=asc").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(tokens_dir["items"], tokens["items"]);
+
+    // A route that *does* take dir still honours it, so this is not blanket param-blindness.
+    let (st, asc) = get(
+        &app,
+        &format!("/v1/tokens/{SIGUSD}/boxes?dir=asc&limit=500"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, desc) = get(
+        &app,
+        &format!("/v1/tokens/{SIGUSD}/boxes?dir=desc&limit=500"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let ids = |v: &Value| -> Vec<String> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let (mut a, d) = (ids(&asc), ids(&desc));
+    a.reverse();
+    assert_eq!(a, d, "dir=asc/desc must be exact reverses");
+}
+
+/// A contract (non-P2PK) tree encodes as a mainnet **P2S address**, not as `null`: the
+/// `Option` on `example_address`/`address` covers a missing tree row, which the store's
+/// invariants rule out, so neither field is null for anything reachable over the API.
+#[tokio::test]
+async fn contract_trees_render_as_p2s_addresses_not_null() {
+    let (_d, app) = app();
+
+    // Find a template whose example tree is not P2PK (mainnet P2PK addresses start with '9'
+    // and are 51 chars; a P2S address encodes the whole script and is far longer).
+    let mut checked = 0;
+    for h in [1866000u32, 1866001, 1866002] {
+        for tx in &fixture(h).txs {
+            for o in &tx.outputs {
+                let Ok(t) = xp_wire::template_hash_of(&o.tree_bytes) else {
+                    continue;
+                };
+                let (st, v) = get(&app, &format!("/v1/templates/{}", hex::encode(t))).await;
+                assert_eq!(st, StatusCode::OK);
+                let addr = v["example_address"]
+                    .as_str()
+                    .expect("example_address is never null for an indexed tree");
+                if !addr.starts_with('9') {
+                    assert!(
+                        addr.len() > 51,
+                        "a P2S address encodes the script, so it is long: {addr}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 0, "no contract template in the fixture set");
+
+    // The same holds for a token holder sitting on a contract tree.
+    let (_d2, tokens_app, _) = app_two_tokens();
+    let (st, h) = get(
+        &tokens_app,
+        &format!("/v1/tokens/{SIGUSD}/holders?limit=10"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let holders = h["items"].as_array().unwrap();
+    let contract = holders
+        .iter()
+        .find(|it| !it["address"].as_str().unwrap().starts_with('9'))
+        .expect("SigUSD sits on a contract tree in the fixture");
+    assert!(contract["address"].is_string(), "never null, always P2S");
+    assert!(contract["address"].as_str().unwrap().len() > 51);
+    for it in holders {
+        assert!(
+            !it["address"].is_null(),
+            "every indexed holder has an address"
+        );
+    }
+}
