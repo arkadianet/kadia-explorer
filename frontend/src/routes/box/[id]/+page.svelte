@@ -10,7 +10,7 @@
 	import RegistersTable from '$lib/components/RegistersTable.svelte';
 	import { hasDisplayableRegisters } from '$lib/registers/decode';
 	import { status } from '$lib/status/status.svelte';
-	import { formatNano } from '$lib/format/amount';
+	import { formatTokenAmount } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
 	import type { PageData } from './$types';
 
@@ -83,7 +83,14 @@
 				{#if box.template_hash}
 					<p class="template">
 						<span class="muted">Template hash</span>
-						<Hash value={box.template_hash} copy={false} head={12} />
+						<!-- The hash is a link: it is the way to every other box locked by this same
+						     script shape. -->
+						<Hash
+							value={box.template_hash}
+							href={`/template/${box.template_hash}`}
+							copy={false}
+							head={12}
+						/>
 					</p>
 				{/if}
 				<pre class="mono hex">{box.ergo_tree}</pre>
@@ -97,14 +104,25 @@
 		<Table>
 			{#snippet head()}
 				<tr>
-					<th>Token id</th>
+					<th>Token</th>
 					<th class="num">Amount</th>
 				</tr>
 			{/snippet}
 			{#each box.tokens as token, i (i)}
 				<tr>
-					<td><span class="mono" title={token.id}>{truncateMiddle(token.id)}</span></td>
-					<td class="num mono">{formatNano(token.amount)}</td>
+					<td>
+						<!-- A minted name is prose and keeps the body face; a token minted without one
+						     falls back to its truncated id in mono. Either way the cell links to the
+						     token's own page. -->
+						{#if token.name}
+							<a class="token-name" href={`/token/${token.id}`} title={token.id}>{token.name}</a>
+						{:else}
+							<a class="mono" href={`/token/${token.id}`} title={token.id}
+								>{truncateMiddle(token.id)}</a
+							>
+						{/if}
+					</td>
+					<td class="num mono">{formatTokenAmount(token.amount, token.decimals)}</td>
 				</tr>
 			{/each}
 		</Table>
@@ -177,5 +195,9 @@
 	.rent-status {
 		margin-top: var(--space-3);
 		font-size: var(--fs-data);
+	}
+	/* A minted name is prose; only ids keep the mono face. */
+	.token-name {
+		font-weight: 500;
 	}
 </style>

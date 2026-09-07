@@ -5,6 +5,7 @@ import type {
 	RentItemDto,
 	RichlistItemDto,
 	StatusDto,
+	TokenInfoDto,
 	TxDto
 } from '$lib/api/types';
 import type { PageLoad } from './$types';
@@ -52,6 +53,13 @@ async function topHolders(fetch: typeof globalThis.fetch): Promise<RichlistItemD
 	return page.items;
 }
 
+/** The five tokens held by the most addresses — "what is actually in circulation here",
+ * which is the question the richlist answers for ERG. */
+async function topTokens(fetch: typeof globalThis.fetch): Promise<TokenInfoDto[]> {
+	const page = await api.tokens('holders', undefined, 5, fetch);
+	return page.items;
+}
+
 export interface Loaded<T> {
 	data: T | null;
 	error: unknown;
@@ -68,13 +76,14 @@ async function safe<T>(p: Promise<T>): Promise<Loaded<T>> {
 export const load: PageLoad = async ({ fetch }) => {
 	// Each call is wrapped so one section's failure can't reject the whole `Promise.all` and
 	// take down the page — every section gets its own success/error result to render from.
-	const [blocks, txs, rent, richlist, status] = await Promise.all([
+	const [blocks, txs, rent, tokens, richlist, status] = await Promise.all([
 		safe<BlockDto[]>(blockWindow(fetch)),
 		safe<PageDto<TxDto>>(api.txs(undefined, 12, undefined, fetch)),
 		safe<RentItemDto[]>(upcomingRentItems(fetch)),
+		safe<TokenInfoDto[]>(topTokens(fetch)),
 		safe<RichlistItemDto[]>(topHolders(fetch)),
 		safe<StatusDto>(api.status(fetch))
 	]);
 
-	return { blocks, txs, rent, richlist, status };
+	return { blocks, txs, rent, tokens, richlist, status };
 };

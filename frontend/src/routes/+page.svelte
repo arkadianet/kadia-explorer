@@ -5,10 +5,10 @@
 	import Table from '$lib/components/Table.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import Age from '$lib/components/Age.svelte';
 	import MinerChip from '$lib/components/MinerChip.svelte';
+	import TokenBadge from '$lib/components/TokenBadge.svelte';
 	import { relTime } from '$lib/format/time';
 	import { formatErg } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
@@ -16,6 +16,7 @@
 	import { status as statusStore } from '$lib/status/status.svelte';
 	import { health } from '$lib/status/health';
 	import { txKind } from '$lib/tx/kind';
+	import { tokenDisplayName } from '$lib/token/kind';
 	import {
 		buckets,
 		chainWindow,
@@ -367,8 +368,8 @@
 	</section>
 </div>
 
-<!-- ------------------------------------------------------------------ rent and richlist -->
-<div class="panels">
+<!-- ----------------------------------------------------------- rent, tokens and holders -->
+<div class="panels three">
 	<section class="panel card">
 		<div class="card-head">
 			<h2 class="card-title">Rent maturing soon</h2>
@@ -391,7 +392,6 @@
 						<th class="num">Value</th>
 						<th class="num">Due</th>
 						<th>Matures in</th>
-						<th>Address</th>
 					</tr>
 				{/snippet}
 				{#each rentItems.slice(0, 5) as item (item.box.id)}
@@ -401,16 +401,40 @@
 						<td class="mono muted">
 							{tip !== null ? `${item.maturity_height - tip} blocks` : `at ${item.maturity_height}`}
 						</td>
-						<td>
-							{#if item.box.address}
-								<Hash value={item.box.address} copy={false} />
-							{:else}
-								—
-							{/if}
-						</td>
 					</tr>
 				{/each}
 			</Table>
+		{/if}
+	</section>
+
+	<section class="panel card">
+		<div class="card-head">
+			<h2 class="card-title">Top tokens</h2>
+			<a class="more" href="/tokens">All tokens<Icon name="chevron-right" size={14} /></a>
+		</div>
+		{#if data.tokens.error}
+			<div class="pad"><ErrorState error={data.tokens.error} /></div>
+		{:else if (data.tokens.data ?? []).length === 0}
+			<div class="pad">
+				<EmptyState
+					message="No tokens indexed yet — they appear as the indexer reaches the blocks that mint them."
+				/>
+			</div>
+		{:else}
+			<ol class="tokens">
+				{#each data.tokens.data ?? [] as token, i (token.id)}
+					<li>
+						<span class="rank">{i + 1}</span>
+						<a class="token-name" href={`/token/${token.id}`} title={token.name.trim() || token.id}>
+							{tokenDisplayName(token.name, token.id)}
+						</a>
+						<TokenBadge kind={token.kind} />
+						<span class="token-holders" title="Addresses holding this token">
+							{token.holder_count.toLocaleString('en-US')}<span class="unit">holders</span>
+						</span>
+					</li>
+				{/each}
+			</ol>
 		{/if}
 	</section>
 
@@ -655,6 +679,12 @@
 		align-items: start;
 	}
 
+	/* Three summaries of "what is on the chain right now", side by side. The rent card holds a
+	   table and the other two hold lists, so it keeps a little more width. */
+	.panels.three {
+		grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+	}
+
 	.panel {
 		overflow: hidden;
 		min-width: 0;
@@ -802,6 +832,45 @@
 		flex: none;
 	}
 
+	/* --------------------------------------------------------------------- top tokens */
+	/* The same row shape as the holders list beside it — rank, name, figure — with the kind
+	   pill in between, since a token's name alone does not say whether it is an NFT. */
+	.tokens li {
+		display: grid;
+		grid-template-columns: 22px minmax(0, 1fr) auto auto;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-5);
+	}
+
+	.tokens li + li {
+		border-top: var(--rule);
+	}
+
+	.token-name {
+		font-size: var(--fs-data);
+		font-weight: 500;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.token-holders {
+		font-size: var(--fs-data);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	/* The figure needs its noun: unlike the ERG balances beside it, a bare count says nothing
+	   about what was counted. */
+	.token-holders .unit {
+		font-size: 10.5px;
+		font-weight: 500;
+		color: var(--fg-muted);
+		margin-left: 4px;
+	}
+
 	/* -------------------------------------------------------------------------- holders */
 	.holders li {
 		display: grid;
@@ -908,6 +977,15 @@
 		}
 		.tools {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 1180px) {
+		/* Three cards in a row need the full desktop width; below it they would each be too
+		   narrow for the rent table, so the row becomes a single column rather than an
+		   awkward two-plus-one. */
+		.panels.three {
+			grid-template-columns: minmax(0, 1fr);
 		}
 	}
 

@@ -19,7 +19,7 @@
 	import { api } from '$lib/api/endpoints';
 	import { createPager, type Pager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
-	import { formatErg, formatNano, sumNano } from '$lib/format/amount';
+	import { formatErg, formatTokenAmount, sumNano } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
 	import type { BoxDto, TxDto } from '$lib/api/types';
 	import type { PageData } from './$types';
@@ -163,14 +163,25 @@
 			<Table>
 				{#snippet head()}
 					<tr>
-						<th>Token id</th>
+						<th>Token</th>
 						<th class="num">Amount</th>
 					</tr>
 				{/snippet}
 				{#each info.balance.tokens as token (token.id)}
 					<tr>
-						<td><span class="mono" title={token.id}>{truncateMiddle(token.id)}</span></td>
-						<td class="num mono">{formatNano(token.amount)}</td>
+						<td>
+							<!-- A minted name is prose and keeps the body face; a token minted without one
+							     falls back to its truncated id in mono. Either way the cell links to the
+							     token's own page. -->
+							{#if token.name}
+								<a class="token-name" href={`/token/${token.id}`} title={token.id}>{token.name}</a>
+							{:else}
+								<a class="mono" href={`/token/${token.id}`} title={token.id}
+									>{truncateMiddle(token.id)}</a
+								>
+							{/if}
+						</td>
+						<td class="num mono">{formatTokenAmount(token.amount, token.decimals)}</td>
 					</tr>
 				{/each}
 			</Table>
@@ -365,6 +376,10 @@
 		margin-top: var(--space-3);
 		color: var(--fg-muted);
 		font-size: var(--fs-data);
+	}
+	/* A minted name is prose; only ids keep the mono face. */
+	.token-name {
+		font-weight: 500;
 	}
 	.notice {
 		padding-bottom: var(--space-3);
