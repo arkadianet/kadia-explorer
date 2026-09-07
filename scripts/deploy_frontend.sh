@@ -23,16 +23,18 @@ for arg in "$@"; do
 	esac
 done
 
-HOST="${positional[0]:-root@167.233.240.191}"
+HOST="${positional[0]:-${DEPLOY_HOST:-}}"
+if [ -z "$HOST" ]; then echo "usage: $0 [--caddy] user@host [site-url]  (or set DEPLOY_HOST)" >&2; exit 2; fi
 SITE_URL="${positional[1]:-${SITE_URL:-https://explorer.kadia.io}}"
-KEY="${SSH_KEY:-$HOME/.ssh/hetzner_vps}"
+KEY="${SSH_KEY:-}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CADDYFILE="$ROOT/deploy/caddy/explorer.kadia.io.Caddyfile"
-SSH=(ssh -i "$KEY" -o BatchMode=yes)
+SSH=(ssh -o BatchMode=yes)
+if [ -n "$KEY" ]; then SSH+=(-i "$KEY"); fi
 
 cd "$ROOT/frontend"
 npm ci --silent && npm run build
-rsync -az --delete -e "ssh -i $KEY -o BatchMode=yes" build/ "$HOST:/var/www/explorer/"
+rsync -az --delete -e "${SSH[*]}" build/ "$HOST:/var/www/explorer/"
 
 if [ "$CADDY" -eq 1 ]; then
 	echo "installing $CADDYFILE on $HOST:/etc/caddy/Caddyfile"

@@ -95,7 +95,7 @@ Pure function `classify(q): { kind: 'height'|'hex32'|'address'|'unknown', value 
 
 - `frontend/package.json` scripts: `dev` (Vite proxy `/v1` → `http://127.0.0.1:18090`), `build`,
   `check` (svelte-check), `test` (vitest), `test:e2e` (playwright with MSW mock API).
-- `scripts/deploy_frontend.sh`: build, then `rsync -az --delete build/ root@167.233.240.191:/var/www/explorer/`.
+- `scripts/deploy_frontend.sh`: build, then `rsync -az --delete build/ <user@host>:/var/www/explorer/`.
 - Caddyfile change: `handle { root * /var/www/explorer; try_files {path} /index.html; file_server }`
   plus long `Cache-Control` for hashed assets under `/_app/`, `no-cache` for `index.html`.
 - Bundle budget: ≤ 120 KB gzipped JS for the home route; CI check via `vite-bundle-visualizer` size

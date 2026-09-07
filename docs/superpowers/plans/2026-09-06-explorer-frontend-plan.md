@@ -353,7 +353,7 @@ Note: `vite.config.ts` proxy target must read `process.env.VITE_API_PROXY ?? 'ht
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-HOST="${1:-root@167.233.240.191}"; KEY="${SSH_KEY:-$HOME/.ssh/hetzner_vps}"
+HOST="${1:-$DEPLOY_HOST}"; KEY="${SSH_KEY:-}"
 cd "$(dirname "$0")/../frontend"
 npm ci --silent && npm run build
 rsync -az --delete -e "ssh -i $KEY -o BatchMode=yes" build/ "$HOST:/var/www/explorer/"

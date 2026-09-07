@@ -140,10 +140,9 @@ It:
    and installs it. Without the flag the host keeps the config it already has.
 4. Reloads Caddy on the host and prints the resulting HTTPS status code for `$SITE_URL`.
 
-Defaults to `root@167.233.240.191`; pass a different `user@host` as the first positional
-argument to target another box, and that box's own site URL as the second (or via the
+Pass the target as `user@host` in the first positional argument (or set `DEPLOY_HOST`), and that box's own site URL as the second (or via the
 `SITE_URL` environment variable — default `https://explorer.kadia.io`) so the health check
-follows the host. Set `SSH_KEY` to override the default key (`~/.ssh/hetzner_vps`).
+follows the host. Set `SSH_KEY` to use a specific private key; otherwise the ssh agent/default key is used.
 
 The committed site config (`deploy/caddy/explorer.kadia.io.Caddyfile`) reverse-proxies `/v1/*`
 to the explorer API on `127.0.0.1:18090`, serves the built SPA from `/var/www/explorer` with a
