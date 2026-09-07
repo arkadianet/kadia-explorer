@@ -1495,3 +1495,37 @@ async fn reads_beyond_the_permit_budget_fail_fast_with_503() {
     assert_eq!(st, StatusCode::OK);
     assert_eq!(s["inflight_reads"], 0);
 }
+
+#[tokio::test]
+async fn ipv6_clients_share_a_bucket_per_64_but_allowlist_matches_the_full_address() {
+    let (_d, app) = app_with(limited(1, 1, &["2001:db8:1:2::9/128"]), None);
+    // Two addresses in one /64 share the single-token bucket.
+    assert_eq!(
+        get_from(&app, "/v1/status", "[2001:db8:1:2::1]", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        get_from(&app, "/v1/status", "[2001:db8:1:2::2]", None)
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    // A different /64 gets its own bucket.
+    assert_eq!(
+        get_from(&app, "/v1/status", "[2001:db8:1:3::1]", None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    // The /128 allowlist entry still matches its exact client inside the exhausted /64.
+    for _ in 0..3 {
+        assert_eq!(
+            get_from(&app, "/v1/status", "[2001:db8:1:2::9]", None)
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
+}

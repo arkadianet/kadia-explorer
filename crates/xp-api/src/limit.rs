@@ -235,11 +235,14 @@ impl RateLimit {
     }
 
     /// `Ok(())` to pass, `Err(seconds)` to reject with that `Retry-After`.
-    fn check(&self, key: IpAddr, now: Instant) -> Result<(), u32> {
+    /// `client` is the full client address (allowlist matches exact entries); the bucket is
+    /// keyed by [`bucket_key`] so an IPv6 client cannot mint a bucket per address.
+    fn check(&self, client: IpAddr, now: Instant) -> Result<(), u32> {
         let s = &self.0;
-        if s.per_second <= 0.0 || s.allowlist.contains(key) {
+        if s.per_second <= 0.0 || s.allowlist.contains(client) {
             return Ok(());
         }
+        let key = bucket_key(client);
         // A poisoned lock only means some other request panicked mid-update; the map is a
         // plain cache of buckets, so recovering the guard is strictly better than taking the
         // whole API down with it.
@@ -321,7 +324,7 @@ where
             .collect::<Vec<_>>()
             .join(",");
         let xff = if xff.is_empty() { None } else { Some(xff) };
-        let key = bucket_key(client_key(peer, xff.as_deref(), &self.limit.0.trusted));
+        let key = client_key(peer, xff.as_deref(), &self.limit.0.trusted);
         match self.limit.check(key, Instant::now()) {
             Ok(()) => {
                 // Only the clone this service holds has been made ready by `poll_ready`, so
