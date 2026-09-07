@@ -1,7 +1,7 @@
 use crate::dto::{
-    address_dto, box_dto_from_reader, enrich_balance, enrich_boxes, enrich_txs, parse_bool_param,
-    parse_dir, parse_limit, parse_u64_cursor, tx_dto, AddrBoxParams, AddressDto, AddressRentDto,
-    BoxDto, ListParams, PageDto, TxDto,
+    address_dto, box_dto_from_reader, enrich_balance, enrich_boxes, parse_bool_param, parse_dir,
+    parse_limit, parse_u64_cursor, tx_summary_dto, AddrBoxParams, AddressDto, AddressRentDto,
+    BoxDto, ListParams, PageDto, TxSummaryDto,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
@@ -76,23 +76,19 @@ pub async fn txs(
     State(state): State<AppState>,
     Path(addr): Path<String>,
     Query(p): Query<ListParams>,
-) -> Result<Json<PageDto<TxDto>>, ApiError> {
+) -> Result<Json<PageDto<TxSummaryDto>>, ApiError> {
     let limit = parse_limit(p.limit.as_deref())?;
     let cursor = parse_u64_cursor(p.cursor.as_deref())?;
     let dir = parse_dir(p.dir.as_deref())?;
     let page = blocking(&state, move |rd| {
-        let emission = rd.emission_tree_hash()?;
         let tree = tree_of(rd, &addr)?;
-        let tip = rd.indexed_height()?;
         let page = rd.tree_txs(&tree, cursor, limit, dir)?;
-        let mut items = page
-            .items
-            .iter()
-            .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        enrich_txs(rd, items.iter_mut())?;
         Ok(PageDto {
-            items,
+            items: page
+                .items
+                .iter()
+                .map(|(id, row)| tx_summary_dto(id, row))
+                .collect(),
             next_cursor: page.next_cursor.map(|c| c.to_string()),
         })
     })

@@ -492,6 +492,35 @@ pub struct TxDto {
     pub outputs: Vec<BoxDto>,
 }
 
+/// One row of an address's transaction list. Built from `TxRow` alone: no box or tree
+/// reads, so hot addresses page in milliseconds (spec §2).
+#[derive(Debug, Serialize)]
+pub struct TxSummaryDto {
+    pub id: String,
+    pub height: u32,
+    pub index: u16,
+    pub timestamp: u64,
+    pub size: u32,
+    pub fee: String,
+    pub input_count: u16,
+    pub data_input_count: u16,
+    pub output_count: u16,
+}
+
+pub fn tx_summary_dto(id: &Hash32, row: &TxRow) -> TxSummaryDto {
+    TxSummaryDto {
+        id: hex32(id),
+        height: row.height,
+        index: row.index,
+        timestamp: row.timestamp,
+        size: row.size,
+        fee: row.fee.to_string(),
+        input_count: u16::try_from(row.inputs.len()).unwrap_or(u16::MAX),
+        data_input_count: u16::try_from(row.data_inputs.len()).unwrap_or(u16::MAX),
+        output_count: row.output_count,
+    }
+}
+
 pub fn tx_dto(
     rd: &Reader,
     id: &Hash32,

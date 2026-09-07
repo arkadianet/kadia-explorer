@@ -1221,3 +1221,49 @@ async fn contract_trees_render_as_p2s_addresses_not_null() {
         );
     }
 }
+
+#[tokio::test]
+async fn address_txs_are_summaries_without_resolved_boxes() {
+    let (_d, app) = app();
+    let addr = coinbase_address();
+    let (st, v) = get(&app, &format!("/v1/addresses/{addr}/txs?limit=5")).await;
+    assert_eq!(st, StatusCode::OK);
+    let items = v["items"].as_array().unwrap();
+    assert!(!items.is_empty());
+    let first = &items[0];
+    for key in [
+        "id",
+        "height",
+        "index",
+        "timestamp",
+        "size",
+        "fee",
+        "input_count",
+        "data_input_count",
+        "output_count",
+    ] {
+        assert!(first.get(key).is_some(), "missing {key}");
+    }
+    assert!(
+        first.get("inputs").is_none(),
+        "summaries must not resolve inputs"
+    );
+    assert!(
+        first.get("outputs").is_none(),
+        "summaries must not resolve outputs"
+    );
+    assert!(first["fee"].is_string());
+    // Cross-check one row against the full tx endpoint.
+    let id = first["id"].as_str().unwrap();
+    let (_, full) = get(&app, &format!("/v1/txs/{id}")).await;
+    assert_eq!(full["height"], first["height"]);
+    assert_eq!(full["fee"], first["fee"]);
+    assert_eq!(
+        full["inputs"].as_array().unwrap().len() as u64,
+        first["input_count"].as_u64().unwrap()
+    );
+    assert_eq!(
+        full["outputs"].as_array().unwrap().len() as u64,
+        first["output_count"].as_u64().unwrap()
+    );
+}
