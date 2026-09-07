@@ -12,7 +12,7 @@ pub mod limit;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::Router;
-use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -65,18 +65,32 @@ pub struct AppState {
 
 /// Runs `f` against a fresh [`Reader`] on the blocking pool. One reader per request keeps
 /// every read in a single request consistent without holding a transaction across `.await`.
+///
+/// Bounded by `state.read_permits`: when the budget is exhausted this fails fast with
+/// [`ApiError::Overloaded`] rather than queuing onto the blocking pool. `inflight_reads` is
+/// incremented only once a permit is held, and is decremented on every exit path (success,
+/// error from `f`, or a join error from the blocking task panicking).
 pub(crate) async fn blocking<T, F>(state: &AppState, f: F) -> Result<T, ApiError>
 where
     F: FnOnce(&Reader) -> Result<T, ApiError> + Send + 'static,
     T: Send + 'static,
 {
+    let permit = state
+        .read_permits
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError::Overloaded)?;
+    let counters = state.counters.clone();
+    counters.inflight_reads.fetch_add(1, Ordering::Relaxed);
     let store = state.store.clone();
-    tokio::task::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || {
+        let _permit = permit; // held for the duration of the read, released when it finishes
         let rd = Reader::new(&store)?;
         f(&rd)
     })
-    .await
-    .map_err(|e| ApiError::Internal(format!("blocking task failed: {e}")))?
+    .await;
+    counters.inflight_reads.fetch_sub(1, Ordering::Relaxed);
+    result.map_err(|e| ApiError::Internal(format!("blocking task failed: {e}")))?
 }
 
 pub fn router(state: AppState, cfg: &ApiConfig) -> Router {

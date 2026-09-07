@@ -51,6 +51,16 @@ fn unlimited() -> ApiConfig {
 
 /// Same again, under an explicit [`ApiConfig`] (rate-limit knobs).
 fn app_with(cfg: ApiConfig, stall: Option<StalledInfo>) -> (tempfile::TempDir, Router) {
+    let (dir, router, _state) = app_with_state(cfg, stall);
+    (dir, router)
+}
+
+/// As [`app_with`], but also returns the [`xp_api::AppState`] so a test can reach into it
+/// (e.g. to hold a read permit from outside the router, as a parked reader would).
+fn app_with_state(
+    cfg: ApiConfig,
+    stall: Option<StalledInfo>,
+) -> (tempfile::TempDir, Router, xp_api::AppState) {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("x.redb")).unwrap();
     let b0 = fixture(1866000);
@@ -79,7 +89,8 @@ fn app_with(cfg: ApiConfig, stall: Option<StalledInfo>) -> (tempfile::TempDir, R
         counters: Arc::new(Counters::default()),
         read_permits: Arc::new(Semaphore::new(cfg.max_inflight_reads as usize)),
     };
-    (dir, xp_api::router(state, &cfg))
+    let router = xp_api::router(state.clone(), &cfg);
+    (dir, router, state)
 }
 
 async fn get(app: &Router, path: &str) -> (StatusCode, Value) {
@@ -1460,4 +1471,27 @@ async fn address_txs_are_summaries_without_resolved_boxes() {
         full["outputs"].as_array().unwrap().len() as u64,
         first["output_count"].as_u64().unwrap()
     );
+}
+
+#[tokio::test]
+async fn reads_beyond_the_permit_budget_fail_fast_with_503() {
+    let cfg = ApiConfig {
+        max_inflight_reads: 1,
+        per_second: 0,
+        ..ApiConfig::default()
+    };
+    let (_d, app, state) = app_with_state(cfg, None);
+    // Occupy the single permit from outside the router, exactly as a parked reader would.
+    let held = state.read_permits.clone().try_acquire_owned().unwrap();
+    let (st, h, v) = get_from(&app, "/v1/blocks?limit=1", "198.51.100.1", None).await;
+    assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(h.get("retry-after").unwrap(), "1");
+    assert_eq!(v["title"], "Service Unavailable");
+    drop(held);
+    let (st, _, _) = get_from(&app, "/v1/blocks?limit=1", "198.51.100.1", None).await;
+    assert_eq!(st, StatusCode::OK);
+    // /v1/status does not take a permit (it reads the watch channel, not the store).
+    let (st, _, s) = get_from(&app, "/v1/status", "198.51.100.1", None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(s["inflight_reads"], 0);
 }
