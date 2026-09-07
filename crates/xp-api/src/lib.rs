@@ -7,6 +7,7 @@
 pub mod dto;
 pub mod error;
 pub mod handlers;
+pub mod limit;
 
 use axum::http::StatusCode;
 use axum::routing::get;
