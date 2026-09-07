@@ -20,8 +20,12 @@ impl TokenBucket {
     }
 
     /// Refill up to `burst` at `per_second`, then take one token. `Err(wait)` is the time
-    /// until one token is available.
+    /// until one token is available. A non-positive or non-finite `per_second` means rate
+    /// limiting is disabled (spec §3): always succeeds without touching the bucket.
     pub fn try_take(&mut self, now: Instant, per_second: f64, burst: u32) -> Result<(), Duration> {
+        if per_second <= 0.0 || !per_second.is_finite() {
+            return Ok(());
+        }
         let elapsed = now.saturating_duration_since(self.last).as_secs_f64();
         self.tokens = (self.tokens + elapsed * per_second).min(burst as f64);
         self.last = now;
@@ -34,16 +38,23 @@ impl TokenBucket {
         }
     }
 
-    /// True when the bucket has been full for `idle` — safe to drop from the map.
-    // Used by Task 3's tower layer to evict stale per-client buckets.
-    #[allow(dead_code)]
+    /// True when the bucket has been full for `idle` — safe to drop from the map. A
+    /// non-positive or non-finite `per_second` means rate limiting is disabled, so there is
+    /// nothing to keep track of and the bucket is always idle.
     pub fn is_idle(&self, now: Instant, per_second: f64, burst: u32, idle: Duration) -> bool {
-        let full_since = self.last
-            + Duration::from_secs_f64((burst as f64 - self.tokens).max(0.0) / per_second.max(1e-9));
+        if per_second <= 0.0 || !per_second.is_finite() {
+            return true;
+        }
+        let full_since =
+            self.last + Duration::from_secs_f64((burst as f64 - self.tokens).max(0.0) / per_second);
         now.saturating_duration_since(full_since) >= idle
     }
 }
 
+/// A single IPv4 or IPv6 network in CIDR notation. Matching normalises IPv4-mapped IPv6
+/// addresses to IPv4 first (see [`contains`](Cidr::contains)), so `0.0.0.0/0` matches every
+/// IPv4 (and IPv4-mapped) address but no native IPv6 address, and `::/0` matches every native
+/// IPv6 address but no IPv4 (or IPv4-mapped) address — the two families never cross-match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cidr {
     addr: IpAddr,
@@ -67,13 +78,20 @@ impl FromStr for Cidr {
             Some((ip, p)) => (ip, Some(p)),
             None => (s, None),
         };
-        let addr = unmap(ip.parse::<IpAddr>().map_err(|e| format!("{s}: {e}"))?);
+        let raw = ip.parse::<IpAddr>().map_err(|e| format!("{s}: {e}"))?;
+        let addr = unmap(raw);
         let max = if addr.is_ipv4() { 32 } else { 128 };
         let prefix = match prefix {
             Some(p) => p.parse::<u8>().map_err(|e| format!("{s}: {e}"))?,
             None => max,
         };
         if prefix > max {
+            if raw.is_ipv6() && addr.is_ipv4() {
+                return Err(format!(
+                    "{s}: address is an IPv4-mapped IPv6 address, normalised to IPv4; \
+                     prefix {prefix} exceeds {max}"
+                ));
+            }
             return Err(format!("{s}: prefix {prefix} exceeds {max}"));
         }
         Ok(Cidr { addr, prefix })
@@ -122,6 +140,7 @@ impl Allowlist {
 
 /// Spec §3 "Client key". Walks `X-Forwarded-For` right to left past trusted proxies.
 pub fn client_key(peer: IpAddr, forwarded_for: Option<&str>, trusted: &Allowlist) -> IpAddr {
+    let peer = unmap(peer);
     if !trusted.contains(peer) {
         return peer;
     }
@@ -129,8 +148,12 @@ pub fn client_key(peer: IpAddr, forwarded_for: Option<&str>, trusted: &Allowlist
         return peer;
     };
     for hop in header.rsplit(',') {
-        match hop.trim().parse::<IpAddr>() {
-            Ok(ip) if trusted.contains(ip) => continue,
+        let hop = hop.trim();
+        if hop.is_empty() {
+            continue;
+        }
+        match hop.parse::<IpAddr>() {
+            Ok(ip) if trusted.contains(unmap(ip)) => continue,
             Ok(ip) => return unmap(ip),
             Err(_) => return peer,
         }
@@ -166,6 +189,38 @@ mod tests {
     }
 
     #[test]
+    fn bucket_disabled_rate_never_limits() {
+        let t0 = Instant::now();
+        let mut b = TokenBucket::new(3);
+        assert!(b.try_take(t0, 0.0, 3).is_ok());
+        assert!(b.try_take(t0, 0.0, 3).is_ok());
+        assert!(b.try_take(t0, f64::NAN, 3).is_ok());
+    }
+
+    #[test]
+    fn bucket_is_idle_basic() {
+        let t0 = Instant::now();
+        let mut b = TokenBucket::new(3);
+        assert!(b.try_take(t0, 1.0, 3).is_ok());
+        // Just used: not idle yet.
+        assert!(!b.is_idle(t0, 1.0, 3, Duration::from_secs(1)));
+        // Bucket refills the missing token after 1s, then stays idle from there.
+        assert!(b.is_idle(
+            t0 + Duration::from_secs(1) + Duration::from_secs(1),
+            1.0,
+            3,
+            Duration::from_secs(1)
+        ));
+    }
+
+    #[test]
+    fn bucket_is_idle_disabled_rate_is_always_idle() {
+        let t0 = Instant::now();
+        let b = TokenBucket::new(3);
+        assert!(b.is_idle(t0, 0.0, 3, Duration::from_secs(1)));
+    }
+
+    #[test]
     fn cidr_parses_and_matches_v4_v6_and_mapped() {
         let c: Cidr = "10.0.0.0/8".parse().unwrap();
         assert!(c.contains(ip("10.255.1.2")));
@@ -179,6 +234,21 @@ mod tests {
         assert!(!v6.contains(ip("2001:db9::1")));
         assert!("1.2.3.4/33".parse::<Cidr>().is_err());
         assert!("nope".parse::<Cidr>().is_err());
+    }
+
+    #[test]
+    fn cidr_prefix_zero_and_max() {
+        let all_v4: Cidr = "0.0.0.0/0".parse().unwrap();
+        assert!(all_v4.contains(ip("9.9.9.9")));
+        let all_v6: Cidr = "::/0".parse().unwrap();
+        assert!(all_v6.contains(ip("2001:db8::1")));
+        assert!(!all_v6.contains(ip("9.9.9.9")));
+        let exact_v4: Cidr = "203.0.113.7/32".parse().unwrap();
+        assert!(exact_v4.contains(ip("203.0.113.7")));
+        assert!(!exact_v4.contains(ip("203.0.113.8")));
+        let exact_v6: Cidr = "2001:db8::1/128".parse().unwrap();
+        assert!(exact_v6.contains(ip("2001:db8::1")));
+        assert!(!exact_v6.contains(ip("2001:db8::2")));
     }
 
     #[test]
@@ -204,5 +274,39 @@ mod tests {
             ip("127.0.0.1")
         );
         assert_eq!(client_key(ip("127.0.0.1"), None, &trusted), ip("127.0.0.1"));
+    }
+
+    #[test]
+    fn client_key_normalises_v4_mapped_peer() {
+        let trusted = Allowlist::parse(&["127.0.0.1".into(), "::1".into()]).unwrap();
+        assert_eq!(
+            client_key(ip("::ffff:8.8.8.8"), None, &trusted),
+            ip("8.8.8.8")
+        );
+        // Mapped trusted peer is still recognised as trusted.
+        assert_eq!(
+            client_key(ip("::ffff:127.0.0.1"), Some("1.1.1.1"), &trusted),
+            ip("1.1.1.1")
+        );
+    }
+
+    #[test]
+    fn client_key_security_edge_cases() {
+        let trusted = Allowlist::parse(&["127.0.0.1".into(), "::1".into()]).unwrap();
+        // Only trusted proxies in the chain: fall back to peer.
+        assert_eq!(
+            client_key(ip("127.0.0.1"), Some("127.0.0.1, ::1"), &trusted),
+            ip("127.0.0.1")
+        );
+        // Blank hops (double comma) are skipped.
+        assert_eq!(
+            client_key(ip("127.0.0.1"), Some("1.1.1.1, , 2.2.2.2"), &trusted),
+            ip("2.2.2.2")
+        );
+        // A hop with a port is not a bare IP: treat as unparsable, fall back to peer.
+        assert_eq!(
+            client_key(ip("127.0.0.1"), Some("1.2.3.4:5678"), &trusted),
+            ip("127.0.0.1")
+        );
     }
 }
