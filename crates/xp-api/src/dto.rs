@@ -232,6 +232,10 @@ pub struct StatusDto {
     /// `indexed` is frozen on a source-side hole that ingest is still retrying — a stall, not
     /// a halt: the process is alive and `halted` stays `null`.
     pub stalled: Option<StalledDto>,
+    /// Blocking store reads in flight right now (bounded by `max_inflight_reads`).
+    pub inflight_reads: u32,
+    /// Requests rejected with 429 since process start.
+    pub rate_limited_total: u64,
 }
 
 #[derive(Debug, Serialize)]

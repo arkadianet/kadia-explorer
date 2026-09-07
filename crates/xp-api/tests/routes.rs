@@ -2,14 +2,18 @@
 //! `tower::ServiceExt::oneshot` over a store holding the three block fixtures.
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::extract::connect_info::ConnectInfo;
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::watch;
+use tokio::sync::Semaphore;
 use tower::ServiceExt;
+use xp_api::{ApiConfig, Counters};
 use xp_ingest::{IngestStatus, Mode, StalledInfo};
 use xp_store::Store;
 
@@ -32,6 +36,21 @@ fn app() -> (tempfile::TempDir, Router) {
 
 /// Same store and router, but with `stalled` on the published ingest status set to `stall`.
 fn app_with_stall(stall: Option<StalledInfo>) -> (tempfile::TempDir, Router) {
+    app_with(unlimited(), stall)
+}
+
+/// The config the non-rate-limit tests run under: limiting off (`per_second = 0`), since
+/// several of them walk a cursor over far more than a default burst of requests and every
+/// one of them arrives without `ConnectInfo`, i.e. under a single client key.
+fn unlimited() -> ApiConfig {
+    ApiConfig {
+        per_second: 0,
+        ..ApiConfig::default()
+    }
+}
+
+/// Same again, under an explicit [`ApiConfig`] (rate-limit knobs).
+fn app_with(cfg: ApiConfig, stall: Option<StalledInfo>) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("x.redb")).unwrap();
     let b0 = fixture(1866000);
@@ -57,8 +76,10 @@ fn app_with_stall(stall: Option<StalledInfo>) -> (tempfile::TempDir, Router) {
     let state = xp_api::AppState {
         store: Arc::new(store),
         status: rx,
+        counters: Arc::new(Counters::default()),
+        read_permits: Arc::new(Semaphore::new(cfg.max_inflight_reads as usize)),
     };
-    (dir, xp_api::router(state))
+    (dir, xp_api::router(state, &cfg))
 }
 
 async fn get(app: &Router, path: &str) -> (StatusCode, Value) {
@@ -75,6 +96,134 @@ async fn get(app: &Router, path: &str) -> (StatusCode, Value) {
         serde_json::from_slice(&bytes).unwrap_or(Value::Null)
     };
     (status, json)
+}
+
+/// GET as a given peer, optionally with `X-Forwarded-For`.
+async fn get_from(
+    app: &Router,
+    path: &str,
+    peer: &str,
+    xff: Option<&str>,
+) -> (StatusCode, HeaderMap, Value) {
+    let peer: SocketAddr = format!("{peer}:4000").parse().unwrap();
+    let mut builder = Request::builder().uri(path);
+    if let Some(x) = xff {
+        builder = builder.header("x-forwarded-for", x);
+    }
+    let mut req = builder.body(Body::empty()).unwrap();
+    req.extensions_mut().insert(ConnectInfo(peer));
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let v: Value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, headers, v)
+}
+
+fn limited(per_second: u32, burst: u32, allow: &[&str]) -> ApiConfig {
+    ApiConfig {
+        per_second,
+        burst,
+        allowlist: xp_api::limit::Allowlist::parse(
+            &allow.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        )
+        .unwrap(),
+        ..ApiConfig::default()
+    }
+}
+
+#[tokio::test]
+async fn rate_limit_returns_429_after_burst_with_retry_after() {
+    let (_d, app) = app_with(limited(1, 2, &[]), None);
+    for _ in 0..2 {
+        let (st, _, _) = get_from(&app, "/v1/status", "198.51.100.1", None).await;
+        assert_eq!(st, StatusCode::OK);
+    }
+    let (st, h, v) = get_from(&app, "/v1/status", "198.51.100.1", None).await;
+    assert_eq!(st, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(h.get("retry-after").unwrap(), "1");
+    assert_eq!(v["status"], 429);
+    assert_eq!(v["title"], "Too Many Requests");
+    // CORS still applies to a rejected request: a browser must be able to read the 429.
+    assert!(h.contains_key("access-control-allow-origin"));
+    // A different client is unaffected.
+    let (st, _, _) = get_from(&app, "/v1/status", "198.51.100.2", None).await;
+    assert_eq!(st, StatusCode::OK);
+    // The counter moved.
+    let (_, _, s) = get_from(&app, "/v1/status", "198.51.100.3", None).await;
+    assert_eq!(s["rate_limited_total"], 1);
+    assert_eq!(s["inflight_reads"], 0);
+}
+
+#[tokio::test]
+async fn allowlisted_clients_are_never_limited() {
+    let (_d, app) = app_with(limited(1, 1, &["198.51.100.0/24"]), None);
+    for _ in 0..5 {
+        let (st, _, _) = get_from(&app, "/v1/status", "198.51.100.7", None).await;
+        assert_eq!(st, StatusCode::OK);
+    }
+}
+
+#[tokio::test]
+async fn forwarded_for_is_honoured_only_from_a_trusted_proxy() {
+    let (_d, app) = app_with(limited(1, 1, &[]), None);
+    // Behind the trusted proxy (127.0.0.1), two distinct forwarded clients each get one.
+    assert_eq!(
+        get_from(&app, "/v1/status", "127.0.0.1", Some("1.1.1.1"))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        get_from(&app, "/v1/status", "127.0.0.1", Some("2.2.2.2"))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        get_from(&app, "/v1/status", "127.0.0.1", Some("1.1.1.1"))
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    // From an untrusted peer the header is ignored: the peer itself is the key.
+    assert_eq!(
+        get_from(&app, "/v1/status", "203.0.113.5", Some("3.3.3.3"))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        get_from(&app, "/v1/status", "203.0.113.5", Some("4.4.4.4"))
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}
+
+#[tokio::test]
+async fn zero_rate_disables_limiting() {
+    let (_d, app) = app_with(limited(0, 1, &[]), None);
+    for _ in 0..10 {
+        assert_eq!(
+            get_from(&app, "/v1/status", "198.51.100.1", None).await.0,
+            StatusCode::OK
+        );
+    }
+}
+
+#[tokio::test]
+async fn requests_without_connect_info_are_keyed_as_unspecified_and_still_limited() {
+    // `oneshot` without ConnectInfo (the existing `get` helper) must not panic.
+    let (_d, app) = app_with(limited(1, 1, &[]), None);
+    let (st, _) = get(&app, "/v1/status").await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = get(&app, "/v1/status").await;
+    assert_eq!(st, StatusCode::TOO_MANY_REQUESTS);
 }
 
 const COINBASE_TX_HEIGHT: u32 = 1866000;
@@ -572,10 +721,16 @@ fn router_over(store: Store, indexed: u32) -> Router {
         halted: None,
         stalled: None,
     });
-    xp_api::router(xp_api::AppState {
-        store: Arc::new(store),
-        status: rx,
-    })
+    let cfg = unlimited();
+    xp_api::router(
+        xp_api::AppState {
+            store: Arc::new(store),
+            status: rx,
+            counters: Arc::new(Counters::default()),
+            read_permits: Arc::new(Semaphore::new(cfg.max_inflight_reads as usize)),
+        },
+        &cfg,
+    )
 }
 
 /// A store seeded just below the SigUSD mint block, with 453051 applied — one token, one

@@ -12,20 +12,55 @@ pub mod limit;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::Router;
+use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+use tokio::sync::Semaphore;
 use tower_http::cors::CorsLayer;
 use tower_http::timeout::TimeoutLayer;
 use xp_ingest::IngestStatus;
 use xp_store::{Reader, Store};
 
 pub use error::ApiError;
+pub use limit::Allowlist;
+
+/// Runtime knobs for the public API (spec §3–§5). `bin/explorer` builds it from TOML.
+#[derive(Debug, Clone)]
+pub struct ApiConfig {
+    pub per_second: u32,
+    pub burst: u32,
+    pub allowlist: Allowlist,
+    pub trusted_proxies: Allowlist,
+    pub max_inflight_reads: u32,
+}
+
+impl Default for ApiConfig {
+    fn default() -> ApiConfig {
+        ApiConfig {
+            per_second: 10,
+            burst: 30,
+            allowlist: Allowlist::default(),
+            trusted_proxies: Allowlist::parse(&["127.0.0.1".into(), "::1".into()]).expect("static"),
+            max_inflight_reads: 32,
+        }
+    }
+}
+
+/// Process-lifetime counters surfaced on `/v1/status`.
+#[derive(Debug, Default)]
+pub struct Counters {
+    pub rate_limited_total: AtomicU64,
+    pub inflight_reads: AtomicU32,
+}
 
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<Store>,
     pub status: watch::Receiver<IngestStatus>,
+    pub counters: Arc<Counters>,
+    /// Bounds concurrent blocking store reads; wired into `blocking()` in Task 4.
+    pub read_permits: Arc<Semaphore>,
 }
 
 /// Runs `f` against a fresh [`Reader`] on the blocking pool. One reader per request keeps
@@ -44,7 +79,8 @@ where
     .map_err(|e| ApiError::Internal(format!("blocking task failed: {e}")))?
 }
 
-pub fn router(state: AppState) -> Router {
+pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
+    let rate_limit = limit::RateLimit::new(cfg, state.counters.clone());
     Router::new()
         .route("/v1/status", get(handlers::status::status))
         .route("/v1/blocks", get(handlers::blocks::list))
@@ -87,6 +123,9 @@ pub fn router(state: AppState) -> Router {
             StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(5),
         ))
+        // Outside the timeout, so a rejected request never enters the timeout budget…
+        .layer(rate_limit)
+        // …and inside CORS, so a browser can read the 429 body.
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

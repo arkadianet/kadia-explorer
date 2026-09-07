@@ -1,6 +1,6 @@
 //! The API's single error type and its RFC 7807 "problem details" rendering.
 
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Serialize;
@@ -14,6 +14,10 @@ pub enum ApiError {
     BadRequest(String),
     #[error("{0}")]
     Internal(String),
+    #[error("rate limited")]
+    TooManyRequests { retry_after: u32 },
+    #[error("overloaded")]
+    Overloaded,
 }
 
 impl ApiError {
@@ -22,6 +26,8 @@ impl ApiError {
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            ApiError::Overloaded => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 
@@ -30,6 +36,8 @@ impl ApiError {
             ApiError::NotFound => "Not Found",
             ApiError::BadRequest(_) => "Bad Request",
             ApiError::Internal(_) => "Internal Server Error",
+            ApiError::TooManyRequests { .. } => "Too Many Requests",
+            ApiError::Overloaded => "Service Unavailable",
         }
     }
 
@@ -39,6 +47,10 @@ impl ApiError {
             ApiError::BadRequest(d) => d.clone(),
             // Never leak the internal cause to the client; it is logged instead.
             ApiError::Internal(_) => "internal error".to_owned(),
+            ApiError::TooManyRequests { retry_after } => {
+                format!("rate limit exceeded; retry after {retry_after} s")
+            }
+            ApiError::Overloaded => "too many concurrent reads; retry shortly".to_owned(),
         }
     }
 }
@@ -59,13 +71,25 @@ impl IntoResponse for ApiError {
         if let ApiError::Internal(msg) = &self {
             tracing::error!(error = %msg, "api internal error");
         }
+        // Back-pressure answers carry `Retry-After` in whole seconds (minimum 1); they are
+        // routine load shedding, so they are never logged.
+        let retry_after = match &self {
+            ApiError::TooManyRequests { retry_after } => Some(*retry_after),
+            ApiError::Overloaded => Some(1),
+            _ => None,
+        };
         let body = Problem {
             r#type: "about:blank",
             title: self.title(),
             status: status.as_u16(),
             detail: self.detail(),
         };
-        (status, Json(body)).into_response()
+        let mut resp = (status, Json(body)).into_response();
+        if let Some(s) = retry_after {
+            resp.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(s));
+        }
+        resp
     }
 }
 

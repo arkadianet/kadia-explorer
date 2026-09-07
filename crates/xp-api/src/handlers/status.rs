@@ -2,6 +2,7 @@ use crate::dto::{stalled_dto, StatusDto};
 use crate::{ApiError, AppState};
 use axum::extract::State;
 use axum::Json;
+use std::sync::atomic::Ordering;
 use xp_ingest::Mode;
 
 pub async fn status(State(state): State<AppState>) -> Result<Json<StatusDto>, ApiError> {
@@ -20,5 +21,7 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusDto>, Ap
         halted: s.halted,
         lag_blocks,
         stalled: s.stalled.as_ref().map(stalled_dto),
+        inflight_reads: state.counters.inflight_reads.load(Ordering::Relaxed),
+        rate_limited_total: state.counters.rate_limited_total.load(Ordering::Relaxed),
     }))
 }

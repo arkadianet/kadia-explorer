@@ -143,11 +143,17 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         shutdown.clone(),
     ));
 
+    // Task 5 replaces these defaults with the `[api]` TOML section.
+    let api_cfg = xp_api::ApiConfig::default();
     let app_state = xp_api::AppState {
         store: store.clone(),
         status: status_rx,
+        counters: Arc::new(xp_api::Counters::default()),
+        read_permits: Arc::new(tokio::sync::Semaphore::new(
+            api_cfg.max_inflight_reads as usize,
+        )),
     };
-    let app = xp_api::router(app_state);
+    let app = xp_api::router(app_state, &api_cfg);
 
     {
         let signal_shutdown = shutdown.clone();

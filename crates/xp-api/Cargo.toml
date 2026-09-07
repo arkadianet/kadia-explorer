@@ -12,6 +12,7 @@ xp-ingest.workspace = true
 axum.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 tower-http.workspace = true
+tower.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 hex.workspace = true
@@ -20,7 +21,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tower.workspace = true
 http-body-util.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 reqwest.workspace = true

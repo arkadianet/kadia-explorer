@@ -1,9 +1,19 @@
 //! Per-client rate limiting (spec §3): token buckets keyed by client IP, a CIDR allowlist,
-//! and the proxy-aware client key. The tower layer that uses them is added in Task 3.
+//! the proxy-aware client key, and the tower layer that puts them in front of the router.
 
+use crate::{ApiConfig, ApiError, Counters};
+use axum::body::Body;
+use axum::extract::connect_info::ConnectInfo;
+use axum::http::Request;
+use axum::response::{IntoResponse, Response};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+use tower::{Layer, Service};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TokenBucket {
@@ -159,6 +169,130 @@ pub fn client_key(peer: IpAddr, forwarded_for: Option<&str>, trusted: &Allowlist
         }
     }
     peer
+}
+
+// ---------------------------------------------------------------------------------------
+// The tower layer
+// ---------------------------------------------------------------------------------------
+
+/// How often idle buckets are swept out of the map, and how long a full bucket must have
+/// been idle to be swept. Both are amortised onto request handling: no background task.
+const SWEEP_EVERY: Duration = Duration::from_secs(60);
+const IDLE_FOR: Duration = Duration::from_secs(60);
+
+struct Shared {
+    per_second: f64,
+    burst: u32,
+    allowlist: Allowlist,
+    trusted: Allowlist,
+    counters: Arc<Counters>,
+    /// (buckets by client key, time of the last sweep).
+    buckets: Mutex<(HashMap<IpAddr, TokenBucket>, Instant)>,
+}
+
+/// Per-client token-bucket rate limiting as a `tower` layer.
+#[derive(Clone)]
+pub struct RateLimit(Arc<Shared>);
+
+impl RateLimit {
+    pub fn new(cfg: &ApiConfig, counters: Arc<Counters>) -> RateLimit {
+        RateLimit(Arc::new(Shared {
+            per_second: f64::from(cfg.per_second),
+            burst: cfg.burst.max(1),
+            allowlist: cfg.allowlist.clone(),
+            trusted: cfg.trusted_proxies.clone(),
+            counters,
+            buckets: Mutex::new((HashMap::new(), Instant::now())),
+        }))
+    }
+
+    /// `Ok(())` to pass, `Err(seconds)` to reject with that `Retry-After`.
+    fn check(&self, key: IpAddr, now: Instant) -> Result<(), u32> {
+        let s = &self.0;
+        if s.per_second <= 0.0 || s.allowlist.contains(key) {
+            return Ok(());
+        }
+        // A poisoned lock only means some other request panicked mid-update; the map is a
+        // plain cache of buckets, so recovering the guard is strictly better than taking the
+        // whole API down with it.
+        let mut guard = s.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        let (map, last_sweep) = &mut *guard;
+        if now.saturating_duration_since(*last_sweep) >= SWEEP_EVERY {
+            map.retain(|_, b| !b.is_idle(now, s.per_second, s.burst, IDLE_FOR));
+            *last_sweep = now;
+        }
+        let bucket = map.entry(key).or_insert_with(|| TokenBucket::new(s.burst));
+        match bucket.try_take(now, s.per_second, s.burst) {
+            Ok(()) => Ok(()),
+            Err(wait) => {
+                s.counters
+                    .rate_limited_total
+                    .fetch_add(1, Ordering::Relaxed);
+                Err((wait.as_secs_f64().ceil() as u32).max(1))
+            }
+        }
+    }
+}
+
+impl<S> Layer<S> for RateLimit {
+    type Service = RateLimitService<S>;
+    fn layer(&self, inner: S) -> RateLimitService<S> {
+        RateLimitService {
+            inner,
+            limit: self.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RateLimitService<S> {
+    inner: S,
+    limit: RateLimit,
+}
+
+impl<S> Service<Request<Body>> for RateLimitService<S>
+where
+    S: Service<Request<Body>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, S::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), S::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        // Requests without ConnectInfo (tests via `oneshot`) share one key; production always
+        // has it because main serves with `into_make_service_with_connect_info`.
+        let peer = req
+            .extensions()
+            .get::<ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip())
+            .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+        let xff = req
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let key = client_key(peer, xff.as_deref(), &self.limit.0.trusted);
+        match self.limit.check(key, Instant::now()) {
+            Ok(()) => {
+                // Only the clone this service holds has been made ready by `poll_ready`, so
+                // call *it* and leave a fresh clone behind for the next request.
+                let clone = self.inner.clone();
+                let mut inner = std::mem::replace(&mut self.inner, clone);
+                Box::pin(async move { inner.call(req).await })
+            }
+            Err(retry_after) => {
+                Box::pin(
+                    async move { Ok(ApiError::TooManyRequests { retry_after }.into_response()) },
+                )
+            }
+        }
+    }
 }
 
 #[cfg(test)]
