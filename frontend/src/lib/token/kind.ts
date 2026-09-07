@@ -32,10 +32,12 @@ export function tokenDisplayName(name: string, id: string): string {
 	return trimmed === '' ? truncateMiddle(id) : trimmed;
 }
 
-/** A holder's share as text, to two decimals so the column stays one width. The API can
- * return a share with many decimals (a dust holder of a huge supply); printing it raw would
- * overrun the column, and rounding it to "0.00%" would claim the holder owns nothing — hence
- * the explicit "<0.01%" band. */
+/** A holder's share as text, to two decimals so the column stays one width. The API sends
+ * two decimals from 0.01% up and up to four below it ("0.0007"), precisely so a dust holder
+ * of a huge supply is distinguishable from a holder of nothing; printing four decimals raw
+ * would overrun the column and rounding them to "0.00%" would claim the holder owns nothing,
+ * so anything under 0.01% collapses to the "<0.01%" band instead. A bare "0" — the API's
+ * empty holder and its fully burned token — is the only thing that reads "0%". */
 export function formatSharePct(sharePct: string): string {
 	const pct = Number.parseFloat(sharePct);
 	if (!Number.isFinite(pct)) return '—';

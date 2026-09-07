@@ -612,16 +612,33 @@ pub fn token_kind(token_type: Option<&str>) -> &'static str {
     }
 }
 
-/// A holder's share of the circulating supply, in percent with two decimals (`"12.34"`).
-/// A zero supply — every minted unit burned — has no meaningful share, so it renders
-/// `"0.00"` rather than dividing by zero.
+/// A holder's share of the circulating supply, as a decimal percentage string.
+///
+/// A share of 0.01% or more renders with exactly two decimals (`"12.34"`), which is the
+/// width the holders column is laid out for. Below that, two decimals would round every
+/// dust holder of a large supply to `"0.00"` — a claim that a real holder owns nothing —
+/// so a smaller non-zero share renders with up to four decimals, trailing zeros trimmed
+/// (`"0.0007"`, `"0.001"`). A share too small even for four decimals is floored to the
+/// smallest value this rendering can express rather than to zero.
+///
+/// `"0"` — with no decimal point at all, so the two cases are distinguishable on the wire —
+/// is reserved for a holder of nothing and for a zero supply (every minted unit burned),
+/// which has no meaningful share to divide.
 pub fn share_pct(amount: u64, supply: u64) -> String {
-    if supply == 0 {
-        return "0.00".to_owned();
+    if supply == 0 || amount == 0 {
+        return "0".to_owned();
     }
-    // Basis points in u128: `amount * 10_000` overflows u64 for large supplies.
-    let bp = u128::from(amount) * 10_000 / u128::from(supply);
-    format!("{}.{:02}", bp / 100, bp % 100)
+    // Ten-thousandths of a percent, in u128: `amount * 1_000_000` overflows u64 for large
+    // supplies. 100 units of this is 0.01%, the two-decimal threshold.
+    let t = (u128::from(amount) * 1_000_000 / u128::from(supply)).max(1);
+    if t >= 100 {
+        let bp = t / 100;
+        format!("{}.{:02}", bp / 100, bp % 100)
+    } else {
+        // `t` is in 1..=99, so at least one of the four digits is non-zero and trimming
+        // trailing zeros can never leave a bare "0." or collapse to "0".
+        format!("0.{t:04}").trim_end_matches('0').to_owned()
+    }
 }
 
 #[derive(Debug, Serialize)]

@@ -62,9 +62,13 @@ describe('shareBarWidth', () => {
 
 	it('gives a dust holder a visible sliver instead of nothing', () => {
 		expect(shareBarWidth('0.00001')).toBe(0.5);
+		// The shape the API actually sends for a sub-0.01% holder.
+		expect(shareBarWidth('0.0007')).toBe(0.5);
+		expect(shareBarWidth('0.0001')).toBe(0.5);
 	});
 
 	it('shows no bar at all for zero', () => {
+		// The API's bare "0": an empty holder, or a fully burned token.
 		expect(shareBarWidth('0')).toBe(0);
 	});
 
@@ -78,13 +82,22 @@ describe('formatSharePct', () => {
 	it('keeps two decimals so the column stays one width', () => {
 		expect(formatSharePct('50')).toBe('50.00%');
 		expect(formatSharePct('1.6666667')).toBe('1.67%');
+		// 0.01% is the bottom of the two-decimal band on both sides of the wire.
+		expect(formatSharePct('0.01')).toBe('0.01%');
 	});
 
 	it('never rounds a real holder down to nothing', () => {
+		// The sub-0.01% strings the API sends, all of which mean "some, but not much".
+		expect(formatSharePct('0.0099')).toBe('<0.01%');
+		expect(formatSharePct('0.0007')).toBe('<0.01%');
+		expect(formatSharePct('0.001')).toBe('<0.01%');
+		expect(formatSharePct('0.0001')).toBe('<0.01%');
 		expect(formatSharePct('0.000004')).toBe('<0.01%');
 	});
 
 	it('handles zero, over-100 and unparsable shares', () => {
+		// The API's bare "0" — an empty holder, or a fully burned token — is the only
+		// share that owns nothing.
 		expect(formatSharePct('0')).toBe('0%');
 		expect(formatSharePct('100.4')).toBe('100.00%');
 		expect(formatSharePct('n/a')).toBe('—');

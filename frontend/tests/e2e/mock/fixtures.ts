@@ -171,13 +171,17 @@ function rentDue(size: number, value: bigint): bigint {
  * has to be stable and plausible — it is not the store's exact byte count.
  */
 /**
- * A holder's share of a token's supply, as the decimal string the API sends: two decimals,
- * computed in BigInt (an amount can exceed 2^53) via hundredths of a percent. A supply of
- * zero — every unit burned or spent out of the fixture range — has no shares to divide.
+ * A holder's share of a token's supply, as the decimal string the API sends, computed in
+ * BigInt (an amount can exceed 2^53) via ten-thousandths of a percent: two decimals from
+ * 0.01% up, up to four decimals with trailing zeros trimmed below that, and a bare "0" only
+ * for an empty holder or for a supply of zero — every unit burned or spent out of the
+ * fixture range — which has no shares to divide.
  */
 function sharePct(amount: bigint, supply: bigint): string {
-	if (supply <= 0n) return '0.00';
-	return (Number((amount * 10_000n) / supply) / 100).toFixed(2);
+	if (supply <= 0n || amount <= 0n) return '0';
+	const t = (amount * 1_000_000n) / supply || 1n;
+	if (t >= 100n) return (Number(t / 100n) / 100).toFixed(2);
+	return `0.${t.toString().padStart(4, '0')}`.replace(/0+$/, '');
 }
 
 function boxSize(out: NodeOutput): number {

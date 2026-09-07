@@ -769,7 +769,8 @@ async fn token_holders_are_ordered_by_amount_with_shares_and_a_cursor() {
         assert!(amount <= prev, "holders must be descending by amount");
         prev = amount;
         assert_eq!(it["tree_hash"].as_str().unwrap().len(), 64);
-        // Two units out of a 10^13 supply round to 0.00, and never to a bare "0".
+        // Both holders own well over 0.01% of the circulating supply, so both take the
+        // two-decimal band — and neither is the bare "0" reserved for an empty holder.
         let share = it["share_pct"].as_str().unwrap();
         assert!(share.contains('.'), "share_pct has two decimals: {share}");
         assert_eq!(share.split('.').nth(1).unwrap().len(), 2);
@@ -795,16 +796,30 @@ async fn token_holders_are_ordered_by_amount_with_shares_and_a_cursor() {
 }
 
 /// A share of exactly one third of the supply renders as `33.33`, proving the two-decimal
-/// basis-point rendering rather than an integer percent.
+/// basis-point rendering rather than an integer percent — and a dust holder keeps enough
+/// precision to stay visibly non-zero.
 #[tokio::test]
-async fn share_pct_renders_two_decimals() {
+async fn share_pct_renders_two_decimals_and_keeps_dust_visible() {
     assert_eq!(xp_api::dto::share_pct(1, 3), "33.33");
     assert_eq!(xp_api::dto::share_pct(1, 1), "100.00");
     assert_eq!(xp_api::dto::share_pct(1234, 10_000), "12.34");
-    assert_eq!(xp_api::dto::share_pct(0, 100), "0.00");
-    // A fully burned token has no meaningful share, and must not divide by zero.
-    assert_eq!(xp_api::dto::share_pct(5, 0), "0.00");
-    // `amount * 10_000` overflows u64 here; the u128 path keeps it exact.
+    // The two-decimal band reaches down to exactly 0.01%.
+    assert_eq!(xp_api::dto::share_pct(1, 10_000), "0.01");
+
+    // Below 0.01% two decimals would say "0.00" — a holder of something rendered as a
+    // holder of nothing. Up to four decimals, trailing zeros trimmed.
+    assert_eq!(xp_api::dto::share_pct(7, 1_000_000), "0.0007");
+    assert_eq!(xp_api::dto::share_pct(1, 100_000), "0.001");
+    assert_eq!(xp_api::dto::share_pct(99, 1_000_000), "0.0099");
+    // Smaller than four decimals can express: floored to the smallest non-zero rendering,
+    // never to "0".
+    assert_eq!(xp_api::dto::share_pct(1, 10_000_000_000_000), "0.0001");
+
+    // Only an empty holder and a fully burned token render a bare "0" — the latter must
+    // not divide by zero.
+    assert_eq!(xp_api::dto::share_pct(0, 100), "0");
+    assert_eq!(xp_api::dto::share_pct(5, 0), "0");
+    // `amount * 1_000_000` overflows u64 here; the u128 path keeps it exact.
     assert_eq!(xp_api::dto::share_pct(u64::MAX, u64::MAX), "100.00");
 }
 
