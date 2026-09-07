@@ -31,7 +31,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ApiSection {
     pub max_inflight_reads: u32,
     pub trusted_proxies: Vec<String>,
@@ -39,7 +39,7 @@ pub struct ApiSection {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RateLimitSection {
     pub per_second: u32,
     pub burst: u32,
@@ -278,5 +278,22 @@ mod tests {
         "#;
         let err = Config::parse(text).expect_err("unknown source kind must be rejected");
         assert!(err.to_string().contains("scala_node"));
+    }
+
+    #[test]
+    fn api_section_rejects_unknown_keys() {
+        let err = Config::parse(
+            r#"
+        data_dir = "/tmp/x"
+        bind = "127.0.0.1:1"
+        [source]
+        kind = "rust_node"
+        url = "http://127.0.0.1:9053"
+        [api]
+        max_inflight_read = 4
+    "#,
+        )
+        .expect_err("typo in [api] must fail to parse");
+        assert!(format!("{err:#}").contains("max_inflight_read"), "{err:#}");
     }
 }

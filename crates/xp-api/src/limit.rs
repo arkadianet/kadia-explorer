@@ -7,7 +7,7 @@ use axum::extract::connect_info::ConnectInfo;
 use axum::http::Request;
 use axum::response::{IntoResponse, Response};
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -177,6 +177,15 @@ pub fn client_key(peer: IpAddr, forwarded_for: Option<&str>, trusted: &Allowlist
     peer
 }
 
+/// Bucket key for a client address: IPv4 as-is, IPv6 truncated to its /64 so a client that
+/// owns a routed /64 cannot mint a fresh bucket per address (the common allocation unit).
+pub fn bucket_key(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from(u128::from(v6) & (u128::MAX << 64))),
+        v4 => v4,
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // The tower layer
 // ---------------------------------------------------------------------------------------
@@ -312,7 +321,7 @@ where
             .collect::<Vec<_>>()
             .join(",");
         let xff = if xff.is_empty() { None } else { Some(xff) };
-        let key = client_key(peer, xff.as_deref(), &self.limit.0.trusted);
+        let key = bucket_key(client_key(peer, xff.as_deref(), &self.limit.0.trusted));
         match self.limit.check(key, Instant::now()) {
             Ok(()) => {
                 // Only the clone this service holds has been made ready by `poll_ready`, so
@@ -410,6 +419,20 @@ mod tests {
         let key = IpAddr::V4(std::net::Ipv4Addr::new(11, 1, 1, 1));
         assert!(limit.check(key, t0).is_ok());
         assert_eq!(limit.check(key, t0), Err(1));
+    }
+
+    #[test]
+    fn bucket_key_truncates_ipv6_to_64_and_keeps_ipv4() {
+        assert_eq!(bucket_key(ip("2001:db8:1:2:3:4:5:6")), ip("2001:db8:1:2::"));
+        assert_eq!(
+            bucket_key(ip("2001:db8:1:2:ffff::1")),
+            bucket_key(ip("2001:db8:1:2::1"))
+        );
+        assert_ne!(
+            bucket_key(ip("2001:db8:1:2::1")),
+            bucket_key(ip("2001:db8:1:3::1"))
+        );
+        assert_eq!(bucket_key(ip("9.9.9.9")), ip("9.9.9.9"));
     }
 
     #[test]

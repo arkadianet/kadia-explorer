@@ -19,7 +19,7 @@ rent), and serves it at <https://explorer.kadia.io>.
 cargo build --release -p explorer
 cp explorer.example.toml explorer.toml   # point `url` at an Ergo node
 ./target/release/explorer --config explorer.toml
-# API on http://127.0.0.1:18090/v1/status
+# API on http://127.0.0.1:8090/v1/status
 cd frontend && npm ci && npm run dev      # proxies /v1 to the API
 ```
 
