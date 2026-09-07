@@ -192,7 +192,12 @@ export function buildDataset(): Dataset {
 					address: null,
 					template_hash: sha256Hex(`template:${out.ergoTree}`),
 					tree_hash: treeHashOf(out.ergoTree),
-					tokens: out.assets.map((a) => ({ id: a.tokenId, amount: String(a.amount) })),
+					tokens: out.assets.map((a) => ({
+						id: a.tokenId,
+						amount: String(a.amount),
+						name: null,
+						decimals: null
+					})),
 					registers: out.additionalRegisters,
 					size,
 					spent_by: null,
@@ -381,10 +386,11 @@ export function buildDataset(): Dataset {
 			balance: {
 				nano: (balanceByTree.get(richestTree) ?? 0n).toString(),
 				tokens: [...(tokensByTree.get(richestTree) ?? new Map<string, bigint>())].map(
-					([id, amount]) => ({ id, amount: amount.toString() })
+					([id, amount]) => ({ id, amount: amount.toString(), name: null, decimals: null })
 				)
 			},
 			box_count: unspentCountByTree.get(richestTree) ?? 0,
+			tx_count: (txIdsByTree.get(richestTree) ?? []).length,
 			first_seen: seen?.first ?? 0,
 			last_seen: seen?.last ?? 0
 		});
