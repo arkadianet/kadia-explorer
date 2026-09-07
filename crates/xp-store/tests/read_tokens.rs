@@ -433,7 +433,7 @@ fn boxes_by_register_finds_the_fixture_box_holding_the_value() {
     let wrong_reg = rd
         .boxes_by_register(9, &value_hash, None, 500, Dir::Asc)
         .unwrap();
-    assert!(wrong_reg.items.iter().all(|(id, _)| *id != probe.id.0));
+    assert!(wrong_reg.items.is_empty());
 }
 
 #[test]
@@ -446,4 +446,16 @@ fn token_names_returns_only_the_ids_that_have_rows() {
     let got = rd.token_names(&[unknown, sigusd(), unknown]).unwrap();
     assert_eq!(got, vec![(sigusd(), "SigUSD".to_string(), Some(2u8))]);
     assert!(rd.token_names(&[]).unwrap().is_empty());
+
+    // Documented behaviour: the result is neither index-aligned with `ids` nor deduplicated —
+    // a known id repeated in `ids` comes back once per occurrence, and the unknown id in the
+    // middle is simply absent, so position `i` of the result is not `ids[i]`.
+    let repeated = rd.token_names(&[sigusd(), unknown, sigusd()]).unwrap();
+    assert_eq!(
+        repeated,
+        vec![
+            (sigusd(), "SigUSD".to_string(), Some(2u8)),
+            (sigusd(), "SigUSD".to_string(), Some(2u8)),
+        ]
+    );
 }

@@ -8,7 +8,7 @@ use crate::tables::*;
 use crate::{Store, StoreError};
 use ergo_lib::ergotree_ir::chain::address::{AddressEncoder, NetworkPrefix};
 use ergo_lib::ergotree_ir::serialization::SigmaSerializable;
-use redb::{ReadTransaction, ReadableTable};
+use redb::{ReadOnlyTable, ReadTransaction, ReadableTable};
 use std::ops::Bound;
 use xp_types::{Gidx, Hash32};
 
@@ -116,7 +116,7 @@ impl Reader {
         }
     }
 
-    pub(crate) fn resolve_tx(
+    fn resolve_tx(
         &self,
         txs: &impl ReadableTable<&'static [u8], &'static [u8]>,
         tx_id: Hash32,
@@ -275,24 +275,12 @@ impl Reader {
         }
     }
 
-    pub(crate) fn resolve_box(
-        &self,
-        boxes: &impl ReadableTable<&'static [u8], &'static [u8]>,
-        box_id: Hash32,
-    ) -> Result<(Hash32, BoxRow), StoreError> {
-        let row = boxes
-            .get(box_id.as_slice())?
-            .map(|v| BoxRow::decode(v.value()))
-            .transpose()?
-            .ok_or(StoreError::Corrupt("dangling gidx->box_id entry"))?;
-        Ok((box_id, row))
-    }
-
     /// Generic pager over a composite `(prefix, gidx)`-keyed index table (`TREE_BOXES`,
     /// `TREE_UNSPENT`, `TREE_TXS`, `TOKEN_BOXES`, `REGISTER_IDX`, ...): computes `(lo, hi)`
     /// from `prefix_range(prefix)`, tightens it by `cursor` (`Asc`: lower bound `cursor+1` inclusive; `Desc`: upper bound
     /// `cursor` exclusive), walks the range (`.rev()` for `Desc`), and resolves each entry's
-    /// trailing gidx via `resolve`. `next_cursor` is set only when the page came back full
+    /// trailing gidx via `resolve` (a closure built once per query, so the tables it needs
+    /// are opened once rather than once per row). `next_cursor` is set only when the page came back full
     /// (`items.len() == limit`), and `limit == 0` short-circuits to an empty page.
     ///
     /// `prefix` is a byte slice rather than a hash so the same pager serves `REGISTER_IDX`,
@@ -304,7 +292,7 @@ impl Reader {
         cursor: Option<Gidx>,
         limit: usize,
         dir: Dir,
-        mut resolve: impl FnMut(&Self, Gidx) -> Result<T, StoreError>,
+        mut resolve: impl FnMut(Gidx) -> Result<T, StoreError>,
     ) -> Result<Page<T>, StoreError> {
         if limit == 0 {
             return Ok(Page {
@@ -331,7 +319,7 @@ impl Reader {
                     }
                     let (k, _) = item?;
                     let gidx = crate::keys::gidx_of_composite(k.value())?;
-                    items.push(resolve(self, gidx)?);
+                    items.push(resolve(gidx)?);
                     last_gidx = Some(gidx);
                 }
             }
@@ -352,7 +340,7 @@ impl Reader {
                     }
                     let (k, _) = item?;
                     let gidx = crate::keys::gidx_of_composite(k.value())?;
-                    items.push(resolve(self, gidx)?);
+                    items.push(resolve(gidx)?);
                     last_gidx = Some(gidx);
                 }
             }
@@ -378,8 +366,9 @@ impl Reader {
         } else {
             TREE_BOXES
         };
-        self.page_composite(table, tree.as_slice(), cursor, limit, dir, |r, gidx| {
-            r.box_of_gidx(gidx)
+        let boxes = BoxResolver::open(&self.txn)?;
+        self.page_composite(table, tree.as_slice(), cursor, limit, dir, |gidx| {
+            boxes.get(gidx)
         })
     }
 
@@ -390,11 +379,11 @@ impl Reader {
         limit: usize,
         dir: Dir,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
-        self.page_composite(TREE_TXS, tree.as_slice(), cursor, limit, dir, |r, gidx| {
-            let tx_by_gidx = r.txn.open_table(TX_BY_GIDX)?;
-            let txs = r.txn.open_table(TXS)?;
-            let tx_id = as_hash32(tx_by_gidx_lookup(&tx_by_gidx, gidx)?.as_slice())?;
-            r.resolve_tx(&txs, tx_id)
+        let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
+        let txs = self.txn.open_table(TXS)?;
+        self.page_composite(TREE_TXS, tree.as_slice(), cursor, limit, dir, |gidx| {
+            let tx_id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
+            self.resolve_tx(&txs, tx_id)
         })
     }
 
@@ -497,6 +486,37 @@ impl Reader {
     }
 }
 
+/// The `BOX_BY_GIDX` and `BOXES` handles a box-valued [`Reader::page_composite`] pager needs,
+/// opened once per query rather than once per row: a full 500-row page would otherwise cost a
+/// thousand table opens. Used by every box-valued pager — `tree_boxes`, `token_boxes`,
+/// `template_boxes` and `boxes_by_register`.
+pub(crate) struct BoxResolver {
+    by_gidx: ReadOnlyTable<&'static [u8], &'static [u8]>,
+    boxes: ReadOnlyTable<&'static [u8], &'static [u8]>,
+}
+
+impl BoxResolver {
+    pub(crate) fn open(txn: &ReadTransaction) -> Result<BoxResolver, StoreError> {
+        Ok(BoxResolver {
+            by_gidx: txn.open_table(BOX_BY_GIDX)?,
+            boxes: txn.open_table(BOXES)?,
+        })
+    }
+
+    /// The `(box_id, BoxRow)` a composite index entry's trailing gidx names. A gidx with no
+    /// `BOX_BY_GIDX` entry, or one naming a box with no `BOXES` row, is [`StoreError::Corrupt`].
+    pub(crate) fn get(&self, gidx: Gidx) -> Result<(Hash32, BoxRow), StoreError> {
+        let box_id = as_hash32(box_by_gidx_lookup(&self.by_gidx, gidx)?.as_slice())?;
+        let row = self
+            .boxes
+            .get(box_id.as_slice())?
+            .map(|v| BoxRow::decode(v.value()))
+            .transpose()?
+            .ok_or(StoreError::Corrupt("dangling gidx->box_id entry"))?;
+        Ok((box_id, row))
+    }
+}
+
 /// Leading big-endian maturity height of a `RENT_MATURES` key (see `keys::k_rent`), failing
 /// with [`StoreError::Corrupt`] rather than panicking on a short key.
 fn rent_key_height(key: &[u8]) -> Result<u32, StoreError> {
@@ -506,7 +526,7 @@ fn rent_key_height(key: &[u8]) -> Result<u32, StoreError> {
     crate::meta_u32(head)
 }
 
-pub(crate) fn box_by_gidx_lookup(
+fn box_by_gidx_lookup(
     table: &impl ReadableTable<&'static [u8], &'static [u8]>,
     gidx: Gidx,
 ) -> Result<Vec<u8>, StoreError> {

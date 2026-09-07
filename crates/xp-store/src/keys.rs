@@ -18,6 +18,10 @@ pub fn k_hash_gidx(h: &Hash32, g: Gidx) -> [u8; 40] {
 /// `prefix ++ gidx u64 BE` for a prefix of any width: the 32-byte hash of a
 /// `k_hash_gidx` key, or the 33-byte `(reg, value_hash)` head of a `k_register` one. Used by
 /// the readers' generic pager, which must build a bound key without knowing the width.
+///
+/// The pager's `Asc` bound is `k_prefix_gidx(prefix, cursor + 1)` with a saturating add, so a
+/// cursor of `u64::MAX` would return that row again instead of ending the page — unreachable
+/// in practice, since a gidx is a chain-order counter over boxes and transactions.
 pub fn k_prefix_gidx(prefix: &[u8], g: Gidx) -> Vec<u8> {
     let mut k = Vec::with_capacity(prefix.len() + 8);
     k.extend_from_slice(prefix);

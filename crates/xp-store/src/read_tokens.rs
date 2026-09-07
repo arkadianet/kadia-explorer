@@ -7,7 +7,7 @@
 //! rather than a silently skipped item.
 
 use crate::keys::{k_by_count, k_token_holder, k_u64, prefix_range};
-use crate::read::{as_hash32, box_by_gidx_lookup, Dir, Page};
+use crate::read::{as_hash32, BoxResolver, Dir, Page};
 use crate::rows::{BoxRow, TemplateRow, TokenRow};
 use crate::tables::*;
 use crate::{Reader, StoreError};
@@ -179,15 +179,6 @@ impl Reader {
         Ok((items, next_cursor))
     }
 
-    /// The [`BoxRow`] whose gidx a composite index entry named — the `resolve` closure of
-    /// every box-valued [`Reader::page_composite`] pager, here and in `read.rs`.
-    pub(crate) fn box_of_gidx(&self, gidx: Gidx) -> Result<(Hash32, BoxRow), StoreError> {
-        let box_by_gidx = self.txn.open_table(BOX_BY_GIDX)?;
-        let boxes = self.txn.open_table(BOXES)?;
-        let box_id = as_hash32(box_by_gidx_lookup(&box_by_gidx, gidx)?.as_slice())?;
-        self.resolve_box(&boxes, box_id)
-    }
-
     /// Boxes carrying `id`: every one ever, or only those still unspent.
     pub fn token_boxes(
         &self,
@@ -202,8 +193,9 @@ impl Reader {
         } else {
             TOKEN_BOXES
         };
-        self.page_composite(table, id.as_slice(), cursor, limit, dir, |r, gidx| {
-            r.box_of_gidx(gidx)
+        let boxes = BoxResolver::open(&self.txn)?;
+        self.page_composite(table, id.as_slice(), cursor, limit, dir, |gidx| {
+            boxes.get(gidx)
         })
     }
 
@@ -230,8 +222,9 @@ impl Reader {
         } else {
             TEMPLATE_BOXES
         };
-        self.page_composite(table, hash.as_slice(), cursor, limit, dir, |r, gidx| {
-            r.box_of_gidx(gidx)
+        let boxes = BoxResolver::open(&self.txn)?;
+        self.page_composite(table, hash.as_slice(), cursor, limit, dir, |gidx| {
+            boxes.get(gidx)
         })
     }
 
@@ -247,17 +240,22 @@ impl Reader {
         dir: Dir,
     ) -> Result<Page<(Hash32, BoxRow)>, StoreError> {
         let prefix = register_prefix(reg, value_hash);
-        self.page_composite(REGISTER_IDX, &prefix, cursor, limit, dir, |r, gidx| {
-            r.box_of_gidx(gidx)
+        let boxes = BoxResolver::open(&self.txn)?;
+        self.page_composite(REGISTER_IDX, &prefix, cursor, limit, dir, |gidx| {
+            boxes.get(gidx)
         })
     }
 
     /// `(id, name, decimals)` for those `ids` that have a `TOKENS` row, in the order given.
     ///
-    /// Ids without a row are skipped rather than reported: a partial store legitimately holds
-    /// boxes carrying tokens minted before its seed height, so a caller enriching a box's
-    /// token list must tolerate the gap. Duplicate ids are looked up (and returned) once each
-    /// time they appear.
+    /// The result is **neither index-aligned with `ids` nor deduplicated**: an id without a
+    /// row is skipped (so `out.len() <= ids.len()` and `out[i]` need not describe `ids[i]`),
+    /// and a known id repeated in `ids` is returned once per occurrence. Callers enriching a
+    /// box's token list should collect it into a `HashMap<Hash32, _>` and look ids up there,
+    /// never index into it positionally.
+    ///
+    /// Ids are skipped rather than reported missing because a partial store legitimately holds
+    /// boxes carrying tokens minted before its seed height.
     pub fn token_names(
         &self,
         ids: &[Hash32],
