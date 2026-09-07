@@ -95,6 +95,10 @@ fn referenced_box_ids(
 }
 
 /// Registers as `{"R4": "<hex>", ...}` — the node's hex verbatim, R4..R9 in order.
+///
+/// `serde_json`'s compact rendering (no spaces, values always quoted hex) is relied on by
+/// `xp_store::extras::register_hex`, which scans this string for `"R<n>":"` instead of
+/// parsing it; keep the format compact if this is ever rewritten.
 fn registers_json_of(v: &serde_json::Value, count: usize) -> String {
     let mut map = serde_json::Map::new();
     if let Some(regs) = v.get("additionalRegisters").and_then(|r| r.as_object()) {

@@ -30,10 +30,20 @@ use crate::StoreError;
 /// Shorthand for this crate's uniform `&[u8] -> &[u8]` table shape.
 type Tb<'txn> = Table<'txn, &'static [u8], &'static [u8]>;
 
-/// The lowest and highest non-mandatory register indexes an Ergo box can carry (R0..R3 are
-/// the mandatory value/script/tokens/creation-info registers and are not indexed).
+/// The lowest non-mandatory register index an Ergo box can carry (R0..R3 are the mandatory
+/// value/script/tokens/creation-info registers and are not indexed).
 const FIRST_REG: u8 = 4;
-const LAST_REG: u8 = 9;
+
+/// The key patterns [`register_hex`] scans for, one per optional register, in `FIRST_REG`
+/// order — precomputed so no `format!` runs per box per register.
+const REG_PATTERNS: [&str; 6] = [
+    "\"R4\":\"",
+    "\"R5\":\"",
+    "\"R6\":\"",
+    "\"R7\":\"",
+    "\"R8\":\"",
+    "\"R9\":\"",
+];
 
 /// What [`Extras`] contributes to a block's `UndoRow`. `apply_block` moves these into the
 /// row it writes; `Store::seed_genesis` discards them (genesis precedes every block and is
@@ -133,8 +143,9 @@ impl<'txn> Extras<'txn> {
         row.box_count += 1;
         row.unspent_count += 1;
 
-        for reg in FIRST_REG..=LAST_REG {
-            let Some(hex_str) = register_hex(&o.registers_json, reg) else {
+        for (i, pattern) in REG_PATTERNS.iter().enumerate() {
+            let reg = FIRST_REG + i as u8;
+            let Some(hex_str) = register_hex(&o.registers_json, pattern) else {
                 continue;
             };
             let raw = hex::decode(hex_str).map_err(|_| StoreError::Corrupt("bad register hex"))?;
@@ -175,6 +186,11 @@ impl<'txn> Extras<'txn> {
 
     /// Flushes the cached template rows and yields the undo bookkeeping. Consumes `self` so
     /// the four tables are closed before the caller opens anything else.
+    ///
+    /// The two template vectors are drained from a `HashMap`, so they are sorted before being
+    /// handed over: rollback does not care about order (each entry addresses a distinct key),
+    /// but the encoded `UndoRow` is a stored value, and a store whose bytes depend on hash
+    /// iteration order cannot be compared across runs (fingerprint tests, replica diffing).
     pub(crate) fn finish(mut self) -> Result<ExtrasUndo, StoreError> {
         for (tmpl, (row, prev)) in std::mem::take(&mut self.rows) {
             match prev {
@@ -184,34 +200,50 @@ impl<'txn> Extras<'txn> {
             self.templates
                 .insert(tmpl.as_slice(), row.encode().as_slice())?;
         }
+        self.undo.new_templates.sort_unstable();
+        self.undo.prev_templates.sort_unstable_by_key(|(t, _)| *t);
+        // `register_keys` is already appended in (gidx, reg) order by `on_output`, which is
+        // deterministic; nothing to sort.
         Ok(self.undo)
     }
 }
 
-/// The raw hex of register `reg` in a box's `registers_json`, or `None` if it is absent.
+/// The raw hex of the register whose key `pattern` names (one of [`REG_PATTERNS`]) in a
+/// box's `registers_json`, or `None` if that register is absent.
 ///
-/// `registers_json` is never arbitrary JSON: `xp_wire` renders it itself as a flat
-/// `{"R4":"<hex>",…}` object whose values are the node's hex strings, which can contain
-/// neither a quote nor a backslash. Scanning for `"R<n>":"` is therefore exact, and saves
-/// pulling a JSON parser into this crate for six lookups per box.
-fn register_hex(registers_json: &str, reg: u8) -> Option<&str> {
-    let (_, after) = registers_json.split_once(&format!("\"R{reg}\":\""))?;
+/// `registers_json` is never arbitrary JSON: `xp_wire::registers_json_of` renders it itself
+/// as a flat, space-free `{"R4":"<hex>",…}` object whose values are the node's hex strings,
+/// which can contain neither a quote nor a backslash. Scanning for `"R<n>":"` is therefore
+/// exact, and saves pulling a JSON parser into this crate for six lookups per box.
+fn register_hex<'a>(registers_json: &'a str, pattern: &str) -> Option<&'a str> {
+    let (_, after) = registers_json.split_once(pattern)?;
     let end = after.find('"')?;
     Some(&after[..end])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::register_hex;
+    use super::{register_hex, FIRST_REG, REG_PATTERNS};
+
+    fn reg(json: &str, n: u8) -> Option<&str> {
+        register_hex(json, REG_PATTERNS[(n - FIRST_REG) as usize])
+    }
 
     #[test]
     fn register_hex_reads_each_present_register_and_nothing_else() {
         let json = r#"{"R4":"0e0401020304","R5":"05a0b1","R6":"0402"}"#;
-        assert_eq!(register_hex(json, 4), Some("0e0401020304"));
-        assert_eq!(register_hex(json, 5), Some("05a0b1"));
-        assert_eq!(register_hex(json, 6), Some("0402"));
-        assert_eq!(register_hex(json, 7), None);
-        assert_eq!(register_hex(json, 9), None);
-        assert_eq!(register_hex("{}", 4), None);
+        assert_eq!(reg(json, 4), Some("0e0401020304"));
+        assert_eq!(reg(json, 5), Some("05a0b1"));
+        assert_eq!(reg(json, 6), Some("0402"));
+        assert_eq!(reg(json, 7), None);
+        assert_eq!(reg(json, 9), None);
+        assert_eq!(reg("{}", 4), None);
+    }
+
+    #[test]
+    fn reg_patterns_cover_r4_to_r9_in_order() {
+        for (i, p) in REG_PATTERNS.iter().enumerate() {
+            assert_eq!(*p, format!("\"R{}\":\"", FIRST_REG + i as u8));
+        }
     }
 }

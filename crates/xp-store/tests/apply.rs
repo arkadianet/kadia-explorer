@@ -326,6 +326,10 @@ fn template_index_counts_boxes_and_unspent() {
     let s = seeded_store(dir.path());
     let blocks = [fixture(1866000), fixture(1866001), fixture(1866002)];
     s.apply_batch(&blocks, true).unwrap();
+    // `seeded_store` is a partial store: no chain-spec genesis boxes were written, so every
+    // TEMPLATES row below was produced by these three blocks alone and the counts can be
+    // compared against the fixtures directly.
+    assert!(!s.genesis_seeded().unwrap());
 
     // The template carried by the most boxes in the fixtures. (A plain P2PK tree is NOT
     // constant-segregated, so its "template" still contains the public key and is unique per
@@ -449,6 +453,45 @@ fn tx_count_counts_each_touching_tx_once() {
     assert!(expected > 1);
     let bal = rd.balance(&tree).unwrap().expect("balance row");
     assert_eq!(bal.tx_count, expected);
+
+    // The discriminating case: a tree that appears on SEVERAL outputs of the SAME tx (the
+    // `100a0400…` contract has 4, 4 and 12 outputs in one tx of 1866000/1866001/1866002
+    // respectively). Counting boxes instead of txs would inflate `tx_count` more than
+    // threefold here, so this is what pins the deduplication.
+    let multi = all_outputs(&blocks)
+        .into_iter()
+        .find(|o| {
+            o.tree_bytes
+                .starts_with(&hex::decode("100a040004000580dac409").unwrap())
+        })
+        .expect("the multi-output contract tree in the fixtures");
+    let tree = multi.tree_hash.0;
+    let mut distinct_txs = 0u64;
+    let mut boxes_touched = 0u64;
+    for tx in blocks.iter().flat_map(|b| b.txs.iter()) {
+        let outs = tx.outputs.iter().filter(|o| o.tree_hash.0 == tree).count() as u64;
+        let ins = tx
+            .inputs
+            .iter()
+            .filter(|i| {
+                rd.box_by_id(&i.0)
+                    .unwrap()
+                    .map(|r| r.tree_hash == tree)
+                    .unwrap_or(false)
+            })
+            .count() as u64;
+        if outs + ins > 0 {
+            distinct_txs += 1;
+            boxes_touched += outs + ins;
+        }
+    }
+    assert!(
+        boxes_touched > distinct_txs * 2,
+        "fixture must have txs with several boxes on this tree ({boxes_touched} boxes across \
+         {distinct_txs} txs), else the assertion below cannot discriminate"
+    );
+    let bal = rd.balance(&tree).unwrap().expect("balance row");
+    assert_eq!(bal.tx_count, distinct_txs);
 }
 
 /// Spending a box drops its `TEMPLATE_UNSPENT` key and decrements the template's
