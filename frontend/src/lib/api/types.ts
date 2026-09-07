@@ -20,6 +20,8 @@ export interface StatusDto {
 	halted: string | null;
 	lag_blocks: number;
 	stalled: StatusStalledDto | null;
+	inflight_reads: number;
+	rate_limited_total: number;
 }
 
 export interface BlockDto {
@@ -82,6 +84,19 @@ export interface TxDto {
 	inputs: InputDto[];
 	data_inputs: string[];
 	outputs: BoxDto[];
+}
+
+/** `/v1/addresses/{addr}/txs` — a cheap summary of a transaction, without inputs/outputs. */
+export interface TxSummaryDto {
+	id: string;
+	height: number;
+	index: number;
+	timestamp: number;
+	size: number;
+	fee: string;
+	input_count: number;
+	data_input_count: number;
+	output_count: number;
 }
 
 export interface BalanceDto {

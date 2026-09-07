@@ -13,7 +13,8 @@ import type {
 	TemplateDto,
 	TokenHolderDto,
 	TokenInfoDto,
-	TxDto
+	TxDto,
+	TxSummaryDto
 } from './types';
 
 type Fetch = typeof fetch;
@@ -58,7 +59,11 @@ export const api = {
 		),
 
 	addressTxs: (addr: string, cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
-		apiGet<PageDto<TxDto>>(`/addresses/${encodeURIComponent(addr)}/txs`, { cursor, limit, dir }, f),
+		apiGet<PageDto<TxSummaryDto>>(
+			`/addresses/${encodeURIComponent(addr)}/txs`,
+			{ cursor, limit, dir },
+			f
+		),
 
 	addressRent: (addr: string, f?: Fetch) =>
 		apiGet<AddressRentDto>(`/addresses/${encodeURIComponent(addr)}/rent`, undefined, f),

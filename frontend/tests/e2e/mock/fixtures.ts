@@ -663,7 +663,9 @@ export function buildDataset(): Dataset {
 		source: 'mock',
 		halted: null,
 		lag_blocks: 0,
-		stalled: null
+		stalled: null,
+		inflight_reads: 0,
+		rate_limited_total: 0
 	};
 
 	return {

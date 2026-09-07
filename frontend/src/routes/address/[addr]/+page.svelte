@@ -21,7 +21,7 @@
 	import { status } from '$lib/status/status.svelte';
 	import { formatErg, formatTokenAmount, sumNano } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
-	import type { BoxDto, TxDto } from '$lib/api/types';
+	import type { BoxDto, TxSummaryDto } from '$lib/api/types';
 	import type { PageData } from './$types';
 
 	const PAGE_SIZE = 50;
@@ -53,7 +53,7 @@
 
 	// Each tab's data source is created on first activation, so opening the page costs one
 	// request (the txs page) rather than four.
-	let txPager = $state<Pager<TxDto> | null>(null);
+	let txPager = $state<Pager<TxSummaryDto> | null>(null);
 	let unspentPager = $state<Pager<BoxDto> | null>(null);
 	let boxPager = $state<Pager<BoxDto> | null>(null);
 
@@ -106,7 +106,7 @@
 	$effect(() => {
 		if (info === null) return;
 		if (active === 'txs' && !txPager) {
-			const p = createPager<TxDto>((c) => api.addressTxs(addr, c, PAGE_SIZE));
+			const p = createPager<TxSummaryDto>((c) => api.addressTxs(addr, c, PAGE_SIZE));
 			txPager = p;
 			void p.loadMore();
 		} else if (active === 'unspent' && !unspentPager) {
@@ -209,7 +209,7 @@
 								<th class="num">Fee</th>
 							</tr>
 						{/snippet}
-						{#snippet children(tx: TxDto)}
+						{#snippet children(tx: TxSummaryDto)}
 							<tr>
 								<td><Hash value={tx.id} href={`/tx/${tx.id}`} copy={false} /></td>
 								<td class="num mono"><a href={`/blocks/${tx.height}`}>{tx.height}</a></td>

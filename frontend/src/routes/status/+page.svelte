@@ -66,6 +66,14 @@
 					<td>Halted</td>
 					<td class="mono">{current.halted ?? '—'}</td>
 				</tr>
+				<tr>
+					<td>Reads in flight</td>
+					<td class="mono">{current.inflight_reads}</td>
+				</tr>
+				<tr>
+					<td>Rate limited</td>
+					<td class="mono">{current.rate_limited_total}</td>
+				</tr>
 			</Table>
 		</div>
 

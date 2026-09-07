@@ -14,6 +14,8 @@ test('/status renders the indexer fields and hides the stall row when healthy', 
 	await expect(table.getByRole('row', { name: /^Mode/ })).toContainText('tip');
 	await expect(table.getByRole('row', { name: /^Source/ })).toContainText('mock');
 	await expect(table.getByRole('row', { name: /^Halted/ })).toContainText('—');
+	await expect(table.getByRole('row', { name: /^Reads in flight/ })).toContainText('0');
+	await expect(table.getByRole('row', { name: /^Rate limited/ })).toContainText('0');
 
 	// `stalled: null` from the mock, so no stall callout.
 	await expect(page.locator('.stalled')).toHaveCount(0);

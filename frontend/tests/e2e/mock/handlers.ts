@@ -23,7 +23,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { BoxDto, PageDto, TokenHolderDto, TxDto } from '../../../src/lib/api/types.ts';
+import type {
+	BoxDto,
+	PageDto,
+	TokenHolderDto,
+	TxDto,
+	TxSummaryDto
+} from '../../../src/lib/api/types.ts';
 import { buildDataset, registerKey, type Dataset } from './fixtures.ts';
 
 /** Items per page, small enough that the app's 50-item requests still paginate. */
@@ -170,6 +176,21 @@ function txsOfTree(d: Dataset, tree: string): TxDto[] {
 	});
 }
 
+/** `/v1/addresses/{addr}/txs` — mirrors `xp-api`'s switch to cheap summaries (Task 1). */
+function txSummariesOfTree(d: Dataset, tree: string): TxSummaryDto[] {
+	return txsOfTree(d, tree).map((t) => ({
+		id: t.id,
+		height: t.height,
+		index: t.index,
+		timestamp: t.timestamp,
+		size: t.size,
+		fee: t.fee,
+		input_count: t.inputs.length,
+		data_input_count: t.data_inputs.length,
+		output_count: t.outputs.length
+	}));
+}
+
 /** Resolves `/v1/blocks/{height_or_id}` the way the real handler does. */
 function resolveBlock(d: Dataset, raw: string) {
 	if (DIGITS.test(raw)) return d.blockByHeight.get(Number(raw));
@@ -291,7 +312,7 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 				return;
 			}
 			case '/txs':
-				sendJson(res, 200, page(txsOfTree(d, tree), cursor, limit));
+				sendJson(res, 200, page(txSummariesOfTree(d, tree), cursor, limit));
 				return;
 			case '/rent':
 				sendJson(res, 200, { items: boxesOfTree(d, tree, true), truncated: false });
