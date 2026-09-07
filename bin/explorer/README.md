@@ -78,8 +78,16 @@ An unrecognized `source.kind` is rejected at startup with a clear error naming t
 
 See `xp-api` for the full `/v1` route tree (`/v1/status`, `/v1/blocks`, `/v1/txs`,
 `/v1/boxes`, `/v1/addresses`, `/v1/tokens`, `/v1/templates`, `/v1/registers`, ...).
-`/v1/status` reports `{ indexed, best, mode, source, halted, lag_blocks, stalled }` and is
-the quickest way to watch progress:
+
+`GET /v1/addresses/{addr}/txs?cursor&limit&dir` returns lightweight `TxSummaryDto` items
+(`id`, `height`, `index`, `timestamp`, `size`, `fee`, `input_count`, `data_input_count`,
+`output_count`) rather than the full `TxDto` — the handler resolves no input/output boxes,
+so a wallet address with tens of thousands of boxes pages in milliseconds instead of timing
+out. `GET /v1/txs/{id}` and the block/global transaction lists are unaffected and still
+return the full `TxDto` with resolved inputs and outputs.
+
+`/v1/status` reports `{ indexed, best, mode, source, halted, lag_blocks, stalled,
+inflight_reads, rate_limited_total }` and is the quickest way to watch progress:
 
 ```bash
 curl -s 127.0.0.1:8090/v1/status
@@ -97,11 +105,61 @@ curl -s 127.0.0.1:8090/v1/status
     "height": 545684,
     "since_secs": 912,
     "reason": "source http://127.0.0.1:9063 announced a header at height 545684 but serves no block body"
-  }
+  },
+  "inflight_reads": 0,
+  "rate_limited_total": 0
 }
 ```
 
 `stalled` is `null` whenever ingest is progressing or merely idle at the tip.
+`inflight_reads` is the number of blocking store reads in flight right now (bounded by
+`api.max_inflight_reads`, see [Limits](#limits) below); `rate_limited_total` is a
+process-lifetime count of requests rejected with `429`. Neither is persisted — both reset
+to `0` on restart.
+
+## Limits
+
+An optional `[api]` section in `explorer.toml` bounds concurrent blocking store reads and
+rate-limits clients per IP. The whole section may be omitted; every key below then takes
+its default:
+
+```toml
+[api]
+max_inflight_reads = 32
+trusted_proxies = ["127.0.0.1", "::1"]
+
+[api.rate_limit]
+per_second = 10
+burst = 30
+allowlist = ["203.0.113.7", "2001:db8::/32"]
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `api.max_inflight_reads` | Max concurrent blocking store reads. A request that finds the pool full gets `503` immediately instead of queuing. | 32 |
+| `api.trusted_proxies` | IPs/CIDRs allowed to set `X-Forwarded-For`. Behind a trusted proxy, the client key is the right-most address in the header that is *not* itself a trusted proxy; a missing or unparsable header falls back to the peer address (a proxy can never be spoofed into bypassing the limit). Requests from any other peer are keyed on the peer address, ignoring the header entirely. | `["127.0.0.1", "::1"]` |
+| `api.rate_limit.per_second` | Token-bucket refill rate per client key, in tokens/s (one token per request). `0` disables rate limiting entirely. | 10 |
+| `api.rate_limit.burst` | Token-bucket capacity per client key. | 30 |
+| `api.rate_limit.allowlist` | IPs/CIDRs (v4 and v6) exempt from the bucket entirely — not counted, never limited. Put the fleet's arms and the operator's IP here. | `[]` (empty) |
+
+**429 (rate limited).** A client key with no tokens left gets `429 Too Many Requests` as an
+RFC 7807 problem JSON body (`type`, `title`, `status`, `detail`), with a `Retry-After`
+header giving the whole seconds until a token is available (minimum 1). Each `429`
+increments `rate_limited_total` on `/v1/status`.
+
+**503 (overloaded).** A request that arrives when `max_inflight_reads` blocking reads are
+already in progress gets `503 Service Unavailable`, same problem JSON shape, `Retry-After:
+1`, without occupying a blocking-pool thread. The existing 5 s request timeout is unchanged
+and still applies to reads that do get a permit.
+
+Neither case is logged per request — a flood must not also flood the log — so the counters
+on `/v1/status` are the way to see rate limiting or overload happening.
+
+**Allowlisting the fleet.** Add each collector/bot IP (and the operator's own) to
+`api.rate_limit.allowlist` before exposing the API publicly, otherwise a normal polling
+cadence from the fleet can trip its own rate limit. Caddy in front of the API must be listed
+in `api.trusted_proxies` (it already forwards `X-Forwarded-For`) or every request will be
+keyed on Caddy's own address instead of the real client's.
 
 ## Tokens, templates and register search
 
