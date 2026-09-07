@@ -15,6 +15,7 @@ use redb::{Durability, ReadableTable};
 use xp_wire::DecodedBox;
 
 use crate::apply::{insert_output, upsert_tree};
+use crate::extras::Extras;
 use crate::keys::{k_rich, k_u64};
 use crate::rows::BalanceRow;
 use crate::tables::*;
@@ -65,6 +66,10 @@ impl Store {
             let mut rent_matures = txn.open_table(RENT_MATURES)?;
             let mut tree_balance = txn.open_table(TREE_BALANCE)?;
             let mut rich = txn.open_table(RICH)?;
+            // Template and register indexes come from the same helper `apply_block` uses,
+            // so the genesis boxes are indexed identically to any other box. The undo
+            // bookkeeping it returns is discarded: genesis precedes every block.
+            let mut extras = Extras::open(&txn)?;
 
             for b in boxes {
                 let gidx = next_box;
@@ -83,6 +88,7 @@ impl Store {
                     gidx,
                     b,
                 )?;
+                extras.on_output(&ergo_trees, 0, gidx, b)?;
 
                 // Balances and `RICH` are the one thing `insert_output` leaves to the caller:
                 // apply.rs flushes them once per block from a cache, this seeds three boxes and
@@ -116,6 +122,8 @@ impl Store {
                 }
                 tree_balance.insert(tree.as_slice(), bal.encode().as_slice())?;
             }
+
+            extras.finish()?;
 
             // The emission box is the largest of the chain-spec boxes by five orders of
             // magnitude (93 M ERG against a treasury box of ~4 M and a proof box of 1 nanoERG),

@@ -300,3 +300,234 @@ fn block_fees_sum_tx_fees_and_match_the_fee_collection_tx() {
         assert!(hdr.fees > 0);
     }
 }
+
+/// Reads the raw hex of R4 out of a box's stored `registers_json` (this crate's own
+/// canonical `{"R4":"<hex>",…}` rendering — hex values never contain a quote).
+fn r4_hex(registers_json: &str) -> Option<&str> {
+    let (_, after) = registers_json.split_once("\"R4\":\"")?;
+    let end = after.find('"')?;
+    Some(&after[..end])
+}
+
+fn all_outputs(blocks: &[xp_wire::DecodedBlock]) -> Vec<&xp_wire::DecodedBox> {
+    blocks
+        .iter()
+        .flat_map(|b| b.txs.iter())
+        .flat_map(|t| t.outputs.iter())
+        .collect()
+}
+
+/// `TEMPLATES` must count every box carrying a template, and `TEMPLATE_UNSPENT` must hold
+/// exactly the ones still unspent — cross-checked against the fixture blocks themselves and
+/// against the key counts in `TEMPLATE_BOXES`/`TEMPLATE_UNSPENT`.
+#[test]
+fn template_index_counts_boxes_and_unspent() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    let blocks = [fixture(1866000), fixture(1866001), fixture(1866002)];
+    s.apply_batch(&blocks, true).unwrap();
+
+    // The template carried by the most boxes in the fixtures. (A plain P2PK tree is NOT
+    // constant-segregated, so its "template" still contains the public key and is unique per
+    // address — the shared templates are the segregated contract scripts.)
+    let mut counts: std::collections::HashMap<[u8; 32], usize> = Default::default();
+    for o in all_outputs(&blocks) {
+        if let Ok(h) = xp_wire::template_hash_of(&o.tree_bytes) {
+            *counts.entry(h).or_default() += 1;
+        }
+    }
+    let tmpl = *counts
+        .iter()
+        .max_by_key(|(h, n)| (**n, **h))
+        .expect("some template")
+        .0;
+
+    let outs: Vec<_> = all_outputs(&blocks)
+        .into_iter()
+        .filter(|o| xp_wire::template_hash_of(&o.tree_bytes).ok() == Some(tmpl))
+        .collect();
+    let first_tree = outs[0].tree_hash.0;
+    assert!(outs.len() > 1, "expected several boxes on this template");
+    let spent_within = outs
+        .iter()
+        .filter(|o| {
+            blocks
+                .iter()
+                .flat_map(|b| b.txs.iter())
+                .any(|t| t.inputs.contains(&o.id))
+        })
+        .count();
+    assert!(spent_within > 0, "expected at least one same-run spend");
+
+    let txn = s.begin_read().unwrap();
+    let templates = txn.open_table(xp_store::tables::TEMPLATES).unwrap();
+    let row = xp_store::rows::TemplateRow::decode(
+        templates
+            .get(tmpl.as_slice())
+            .unwrap()
+            .expect("template row indexed")
+            .value(),
+    )
+    .unwrap();
+    assert_eq!(row.box_count, outs.len() as u64);
+    assert_eq!(row.unspent_count, (outs.len() - spent_within) as u64);
+    assert_eq!(row.first_seen, 1866000);
+    assert_eq!(row.example_tree, first_tree);
+
+    // The counters must agree with the composite-key indexes they summarise.
+    let (lo, hi) = xp_store::keys::prefix_range(tmpl.as_slice());
+    let count = |t: xp_store::tables::Tbl| {
+        txn.open_table(t)
+            .unwrap()
+            .range(lo.as_slice()..hi.as_slice())
+            .unwrap()
+            .count() as u64
+    };
+    assert_eq!(count(xp_store::tables::TEMPLATE_BOXES), row.box_count);
+    assert_eq!(count(xp_store::tables::TEMPLATE_UNSPENT), row.unspent_count);
+}
+
+/// Every register present on an output is indexed under `(reg, blake2b256(raw), gidx)`.
+#[test]
+fn register_index_holds_the_r4_value_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    let blocks = [fixture(1866000), fixture(1866001), fixture(1866002)];
+    s.apply_batch(&blocks, true).unwrap();
+
+    let rd = xp_store::Reader::new(&s).unwrap();
+    let mut checked = 0;
+    let txn = s.begin_read().unwrap();
+    let reg_idx = txn.open_table(xp_store::tables::REGISTER_IDX).unwrap();
+    for o in all_outputs(&blocks) {
+        let Some(hex_str) = r4_hex(&o.registers_json) else {
+            continue;
+        };
+        let raw = hex::decode(hex_str).unwrap();
+        let gidx = rd.box_by_id(&o.id.0).unwrap().expect("box indexed").gidx;
+        let k = xp_store::keys::k_register(4, &xp_wire::tree::blake2b256(&raw), gidx);
+        assert!(
+            reg_idx.get(k.as_slice()).unwrap().is_some(),
+            "REGISTER_IDX missing R4 key for box {}",
+            hex::encode(o.id.0)
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no fixture output carries an R4");
+
+    // A value that no box holds must not be indexed.
+    let absent = xp_store::keys::k_register(4, &xp_wire::tree::blake2b256(b"nope"), 0);
+    assert!(reg_idx.get(absent.as_slice()).unwrap().is_none());
+}
+
+/// `BalanceRow::tx_count` counts the transactions that touch a tree — through their inputs
+/// or their outputs — exactly once each, not once per box.
+#[test]
+fn tx_count_counts_each_touching_tx_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    let blocks = [fixture(1866000), fixture(1866001), fixture(1866002)];
+    s.apply_batch(&blocks, true).unwrap();
+    let rd = xp_store::Reader::new(&s).unwrap();
+
+    // The miner's reward tree: block 1866000's emission tx pays it, and so does every
+    // block's fee-collection tx, so it is touched by more than one tx per block.
+    let tree = blocks[0].txs[0].outputs[1].tree_hash.0;
+    let mut expected = 0u64;
+    for tx in blocks.iter().flat_map(|b| b.txs.iter()) {
+        let by_output = tx.outputs.iter().any(|o| o.tree_hash.0 == tree);
+        let by_input = tx.inputs.iter().any(|i| {
+            rd.box_by_id(&i.0)
+                .unwrap()
+                .map(|r| r.tree_hash == tree)
+                .unwrap_or(false)
+        });
+        if by_output || by_input {
+            expected += 1;
+        }
+    }
+    assert!(expected > 1);
+    let bal = rd.balance(&tree).unwrap().expect("balance row");
+    assert_eq!(bal.tx_count, expected);
+}
+
+/// Spending a box drops its `TEMPLATE_UNSPENT` key and decrements the template's
+/// `unspent_count`, while `TEMPLATE_BOXES` and `box_count` are untouched.
+#[test]
+fn spending_a_box_decrements_its_template_unspent_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = seeded_store(dir.path());
+    let b0 = fixture(1866000);
+    let b1 = fixture(1866001);
+    let spent = b0.txs[0].outputs[0].clone();
+    assert_eq!(b1.txs[0].inputs[0], spent.id);
+    let tmpl = xp_wire::template_hash_of(&spent.tree_bytes).unwrap();
+
+    s.apply_batch(std::slice::from_ref(&b0), true).unwrap();
+    let gidx = xp_store::Reader::new(&s)
+        .unwrap()
+        .box_by_id(&spent.id.0)
+        .unwrap()
+        .expect("box indexed")
+        .gidx;
+    let read_row = |s: &Store| {
+        let txn = s.begin_read().unwrap();
+        let t = txn.open_table(xp_store::tables::TEMPLATES).unwrap();
+        xp_store::rows::TemplateRow::decode(t.get(tmpl.as_slice()).unwrap().unwrap().value())
+            .unwrap()
+    };
+    let before = read_row(&s);
+    {
+        let txn = s.begin_read().unwrap();
+        let tu = txn.open_table(xp_store::tables::TEMPLATE_UNSPENT).unwrap();
+        assert!(tu
+            .get(xp_store::keys::k_hash_gidx(&tmpl, gidx).as_slice())
+            .unwrap()
+            .is_some());
+    }
+
+    s.apply_batch(std::slice::from_ref(&b1), true).unwrap();
+
+    let created = b1
+        .txs
+        .iter()
+        .flat_map(|t| t.outputs.iter())
+        .filter(|o| xp_wire::template_hash_of(&o.tree_bytes).ok() == Some(tmpl))
+        .count() as u64;
+    // Inputs of b1 that resolve to a box on this same template (at minimum `spent`).
+    let rd = xp_store::Reader::new(&s).unwrap();
+    let spent_here = b1
+        .txs
+        .iter()
+        .flat_map(|t| t.inputs.iter())
+        .filter(|i| {
+            rd.box_by_id(&i.0)
+                .unwrap()
+                .and_then(|r| rd.tree_row(&r.tree_hash).unwrap())
+                .map(|t| t.template_hash == tmpl)
+                .unwrap_or(false)
+        })
+        .count() as u64;
+    assert!(spent_here >= 1);
+    let after = read_row(&s);
+    assert_eq!(after.box_count, before.box_count + created);
+    assert_eq!(
+        after.unspent_count,
+        before.unspent_count + created - spent_here
+    );
+
+    let txn = s.begin_read().unwrap();
+    let k = xp_store::keys::k_hash_gidx(&tmpl, gidx);
+    assert!(txn
+        .open_table(xp_store::tables::TEMPLATE_UNSPENT)
+        .unwrap()
+        .get(k.as_slice())
+        .unwrap()
+        .is_none());
+    assert!(txn
+        .open_table(xp_store::tables::TEMPLATE_BOXES)
+        .unwrap()
+        .get(k.as_slice())
+        .unwrap()
+        .is_some());
+}

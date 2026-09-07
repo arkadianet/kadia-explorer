@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use xp_types::{rent::maturity_height, Gidx, Hash32};
 use xp_wire::{tree_info, DecodedBlock};
 
+use crate::extras::Extras;
 use crate::keys::{k_hash_gidx, k_rent, k_rich, k_u32, k_u64};
 use crate::rows::{BalanceRow, BoxRow, HeaderRow, TreeRow, TxRow, UndoRow};
 use crate::tables::*;
@@ -175,6 +176,9 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
     let mut txs_table = ctx.txn.open_table(TXS)?;
     let mut tx_by_gidx = ctx.txn.open_table(TX_BY_GIDX)?;
     let mut tree_balance = ctx.txn.open_table(TREE_BALANCE)?;
+    // Owns TEMPLATES/TEMPLATE_BOXES/TEMPLATE_UNSPENT/REGISTER_IDX plus this block's template
+    // caches; `finish()` below flushes them and hands back the undo bookkeeping.
+    let mut extras = Extras::open(ctx.txn)?;
 
     let mut fees = 0u64;
     let mut touched_balances: HashMap<Hash32, BalanceRow> = HashMap::new();
@@ -228,6 +232,14 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             sub_tokens(&mut bal.tokens, &row.tokens, ctx.partial)?;
             bal.last_seen = ctx.height;
 
+            extras.on_spend(
+                &ergo_trees,
+                &row.tree_hash,
+                row.gidx,
+                ctx.height,
+                ctx.partial,
+            )?;
+
             trees_in_tx.push(row.tree_hash);
             ctx.undo.spent_boxes.push(inp.0);
         }
@@ -257,6 +269,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
                 gidx,
                 o,
             )?;
+            extras.on_output(&ergo_trees, ctx.height, gidx, o)?;
 
             let bal = load_balance(
                 &tree_balance,
@@ -283,6 +296,9 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         for t in trees_in_tx {
             tree_txs.insert(k_hash_gidx(&t, tx_gidx).as_slice(), &[][..])?;
             ctx.undo.tree_txs.push((t, tx_gidx));
+            // One increment per (tree, tx), from the same deduplicated set `TREE_TXS` uses,
+            // so a tx with twenty boxes on one address still counts once for it.
+            load_balance(&tree_balance, &mut touched_balances, &t, ctx.height)?.tx_count += 1;
         }
 
         let txrow = TxRow {
@@ -301,6 +317,11 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         tx_by_gidx.insert(k_u64(tx_gidx).as_slice(), tx.id.0.as_slice())?;
         ctx.undo.tx_ids.push(tx.id.0);
     }
+
+    let extras_undo = extras.finish()?;
+    ctx.undo.new_templates = extras_undo.new_templates;
+    ctx.undo.prev_templates = extras_undo.prev_templates;
+    ctx.undo.register_keys = extras_undo.register_keys;
 
     if unverified_boxes > 0 {
         tracing::warn!(
