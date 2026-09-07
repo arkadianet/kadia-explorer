@@ -6,6 +6,7 @@ pub mod read;
 pub mod rollback;
 pub mod rows;
 pub mod tables;
+pub(crate) mod tokens;
 
 pub use apply::{is_fee_tree, FEE_TREE_HASH, FEE_TREE_HEX};
 pub use read::Reader;
@@ -189,6 +190,12 @@ impl Store {
                 .insert(id.as_slice(), keys::k_u32(height).as_slice())?;
             let mut meta = txn.open_table(META)?;
             meta.insert(META_INDEXED_HEIGHT, keys::k_u32(height).as_slice())?;
+            // The gidx counters are written explicitly, even though `apply_batch` reads an
+            // absent key as 0: `rollback_to` always writes them back, so a seeded store that
+            // left them absent would not be byte-identical to itself after an apply and a
+            // rollback — which is exactly what the identity tests compare.
+            meta.insert(META_NEXT_BOX_GIDX, keys::k_u64(0).as_slice())?;
+            meta.insert(META_NEXT_TX_GIDX, keys::k_u64(0).as_slice())?;
             if partial {
                 meta.insert(META_PARTIAL_FROM, keys::k_u32(height).as_slice())?;
             }

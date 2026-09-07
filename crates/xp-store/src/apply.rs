@@ -7,6 +7,7 @@ use crate::extras::Extras;
 use crate::keys::{k_hash_gidx, k_rent, k_rich, k_u32, k_u64};
 use crate::rows::{BalanceRow, BoxRow, HeaderRow, TreeRow, TxRow, UndoRow};
 use crate::tables::*;
+use crate::tokens::Tokens;
 use crate::{Store, StoreError};
 
 /// Serialized ergo tree of Ergo mainnet's miner-fee contract, hex-encoded.
@@ -179,6 +180,9 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
     // Owns TEMPLATES/TEMPLATE_BOXES/TEMPLATE_UNSPENT/REGISTER_IDX plus this block's template
     // caches; `finish()` below flushes them and hands back the undo bookkeeping.
     let mut extras = Extras::open(ctx.txn)?;
+    // Owns the seven TOKEN*/TOKENS* tables plus this block's token-row and holder caches;
+    // `finish()` below flushes them and hands back the undo bookkeeping.
+    let mut tokens = Tokens::open(ctx.txn)?;
 
     let mut fees = 0u64;
     let mut touched_balances: HashMap<Hash32, BalanceRow> = HashMap::new();
@@ -193,6 +197,9 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         let tx_gidx = ctx.next_tx;
         ctx.next_tx += 1;
         let mut trees_in_tx: Vec<Hash32> = vec![];
+        // The tx's resolved input boxes, in input order — what the token index needs to know
+        // what the tx consumed (see tokens.rs; an unresolved input contributes nothing).
+        let mut input_boxes: Vec<BoxRow> = Vec::with_capacity(tx.inputs.len());
 
         for inp in &tx.inputs {
             let existing = boxes
@@ -241,6 +248,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             )?;
 
             trees_in_tx.push(row.tree_hash);
+            input_boxes.push(row);
             ctx.undo.spent_boxes.push(inp.0);
         }
 
@@ -286,6 +294,10 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
             ctx.undo.created_boxes.push(o.id.0);
         }
 
+        // Tokens are indexed per transaction rather than per box: the mint rule reads the
+        // tx's first input, and the burn rule compares its inputs' and outputs' totals.
+        tokens.apply_tx(tx, &input_boxes, first_out_gidx, ctx.height, ctx.partial)?;
+
         // `fee` was summed over the outputs above: it is the value this tx locked in the
         // miner-fee contract. The emission tx (index 0) and the fee-collection tx (the
         // block's last) create no such output, so both come out at 0 with no special case.
@@ -322,6 +334,11 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
     ctx.undo.new_templates = extras_undo.new_templates;
     ctx.undo.prev_templates = extras_undo.prev_templates;
     ctx.undo.register_keys = extras_undo.register_keys;
+
+    let tokens_undo = tokens.finish()?;
+    ctx.undo.new_tokens = tokens_undo.new_tokens;
+    ctx.undo.prev_tokens = tokens_undo.prev_tokens;
+    ctx.undo.prev_holder_amts = tokens_undo.prev_holder_amts;
 
     if unverified_boxes > 0 {
         tracing::warn!(

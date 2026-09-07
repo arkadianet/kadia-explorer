@@ -13,7 +13,6 @@ fn fixture(h: u32) -> xp_wire::DecodedBlock {
 }
 
 #[test]
-#[ignore = "re-enabled in Plan 2 Task 4 (rollback of v2 tables)"]
 fn apply_then_rollback_is_identity() {
     let dir = tempfile::tempdir().unwrap();
     let s = Store::open(&dir.path().join("x.redb")).unwrap();
@@ -29,6 +28,34 @@ fn apply_then_rollback_is_identity() {
     assert_eq!(s.indexed_height().unwrap(), Some(1866000));
     // and re-applying works (gidx counters restored)
     s.apply_batch(&[fixture(1866001)], true).unwrap();
+}
+
+/// The same identity property over the two stand-alone fixture blocks, each on its own store
+/// seeded at its parent height. 453051 is the one fixture that mints a token (SigUSD), so it
+/// is the only block that exercises every schema-v2 table at once — `TOKENS`,
+/// `TOKENS_BY_GIDX`, `TOKENS_BY_HOLDERS`, `TOKEN_BOXES`/`TOKEN_UNSPENT`,
+/// `TOKEN_HOLDERS`/`TOKEN_HOLDER_AMT` on top of the template and register indexes.
+#[test]
+fn apply_then_rollback_is_identity_for_standalone_fixtures() {
+    for h in [1702686u32, 453051] {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(&dir.path().join("x.redb")).unwrap();
+        let b = fixture(h);
+        s.seed_for_tests(h - 1, b.header.parent_id.0).unwrap();
+        let before = s.fingerprint().unwrap();
+        s.apply_batch(&[b], true).unwrap();
+        assert_ne!(
+            s.fingerprint().unwrap(),
+            before,
+            "block {h} changed nothing"
+        );
+        s.rollback_to(h - 1).unwrap();
+        assert_eq!(s.fingerprint().unwrap(), before, "block {h} not identity");
+        assert_eq!(s.indexed_height().unwrap(), Some(h - 1));
+        // Re-applying must work: the gidx counters and every v2 index are back where the
+        // block found them.
+        s.apply_batch(&[fixture(h)], true).unwrap();
+    }
 }
 
 #[test]
@@ -51,7 +78,6 @@ fn rollback_beyond_window_is_refused() {
 /// restores previously-spent boxes (or only removes created ones) leaves a stale row behind.
 /// The store fingerprint catches any such residue, in any table.
 #[test]
-#[ignore = "re-enabled in Plan 2 Task 4 (rollback of v2 tables)"]
 fn apply_then_rollback_with_same_block_create_and_spend() {
     let dir = tempfile::tempdir().unwrap();
     let s = Store::open(&dir.path().join("x.redb")).unwrap();

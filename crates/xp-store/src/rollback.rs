@@ -2,13 +2,33 @@
 //! [`crate::apply`], restoring the store to exactly the state it held before those blocks
 //! were applied. See [`Store::rollback_to`].
 
-use redb::ReadableTable;
-use xp_types::rent::maturity_height;
+use redb::{ReadableTable, Table};
+use xp_types::{rent::maturity_height, Hash32};
 
-use crate::keys::{k_hash_gidx, k_rent, k_rich, k_u32, k_u64};
-use crate::rows::{BalanceRow, BoxRow, HeaderRow, TxRow, UndoRow};
+use crate::keys::{
+    k_by_count, k_hash_gidx, k_register, k_rent, k_rich, k_token_holder, k_token_tree, k_u32, k_u64,
+};
+use crate::rows::{BalanceRow, BoxRow, HeaderRow, TokenRow, TxRow, UndoRow};
 use crate::tables::*;
 use crate::{Store, StoreError, ROLLBACK_WINDOW};
+
+/// The template hash recorded on `tree`'s [`crate::rows::TreeRow`] — the same lookup
+/// `extras::Extras::template_of` does on the apply side, and with the same contract: every
+/// indexed box has a tree row, so a missing one is corruption. Rollback must therefore
+/// resolve template (and token) keys for the boxes it is about to delete *before* it deletes
+/// their `BOXES` rows or this block's fresh `ERGO_TREES` entries.
+fn template_of(
+    ergo_trees: &Table<'_, &'static [u8], &'static [u8]>,
+    tree: &Hash32,
+) -> Result<Hash32, StoreError> {
+    Ok(crate::rows::TreeRow::decode(
+        ergo_trees
+            .get(tree.as_slice())?
+            .ok_or(StoreError::Corrupt("undo: missing tree row for template"))?
+            .value(),
+    )?
+    .template_hash)
+}
 
 impl Store {
     /// Rolls the store back to `target` (inclusive), undoing every block above it in
@@ -45,25 +65,47 @@ impl Store {
             };
 
             // 1. Un-create boxes this block created (reverse of apply's output loop).
-            for id in undo.created_boxes.iter().rev() {
-                let row = {
-                    let b = txn.open_table(BOXES)?;
-                    let decoded = BoxRow::decode(
-                        b.get(id.as_slice())?
-                            .ok_or(StoreError::Corrupt("undo: created box missing"))?
-                            .value(),
+            // The schema-v2 template and token memberships are keyed by things only the box
+            // itself knows — its tree's template hash and its token ids — so they are removed
+            // here, while the `BOXES` row is still readable and before step 5 drops the
+            // `ERGO_TREES` rows this block created.
+            {
+                let mut boxes_t = txn.open_table(BOXES)?;
+                let mut box_by_gidx = txn.open_table(BOX_BY_GIDX)?;
+                let mut tree_boxes = txn.open_table(TREE_BOXES)?;
+                let mut tree_unspent = txn.open_table(TREE_UNSPENT)?;
+                let mut rent_matures = txn.open_table(RENT_MATURES)?;
+                let ergo_trees = txn.open_table(ERGO_TREES)?;
+                let mut template_boxes = txn.open_table(TEMPLATE_BOXES)?;
+                let mut template_unspent = txn.open_table(TEMPLATE_UNSPENT)?;
+                let mut token_boxes = txn.open_table(TOKEN_BOXES)?;
+                let mut token_unspent = txn.open_table(TOKEN_UNSPENT)?;
+                for id in undo.created_boxes.iter().rev() {
+                    let row = {
+                        let decoded = BoxRow::decode(
+                            boxes_t
+                                .get(id.as_slice())?
+                                .ok_or(StoreError::Corrupt("undo: created box missing"))?
+                                .value(),
+                        )?;
+                        decoded
+                    };
+                    let tk = k_hash_gidx(&template_of(&ergo_trees, &row.tree_hash)?, row.gidx);
+                    template_boxes.remove(tk.as_slice())?;
+                    template_unspent.remove(tk.as_slice())?;
+                    for (token, _) in &row.tokens {
+                        let k = k_hash_gidx(token, row.gidx);
+                        token_boxes.remove(k.as_slice())?;
+                        token_unspent.remove(k.as_slice())?;
+                    }
+                    boxes_t.remove(id.as_slice())?;
+                    box_by_gidx.remove(k_u64(row.gidx).as_slice())?;
+                    tree_boxes.remove(k_hash_gidx(&row.tree_hash, row.gidx).as_slice())?;
+                    tree_unspent.remove(k_hash_gidx(&row.tree_hash, row.gidx).as_slice())?;
+                    rent_matures.remove(
+                        k_rent(maturity_height(row.creation_height), row.gidx).as_slice(),
                     )?;
-                    decoded
-                };
-                txn.open_table(BOXES)?.remove(id.as_slice())?;
-                txn.open_table(BOX_BY_GIDX)?
-                    .remove(k_u64(row.gidx).as_slice())?;
-                txn.open_table(TREE_BOXES)?
-                    .remove(k_hash_gidx(&row.tree_hash, row.gidx).as_slice())?;
-                txn.open_table(TREE_UNSPENT)?
-                    .remove(k_hash_gidx(&row.tree_hash, row.gidx).as_slice())?;
-                txn.open_table(RENT_MATURES)?
-                    .remove(k_rent(maturity_height(row.creation_height), row.gidx).as_slice())?;
+                }
             }
 
             // 2. Un-spend inputs this block spent. This MUST run after step 1 (un-create):
@@ -74,25 +116,37 @@ impl Store {
             // chain-spec genesis boxes are now seeded rather than tolerated — `continue`s
             // before ever pushing onto `spent_boxes`, so it never reaches this loop at all.) The `if let Some` guard exists solely for the same-block
             // create-then-spend case.
-            for id in &undo.spent_boxes {
-                let existing = {
-                    let b = txn.open_table(BOXES)?;
-                    let decoded = b
-                        .get(id.as_slice())?
-                        .map(|v| BoxRow::decode(v.value()))
-                        .transpose()?;
-                    decoded
-                };
-                if let Some(mut row) = existing {
-                    row.spent = None;
-                    txn.open_table(BOXES)?
-                        .insert(id.as_slice(), row.encode().as_slice())?;
-                    txn.open_table(TREE_UNSPENT)?
-                        .insert(k_hash_gidx(&row.tree_hash, row.gidx).as_slice(), &[][..])?;
-                    txn.open_table(RENT_MATURES)?.insert(
-                        k_rent(maturity_height(row.creation_height), row.gidx).as_slice(),
-                        id.as_slice(),
-                    )?;
+            {
+                let mut boxes_t = txn.open_table(BOXES)?;
+                let mut tree_unspent = txn.open_table(TREE_UNSPENT)?;
+                let mut rent_matures = txn.open_table(RENT_MATURES)?;
+                let ergo_trees = txn.open_table(ERGO_TREES)?;
+                let mut template_unspent = txn.open_table(TEMPLATE_UNSPENT)?;
+                let mut token_unspent = txn.open_table(TOKEN_UNSPENT)?;
+                for id in &undo.spent_boxes {
+                    let existing = {
+                        let decoded = boxes_t
+                            .get(id.as_slice())?
+                            .map(|v| BoxRow::decode(v.value()))
+                            .transpose()?;
+                        decoded
+                    };
+                    if let Some(mut row) = existing {
+                        row.spent = None;
+                        boxes_t.insert(id.as_slice(), row.encode().as_slice())?;
+                        tree_unspent
+                            .insert(k_hash_gidx(&row.tree_hash, row.gidx).as_slice(), &[][..])?;
+                        rent_matures.insert(
+                            k_rent(maturity_height(row.creation_height), row.gidx).as_slice(),
+                            id.as_slice(),
+                        )?;
+                        let tk = k_hash_gidx(&template_of(&ergo_trees, &row.tree_hash)?, row.gidx);
+                        template_unspent.insert(tk.as_slice(), &[][..])?;
+                        for (token, _) in &row.tokens {
+                            token_unspent
+                                .insert(k_hash_gidx(token, row.gidx).as_slice(), &[][..])?;
+                        }
+                    }
                 }
             }
 
@@ -140,6 +194,80 @@ impl Store {
                     None => {
                         tb.remove(tree.as_slice())?;
                     }
+                }
+            }
+
+            // 4b. Reverse the remaining schema-v2 writes. Order within this step matters
+            // only between holders and token rows: `TOKEN_HOLDERS` is re-keyed from the
+            // *current* amounts, and `TOKENS_BY_HOLDERS` from the current `holder_count`, so
+            // both are read back before their rows are restored.
+            {
+                let mut reg = txn.open_table(REGISTER_IDX)?;
+                for (r, value_hash, gidx) in &undo.register_keys {
+                    reg.remove(k_register(*r, value_hash, *gidx).as_slice())?;
+                }
+            }
+            {
+                let mut amt = txn.open_table(TOKEN_HOLDER_AMT)?;
+                let mut holders = txn.open_table(TOKEN_HOLDERS)?;
+                for (token, tree, prev) in &undo.prev_holder_amts {
+                    let key = k_token_tree(token, tree);
+                    let cur = amt
+                        .get(key.as_slice())?
+                        .map(|v| crate::meta_u64(v.value()))
+                        .transpose()?;
+                    if let Some(c) = cur {
+                        holders.remove(k_token_holder(token, c, tree).as_slice())?;
+                    }
+                    match prev {
+                        // Apply never stores a zero amount (a holder at zero is removed from
+                        // both tables), so `Some` here always means a real holder.
+                        Some(p) => {
+                            amt.insert(key.as_slice(), k_u64(*p).as_slice())?;
+                            holders.insert(k_token_holder(token, *p, tree).as_slice(), &[][..])?;
+                        }
+                        None => {
+                            amt.remove(key.as_slice())?;
+                        }
+                    }
+                }
+            }
+            {
+                let mut tokens = txn.open_table(TOKENS)?;
+                let mut by_gidx = txn.open_table(TOKENS_BY_GIDX)?;
+                let mut by_holders = txn.open_table(TOKENS_BY_HOLDERS)?;
+                for (id, prev) in &undo.prev_tokens {
+                    let cur = TokenRow::decode(
+                        tokens
+                            .get(id.as_slice())?
+                            .ok_or(StoreError::Corrupt("undo: token row missing"))?
+                            .value(),
+                    )?;
+                    if cur.holder_count != prev.holder_count {
+                        by_holders.remove(k_by_count(cur.holder_count, id).as_slice())?;
+                        by_holders.insert(k_by_count(prev.holder_count, id).as_slice(), &[][..])?;
+                    }
+                    tokens.insert(id.as_slice(), prev.encode().as_slice())?;
+                }
+                for id in &undo.new_tokens {
+                    let cur = TokenRow::decode(
+                        tokens
+                            .get(id.as_slice())?
+                            .ok_or(StoreError::Corrupt("undo: new token row missing"))?
+                            .value(),
+                    )?;
+                    by_holders.remove(k_by_count(cur.holder_count, id).as_slice())?;
+                    by_gidx.remove(k_u64(cur.mint_gidx).as_slice())?;
+                    tokens.remove(id.as_slice())?;
+                }
+            }
+            {
+                let mut templates = txn.open_table(TEMPLATES)?;
+                for (hash, prev) in &undo.prev_templates {
+                    templates.insert(hash.as_slice(), prev.encode().as_slice())?;
+                }
+                for hash in &undo.new_templates {
+                    templates.remove(hash.as_slice())?;
                 }
             }
 

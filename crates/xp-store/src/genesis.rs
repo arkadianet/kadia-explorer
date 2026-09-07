@@ -19,6 +19,7 @@ use crate::extras::Extras;
 use crate::keys::{k_rich, k_u64};
 use crate::rows::BalanceRow;
 use crate::tables::*;
+use crate::tokens::Tokens;
 use crate::{Store, StoreError};
 
 impl Store {
@@ -70,6 +71,10 @@ impl Store {
             // so the genesis boxes are indexed identically to any other box. The undo
             // bookkeeping it returns is discarded: genesis precedes every block.
             let mut extras = Extras::open(&txn)?;
+            // Likewise for the token tables. A chain-spec box belongs to no transaction, so
+            // it can mint and burn nothing; only its holdings are indexed. Mainnet's genesis
+            // boxes carry no tokens at all, but the code path stays uniform.
+            let mut tokens = Tokens::open(&txn)?;
 
             for b in boxes {
                 let gidx = next_box;
@@ -89,6 +94,7 @@ impl Store {
                     b,
                 )?;
                 extras.on_output(&ergo_trees, 0, gidx, b)?;
+                tokens.on_output(gidx, b)?;
 
                 // Balances and `RICH` are the one thing `insert_output` leaves to the caller:
                 // apply.rs flushes them once per block from a cache, this seeds three boxes and
@@ -124,6 +130,7 @@ impl Store {
             }
 
             extras.finish()?;
+            tokens.finish()?;
 
             // The emission box is the largest of the chain-spec boxes by five orders of
             // magnitude (93 M ERG against a treasury box of ~4 M and a proof box of 1 nanoERG),
