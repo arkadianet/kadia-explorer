@@ -40,6 +40,7 @@
 		{ href: '/blocks', label: 'Blocks', icon: 'blocks', primary: true },
 		{ href: '/txs', label: 'Transactions', icon: 'txs', primary: true },
 		{ href: '/richlist', label: 'Rich list', icon: 'richlist' },
+		{ href: '/tokens', label: 'Tokens', icon: 'token' },
 		{ href: '/rent', label: 'Storage rent', icon: 'rent-coin', primary: true },
 		{ href: '/status', label: 'Status', icon: 'status', primary: true }
 	];
@@ -50,9 +51,10 @@
 		return path === href || path.startsWith(`${href}/`);
 	}
 
-	// A transaction detail page belongs to the Transactions section. Boxes and addresses have
-	// no section of their own, so they light nothing rather than claiming somebody else's row.
-	const SECTION_OF: Record<string, string> = { '/tx': '/txs' };
+	// A transaction detail page belongs to the Transactions section, a token detail page to
+	// Tokens. Boxes and addresses have no section of their own, so they light nothing rather
+	// than claiming somebody else's row.
+	const SECTION_OF: Record<string, string> = { '/tx': '/txs', '/token': '/tokens' };
 
 	function isCurrent(href: string): boolean {
 		if (isActive(href)) return true;

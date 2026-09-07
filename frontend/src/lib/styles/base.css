@@ -329,6 +329,40 @@ h4 {
 	font-weight: 600;
 }
 
+/* A segmented switch: two or three words in one hairline track, the pressed one lifted onto
+   the card's own surface so the control reads as a switch rather than as separate buttons.
+   Used for the tokens sort and the unspent/all filters. */
+.seg {
+	display: inline-flex;
+	padding: 2px;
+	gap: 2px;
+	border: var(--rule);
+	border-radius: var(--radius-pill);
+	background: var(--bg-sunk);
+}
+
+.seg-btn {
+	background: none;
+	border: 0;
+	height: 24px;
+	padding: 0 var(--space-3);
+	border-radius: var(--radius-pill);
+	font-size: var(--fs-micro);
+	font-weight: 600;
+	color: var(--fg-muted);
+	cursor: pointer;
+}
+
+.seg-btn:hover {
+	color: var(--fg);
+}
+
+.seg-btn[aria-pressed='true'] {
+	color: var(--fg);
+	background: var(--surface-solid);
+	box-shadow: var(--shadow-hair);
+}
+
 /* A quiet "see everything" link in a card head. */
 .more {
 	display: inline-flex;

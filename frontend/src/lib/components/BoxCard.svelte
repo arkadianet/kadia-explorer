@@ -4,7 +4,7 @@
 	import RentBadge from './RentBadge.svelte';
 	import RegistersTable from './RegistersTable.svelte';
 	import { hasDisplayableRegisters } from '$lib/registers/decode';
-	import { formatNano } from '$lib/format/amount';
+	import { formatTokenAmount } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
 	import type { BoxDto } from '$lib/api/types';
 
@@ -65,8 +65,14 @@
 			<ul class="tokens">
 				{#each box.tokens as token, i (i)}
 					<li>
-						<span class="mono" title={token.id}>{truncateMiddle(token.id)}</span>
-						<span class="mono qty">{formatNano(token.amount)}</span>
+						{#if token.name}
+							<a class="token-name" href={`/token/${token.id}`} title={token.id}>{token.name}</a>
+						{:else}
+							<a class="mono" href={`/token/${token.id}`} title={token.id}
+								>{truncateMiddle(token.id)}</a
+							>
+						{/if}
+						<span class="mono qty">{formatTokenAmount(token.amount, token.decimals)}</span>
 					</li>
 				{/each}
 			</ul>
@@ -142,5 +148,12 @@
 	}
 	.qty {
 		color: var(--fg-muted);
+	}
+	/* A minted name is prose; only ids keep the mono face. */
+	.token-name {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>

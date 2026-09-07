@@ -29,7 +29,13 @@
 		sun: 'M12 8.2a3.8 3.8 0 1 1 0 7.6 3.8 3.8 0 0 1 0-7.6Z M12 2.8v2 M12 19.2v2 M2.8 12h2 M19.2 12h2 M5.5 5.5l1.4 1.4 M17.1 17.1l1.4 1.4 M18.5 5.5l-1.4 1.4 M6.9 17.1l-1.4 1.4',
 		moon: 'M20 14.4A8.4 8.4 0 0 1 9.6 4 8.4 8.4 0 1 0 20 14.4Z',
 		spark: 'M12 3.2 13.9 9l6.1.2-4.9 3.7 1.8 5.9-4.9-3.5-4.9 3.5 1.8-5.9L4 9.2 10.1 9Z',
-		menu: 'M4 7h16 M4 12h16 M4 17h16'
+		menu: 'M4 7h16 M4 12h16 M4 17h16',
+		/* A minted token: the isometric box's hexagon, seen head-on inside a coin. */
+		token:
+			'M12 3.6a8.4 8.4 0 1 1 0 16.8 8.4 8.4 0 0 1 0-16.8Z M12 7.4l3.8 2.2v4.4L12 16.2l-3.8-2.2V9.6Z',
+		/* Media held by a token: a frame with a horizon and a sun. */
+		image:
+			'M5.6 4.6h12.8A1.4 1.4 0 0 1 19.8 6v12a1.4 1.4 0 0 1-1.4 1.4H5.6A1.4 1.4 0 0 1 4.2 18V6a1.4 1.4 0 0 1 1.4-1.4Z M4.2 15.4l4.2-3.8 3.6 3.2 2.8-2.4 5 4.4 M9 8.6a1.3 1.3 0 1 1 0 2.6 1.3 1.3 0 0 1 0-2.6Z'
 	} as const;
 
 	export type IconName = keyof typeof ICONS;
