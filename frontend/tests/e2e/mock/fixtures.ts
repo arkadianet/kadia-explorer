@@ -582,7 +582,9 @@ export function buildDataset(): Dataset {
 			name: synthetic ? SYNTHETIC_TOKEN.name : '',
 			description: synthetic ? SYNTHETIC_TOKEN.description : '',
 			decimals: synthetic ? SYNTHETIC_TOKEN.decimals : null,
-			token_type: synthetic ? 'EIP-004' : null,
+			// The raw R7 type tag as the store holds it, not a spec name: "0101" is EIP-4's
+			// plain-token tag, which is the `kind` every mock token carries.
+			token_type: synthetic ? '0101' : null,
 			kind: 'token',
 			emission: acc.emission.toString(),
 			burned: (acc.emission - acc.unspent).toString(),

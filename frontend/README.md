@@ -80,14 +80,17 @@ The specs in `tests/e2e/*.spec.ts` cover every route:
   form: a lookup that returns boxes and puts `?reg=&value=` in the URL, a linked lookup
   rendered straight from that URL, a value nothing carries, and a malformed one rejected
   beside the field
-- `/tokens` — the list, its `?sort=` toggle reordering the rows, and further pages; and
+- `/tokens` — the list, its `?sort=` toggle reordering the rows, an unknown sort falling back
+  to newest, and further pages; and
   `/token/[id]` — the facts of a named token (name, description, decimal-scaled amounts),
   the holders tab with its shares, the boxes tab's unspent/all filter, and the
   "Token not found" state
 - `/template/[hash]` — the facts, the unspent/all box filter, and the not-found state
 
-plus the token data that shows up elsewhere: the home page's "Top tokens" card and an
-address page naming the tokens it holds, and the cross-cutting behaviour: the theme toggle persisting across a reload, the `/` search
+Token data is also checked where it surfaces outside those routes: the home page's "Top
+tokens" card, and an address page naming the tokens it holds.
+
+Then the cross-cutting behaviour: the theme toggle persisting across a reload, the `/` search
 shortcut, an API 500 rendering `ErrorState` with a working Retry, and the lag banner.
 
 ## Bundle budget

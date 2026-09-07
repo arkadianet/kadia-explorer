@@ -47,6 +47,25 @@ test('/tokens lists tokens and the sort toggle reorders them', async ({ page }) 
 	await expect(firstTokenLink(page)).toHaveAttribute('href', `/token/${mostHeldToken.id}`);
 });
 
+test('an unknown sort is normalised to newest rather than sent to the API', async ({ page }) => {
+	// The mock answers `sort=bogus` with a 400 problem, as the real endpoint does — but the
+	// page never asks it that: `/tokens/+page.ts` narrows the query parameter to
+	// 'holders' | 'newest' before the pager is built, so a hand-edited URL falls back to the
+	// default list instead of an ErrorState.
+	const direct = await page.request.get('/v1/tokens?sort=bogus');
+	expect(direct.status()).toBe(400);
+
+	await useShortViewport(page);
+	await page.goto('/tokens?sort=bogus');
+
+	await expect(firstTokenLink(page)).toHaveAttribute('href', `/token/${newestToken.id}`);
+	await expect(page.getByRole('button', { name: 'Newest' })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	await expect(page.locator('.error')).toHaveCount(0);
+});
+
 test('/tokens pulls in further pages as the sentinel scrolls into view', async ({ page }) => {
 	await useShortViewport(page);
 	await page.goto('/tokens');
