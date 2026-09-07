@@ -31,6 +31,24 @@ pub fn put_vlq(out: &mut Vec<u8>, mut v: u64) {
     }
 }
 
+/// Reads an unsigned VLQ (LEB128) from the front of `bytes`.
+///
+/// Returns `(value, rest)` where `rest` is the remainder of `bytes` after the VLQ, or `None`
+/// on truncated input or overflow beyond `u64` (more than 10 continuation groups).
+pub(crate) fn get_vlq(bytes: &[u8]) -> Option<(u64, &[u8])> {
+    let mut v: u64 = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        if i >= 10 {
+            return None;
+        }
+        v |= u64::from(b & 0x7f) << (7 * i);
+        if b & 0x80 == 0 {
+            return Some((v, &bytes[i + 1..]));
+        }
+    }
+    None
+}
+
 /// The pieces of a box, taken verbatim from the node's JSON.
 pub struct BoxParts<'a> {
     pub value: u64,

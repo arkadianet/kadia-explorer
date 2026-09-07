@@ -1,4 +1,5 @@
 pub mod boxser;
+pub mod registers;
 pub mod tree;
 pub use tree::{template_hash_of, tree_hash, tree_info, TreeInfo, TreeKind};
 
