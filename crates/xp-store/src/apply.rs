@@ -296,6 +296,9 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
 
         // Tokens are indexed per transaction rather than per box: the mint rule reads the
         // tx's first input, and the burn rule compares its inputs' and outputs' totals.
+        // `apply_tx` re-derives each output's gidx as `first_out_gidx + i`, so pin the
+        // coupling to the loop above, which allocated exactly one gidx per output in order.
+        debug_assert_eq!(ctx.next_box, first_out_gidx + tx.outputs.len() as Gidx);
         tokens.apply_tx(tx, &input_boxes, first_out_gidx, ctx.height, ctx.partial)?;
 
         // `fee` was summed over the outputs above: it is the value this tx locked in the

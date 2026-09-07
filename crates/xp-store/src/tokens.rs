@@ -64,6 +64,13 @@ pub(crate) struct TokenDelta {
 /// Amounts saturate rather than wrap: consensus caps a token's supply well below `u64::MAX`,
 /// but this must not panic on a debug build fed a hand-built block.
 pub(crate) fn token_deltas(tx: &DecodedTx, input_boxes: &[BoxRow]) -> HashMap<Hash32, TokenDelta> {
+    // The overwhelming majority of transactions move no tokens at all; skipping the map
+    // allocation for them keeps the burn rule off the hot path of a full sync.
+    if input_boxes.iter().all(|b| b.tokens.is_empty())
+        && tx.outputs.iter().all(|o| o.tokens.is_empty())
+    {
+        return HashMap::new();
+    }
     let mut m: HashMap<Hash32, TokenDelta> = HashMap::new();
     for b in input_boxes {
         for (id, amt) in &b.tokens {
@@ -288,13 +295,13 @@ impl<'txn> Tokens<'txn> {
         for (i, o) in tx.outputs.iter().enumerate() {
             self.on_output(out_gidx_start + i as u64, o)?;
         }
-        let mut deltas: Vec<(Hash32, TokenDelta)> = token_deltas(tx, input_boxes)
-            .into_iter()
-            .filter(|(_, d)| d.in_ > d.out)
-            .collect();
-        // Sorted so the undo row's `prev_tokens` order cannot depend on hash iteration order.
-        deltas.sort_unstable_by_key(|(id, _)| *id);
-        for (id, d) in deltas {
+        // Iteration order is irrelevant here: each token's burn lands on its own row, and
+        // `finish()` sorts both the flushed rows and the undo vectors, so nothing the block
+        // stores can depend on this `HashMap`'s order.
+        for (id, d) in token_deltas(tx, input_boxes) {
+            if d.in_ <= d.out {
+                continue;
+            }
             let burned = d.in_ - d.out;
             if let Some(row) = self.row_mut(&id)? {
                 row.burned = row.burned.saturating_add(burned);
@@ -353,6 +360,9 @@ impl<'txn> Tokens<'txn> {
                 // zero without this store ever having seen it acquire the token, so a
                 // "negative" holder count is a legitimate consequence of the missing history
                 // rather than corruption (the same policy as `apply::debit_balance`).
+                // On a full store it cannot trigger: every >0 → 0 transition counted here was
+                // preceded by the 0 → >0 transition that credited the holder in the first
+                // place, and `on_spend` errors before a holder could go negative.
                 row.holder_count = if d >= 0 {
                     row.holder_count.saturating_add(d as u64)
                 } else {
@@ -444,6 +454,19 @@ mod tests {
         assert_eq!(d[&c], TokenDelta { in_: 0, out: 7 });
     }
 
+    /// A tx that touches no token at all short-circuits to an empty map.
+    #[test]
+    fn token_deltas_of_a_token_free_tx_is_empty() {
+        let tx = DecodedTx {
+            id: TxId([0; 32]),
+            inputs: vec![BoxId([1; 32])],
+            data_inputs: vec![],
+            outputs: vec![dbox(vec![])],
+            size: 0,
+        };
+        assert!(token_deltas(&tx, &[brow(vec![])]).is_empty());
+    }
+
     /// With no resolved inputs (a partial store's view of an old box) nothing is consumed, so
     /// nothing can burn — outputs alone are still counted.
     #[test]
@@ -458,5 +481,52 @@ mod tests {
         };
         let d = token_deltas(&tx, &[]);
         assert_eq!(d[&a], TokenDelta { in_: 0, out: 2 });
+    }
+
+    /// Debiting a holder for more than it holds.
+    ///
+    /// This is checked at the unit level rather than through `apply_batch`, because a
+    /// fully-synced store cannot reach it from block data: apply credits a holder for every
+    /// output it indexes and debits it only for boxes it previously indexed, and a `BOXES` row
+    /// re-created under an existing id can only ever *over*-credit the holder relative to the
+    /// row a later spend reads back. The guard therefore exists for genuinely damaged state
+    /// (a truncated or hand-edited store), which is exactly what this test simulates by
+    /// spending a box the holder tables never saw created.
+    #[test]
+    fn debiting_more_than_a_holder_has_is_corruption_on_a_full_store() {
+        let token = [7u8; 32];
+        let tree = [8u8; 32];
+        let mut row = brow(vec![(token, 5)]);
+        row.tree_hash = tree;
+
+        let dir = tempfile::tempdir().unwrap();
+        let s = crate::Store::open(&dir.path().join("x.redb")).unwrap();
+
+        // A fully-synced store treats the deficit as corruption...
+        let txn = s.db.begin_write().unwrap();
+        let mut t = Tokens::open(&txn).unwrap();
+        assert!(matches!(
+            t.on_spend(&row, false),
+            Err(StoreError::Corrupt("token holder underflow"))
+        ));
+        drop(t);
+        drop(txn);
+
+        // ...while a partial store, whose history legitimately starts after the box was
+        // created, saturates at zero and records the holder as never having existed.
+        let txn = s.db.begin_write().unwrap();
+        let mut t = Tokens::open(&txn).unwrap();
+        t.on_spend(&row, true).unwrap();
+        let undo = t.finish().unwrap();
+        assert_eq!(undo.prev_holder_amts, vec![(token, tree, None)]);
+        txn.commit().unwrap();
+        assert!(s
+            .begin_read()
+            .unwrap()
+            .open_table(TOKEN_HOLDER_AMT)
+            .unwrap()
+            .get(k_token_tree(&token, &tree).as_slice())
+            .unwrap()
+            .is_none());
     }
 }

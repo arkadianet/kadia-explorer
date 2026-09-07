@@ -273,20 +273,40 @@ fn holder_count_goes_zero_to_one_to_zero_within_a_block() {
 /// an identity too. This is the path the mint fixture cannot reach: `prev_tokens` (a restored
 /// `TokenRow` with its burn and holder counters) and `prev_holder_amts` with a `Some` previous
 /// amount, both re-keying `TOKENS_BY_HOLDERS`/`TOKEN_HOLDERS` on the way back.
+///
+/// The block deliberately splits the supply across *two* trees while burning the rest, so the
+/// token's `holder_count` moves 1 → 2. That is what exercises the `prev_tokens` re-key branch
+/// of rollback: `TOKENS_BY_HOLDERS` must lose the `(2, id)` key it gained and get `(1, id)`
+/// back, which a same-count rollback would never notice.
 #[test]
-fn rolling_back_a_burn_restores_the_token_row_and_holders() {
+fn rolling_back_a_burn_and_a_new_holder_restores_the_token_row_and_its_keys() {
     let dir = tempfile::tempdir().unwrap();
     let s = store_with_453051(dir.path());
     let id = sigusd();
     let before = s.fingerprint().unwrap();
     let b = fixture(453051);
     let mint_box = b.txs[1].outputs[0].clone();
+    let other = b.txs[1].outputs[1].clone();
+    let t1 = mint_box.tree_hash.0;
+    let t2 = other.tree_hash.0;
+    assert_ne!(t1, t2, "need a second, distinct tree");
+    assert_eq!(token_row(&s, &id).holder_count, 1);
 
-    let mut out = mint_box.clone();
-    out.id = BoxId([0x77u8; 32]);
-    out.tx_id = TxId([0xDDu8; 32]);
-    out.index = 0;
-    out.tokens = vec![(id, 1)];
+    // One output keeps the mint tree a holder, one makes a second tree one, and the rest of
+    // the supply is burned.
+    let mut keep = mint_box.clone();
+    keep.id = BoxId([0x77u8; 32]);
+    keep.tx_id = TxId([0xDDu8; 32]);
+    keep.index = 0;
+    keep.value = mint_box.value / 2;
+    keep.tokens = vec![(id, 1)];
+    let mut moved = other.clone();
+    moved.id = BoxId([0x78u8; 32]);
+    moved.tx_id = TxId([0xDDu8; 32]);
+    moved.index = 1;
+    moved.value = mint_box.value - keep.value;
+    moved.tokens = vec![(id, 1)];
+
     let mut b2 = fixture(453051);
     b2.header.height = 453052;
     b2.header.parent_id = b.header.id;
@@ -295,19 +315,50 @@ fn rolling_back_a_burn_restores_the_token_row_and_holders() {
         id: TxId([0xDDu8; 32]),
         inputs: vec![mint_box.id],
         data_inputs: vec![],
-        outputs: vec![out],
+        outputs: vec![keep, moved],
         size: 100,
     }];
 
     s.apply_batch(&[b2], true).unwrap();
     assert_ne!(s.fingerprint().unwrap(), before);
-    assert_eq!(token_row(&s, &id).burned, SIGUSD_EMISSION - 1);
+    let applied = token_row(&s, &id);
+    assert_eq!(applied.burned, SIGUSD_EMISSION - 2);
+    assert_eq!(applied.holder_count, 2);
+    assert_eq!(holder_amount(&s, &id, &t1), Some(1));
+    assert_eq!(holder_amount(&s, &id, &t2), Some(1));
+    assert!(has_key(
+        &s,
+        TOKENS_BY_HOLDERS,
+        k_by_count(2, &id).as_slice()
+    ));
+    assert!(!has_key(
+        &s,
+        TOKENS_BY_HOLDERS,
+        k_by_count(1, &id).as_slice()
+    ));
 
     s.rollback_to(453051).unwrap();
     assert_eq!(s.fingerprint().unwrap(), before);
-    assert_eq!(token_row(&s, &id).burned, 0);
-    assert_eq!(
-        holder_amount(&s, &id, &mint_box.tree_hash.0),
-        Some(SIGUSD_EMISSION)
-    );
+    let restored = token_row(&s, &id);
+    assert_eq!(restored.burned, 0);
+    assert_eq!(restored.holder_count, 1);
+    assert_eq!(holder_amount(&s, &id, &t1), Some(SIGUSD_EMISSION));
+    assert_eq!(holder_amount(&s, &id, &t2), None);
+    // Only the original holder-count key survives the rollback.
+    assert!(has_key(
+        &s,
+        TOKENS_BY_HOLDERS,
+        k_by_count(1, &id).as_slice()
+    ));
+    assert!(!has_key(
+        &s,
+        TOKENS_BY_HOLDERS,
+        k_by_count(2, &id).as_slice()
+    ));
+    assert_eq!(count_prefix(&s, TOKEN_HOLDERS, id.as_slice()), 1);
+    assert!(has_key(
+        &s,
+        TOKEN_HOLDERS,
+        k_token_holder(&id, SIGUSD_EMISSION, &t1).as_slice()
+    ));
 }

@@ -30,6 +30,92 @@ fn template_of(
     .template_hash)
 }
 
+/// Restores `TOKEN_HOLDER_AMT` (and the `TOKEN_HOLDERS` listing derived from it) to the
+/// amounts recorded in `undo.prev_holder_amts`. The listing key contains the amount, so the
+/// current entry has to be read back and removed under its *current* amount before the
+/// previous one is written.
+fn undo_holders(txn: &redb::WriteTransaction, undo: &UndoRow) -> Result<(), StoreError> {
+    let mut amt = txn.open_table(TOKEN_HOLDER_AMT)?;
+    let mut holders = txn.open_table(TOKEN_HOLDERS)?;
+    for (token, tree, prev) in &undo.prev_holder_amts {
+        let key = k_token_tree(token, tree);
+        let cur = amt
+            .get(key.as_slice())?
+            .map(|v| crate::meta_u64(v.value()))
+            .transpose()?;
+        if let Some(c) = cur {
+            holders.remove(k_token_holder(token, c, tree).as_slice())?;
+        }
+        match prev {
+            // Apply never stores a zero amount (a holder at zero is removed from both
+            // tables), so `Some` here always means a real holder.
+            Some(p) => {
+                amt.insert(key.as_slice(), k_u64(*p).as_slice())?;
+                holders.insert(k_token_holder(token, *p, tree).as_slice(), &[][..])?;
+            }
+            None => {
+                amt.remove(key.as_slice())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The `TokenRow` a token currently holds — i.e. as the block being undone left it. Rollback
+/// needs it to reconstruct the composite keys (`TOKENS_BY_HOLDERS`, `TOKENS_BY_GIDX`) that
+/// were derived from the *current* row, before overwriting or deleting it.
+fn token_row_now(
+    tokens: &Table<'_, &'static [u8], &'static [u8]>,
+    id: &Hash32,
+    missing: &'static str,
+) -> Result<TokenRow, StoreError> {
+    TokenRow::decode(
+        tokens
+            .get(id.as_slice())?
+            .ok_or(StoreError::Corrupt(missing))?
+            .value(),
+    )
+}
+
+/// Restores the `TOKENS` rows this block mutated and deletes the ones it created, re-keying
+/// `TOKENS_BY_HOLDERS` (keyed by `holder_count`) and dropping the `TOKENS_BY_GIDX` entry a
+/// mint added. Must run after [`undo_holders`] only in the sense that both read the store as
+/// the block left it; each token's current row supplies the keys to remove.
+fn undo_tokens(txn: &redb::WriteTransaction, undo: &UndoRow) -> Result<(), StoreError> {
+    let mut tokens = txn.open_table(TOKENS)?;
+    let mut by_gidx = txn.open_table(TOKENS_BY_GIDX)?;
+    let mut by_holders = txn.open_table(TOKENS_BY_HOLDERS)?;
+    for (id, prev) in &undo.prev_tokens {
+        let cur = token_row_now(&tokens, id, "undo: token row missing")?;
+        if cur.holder_count != prev.holder_count {
+            by_holders.remove(k_by_count(cur.holder_count, id).as_slice())?;
+            by_holders.insert(k_by_count(prev.holder_count, id).as_slice(), &[][..])?;
+        }
+        tokens.insert(id.as_slice(), prev.encode().as_slice())?;
+    }
+    for id in &undo.new_tokens {
+        let cur = token_row_now(&tokens, id, "undo: new token row missing")?;
+        by_holders.remove(k_by_count(cur.holder_count, id).as_slice())?;
+        by_gidx.remove(k_u64(cur.mint_gidx).as_slice())?;
+        tokens.remove(id.as_slice())?;
+    }
+    Ok(())
+}
+
+/// Restores the `TEMPLATES` rows this block mutated and deletes the ones it created. The
+/// composite `TEMPLATE_BOXES`/`TEMPLATE_UNSPENT` keys are handled with their boxes, in steps
+/// 1 and 2 of `rollback_to`, where the boxes' tree rows are still readable.
+fn undo_templates(txn: &redb::WriteTransaction, undo: &UndoRow) -> Result<(), StoreError> {
+    let mut templates = txn.open_table(TEMPLATES)?;
+    for (hash, prev) in &undo.prev_templates {
+        templates.insert(hash.as_slice(), prev.encode().as_slice())?;
+    }
+    for hash in &undo.new_templates {
+        templates.remove(hash.as_slice())?;
+    }
+    Ok(())
+}
+
 impl Store {
     /// Rolls the store back to `target` (inclusive), undoing every block above it in
     /// descending height order using each height's stored [`rows::UndoRow`]. A no-op if the
@@ -51,11 +137,12 @@ impl Store {
 
         let txn = self.db.begin_write()?;
         for h in (target + 1..=tip).rev() {
+            // Scoped so the `AccessGuard` (and the table handle it borrows) drop before the
+            // next `txn.open_table` call opens a different table for writing. The binding is
+            // load-bearing, not vestigial: a trailing `?` expression keeps its temporaries
+            // alive to the end of the block, i.e. past the table handle they borrow from.
             let undo = {
                 let u = txn.open_table(UNDO)?;
-                // Bind the decoded row before the block ends so the `AccessGuard` borrowed
-                // from `u` (and `u` itself) drop here, before the next `txn.open_table` call
-                // below tries to open a different table for writing.
                 let decoded = UndoRow::decode(
                     u.get(k_u32(h).as_slice())?
                         .ok_or(StoreError::ReindexRequired(tip - target))?
@@ -81,6 +168,8 @@ impl Store {
                 let mut token_boxes = txn.open_table(TOKEN_BOXES)?;
                 let mut token_unspent = txn.open_table(TOKEN_UNSPENT)?;
                 for id in undo.created_boxes.iter().rev() {
+                    // Bound inside a block (see the `undo` binding above) so the read guard
+                    // drops before `boxes_t` is used mutably below.
                     let row = {
                         let decoded = BoxRow::decode(
                             boxes_t
@@ -124,6 +213,8 @@ impl Store {
                 let mut template_unspent = txn.open_table(TEMPLATE_UNSPENT)?;
                 let mut token_unspent = txn.open_table(TOKEN_UNSPENT)?;
                 for id in &undo.spent_boxes {
+                    // Bound inside a block (see the `undo` binding above) so the read guard
+                    // drops before `boxes_t` is used mutably below.
                     let existing = {
                         let decoded = boxes_t
                             .get(id.as_slice())?
@@ -207,69 +298,9 @@ impl Store {
                     reg.remove(k_register(*r, value_hash, *gidx).as_slice())?;
                 }
             }
-            {
-                let mut amt = txn.open_table(TOKEN_HOLDER_AMT)?;
-                let mut holders = txn.open_table(TOKEN_HOLDERS)?;
-                for (token, tree, prev) in &undo.prev_holder_amts {
-                    let key = k_token_tree(token, tree);
-                    let cur = amt
-                        .get(key.as_slice())?
-                        .map(|v| crate::meta_u64(v.value()))
-                        .transpose()?;
-                    if let Some(c) = cur {
-                        holders.remove(k_token_holder(token, c, tree).as_slice())?;
-                    }
-                    match prev {
-                        // Apply never stores a zero amount (a holder at zero is removed from
-                        // both tables), so `Some` here always means a real holder.
-                        Some(p) => {
-                            amt.insert(key.as_slice(), k_u64(*p).as_slice())?;
-                            holders.insert(k_token_holder(token, *p, tree).as_slice(), &[][..])?;
-                        }
-                        None => {
-                            amt.remove(key.as_slice())?;
-                        }
-                    }
-                }
-            }
-            {
-                let mut tokens = txn.open_table(TOKENS)?;
-                let mut by_gidx = txn.open_table(TOKENS_BY_GIDX)?;
-                let mut by_holders = txn.open_table(TOKENS_BY_HOLDERS)?;
-                for (id, prev) in &undo.prev_tokens {
-                    let cur = TokenRow::decode(
-                        tokens
-                            .get(id.as_slice())?
-                            .ok_or(StoreError::Corrupt("undo: token row missing"))?
-                            .value(),
-                    )?;
-                    if cur.holder_count != prev.holder_count {
-                        by_holders.remove(k_by_count(cur.holder_count, id).as_slice())?;
-                        by_holders.insert(k_by_count(prev.holder_count, id).as_slice(), &[][..])?;
-                    }
-                    tokens.insert(id.as_slice(), prev.encode().as_slice())?;
-                }
-                for id in &undo.new_tokens {
-                    let cur = TokenRow::decode(
-                        tokens
-                            .get(id.as_slice())?
-                            .ok_or(StoreError::Corrupt("undo: new token row missing"))?
-                            .value(),
-                    )?;
-                    by_holders.remove(k_by_count(cur.holder_count, id).as_slice())?;
-                    by_gidx.remove(k_u64(cur.mint_gidx).as_slice())?;
-                    tokens.remove(id.as_slice())?;
-                }
-            }
-            {
-                let mut templates = txn.open_table(TEMPLATES)?;
-                for (hash, prev) in &undo.prev_templates {
-                    templates.insert(hash.as_slice(), prev.encode().as_slice())?;
-                }
-                for hash in &undo.new_templates {
-                    templates.remove(hash.as_slice())?;
-                }
-            }
+            undo_holders(&txn, &undo)?;
+            undo_tokens(&txn, &undo)?;
+            undo_templates(&txn, &undo)?;
 
             // 5. Drop ERGO_TREES entries first seen in this block.
             {
