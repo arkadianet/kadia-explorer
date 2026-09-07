@@ -129,6 +129,12 @@ impl Store {
                     prev_next_box_gidx: next_box,
                     prev_next_tx_gidx: next_tx,
                     new_trees: vec![],
+                    new_templates: vec![],
+                    prev_templates: vec![],
+                    new_tokens: vec![],
+                    prev_tokens: vec![],
+                    prev_holder_amts: vec![],
+                    register_keys: vec![],
                 },
             };
             apply_block(&mut ctx, b)?;
@@ -511,6 +517,7 @@ fn load_balance<'a>(
                 box_count: 0,
                 first_seen: height,
                 last_seen: height,
+                tx_count: 0,
             });
         cache.insert(*tree, row);
     }

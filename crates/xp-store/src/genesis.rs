@@ -98,6 +98,7 @@ impl Store {
                         box_count: 0,
                         first_seen: 0,
                         last_seen: 0,
+                        tx_count: 0,
                     });
                 if bal.nano > 0 {
                     rich.remove(k_rich(bal.nano, &tree).as_slice())?;

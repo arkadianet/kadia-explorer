@@ -239,6 +239,12 @@ mod tests {
                 prev_next_box_gidx: 0,
                 prev_next_tx_gidx: 0,
                 new_trees: vec![],
+                new_templates: vec![],
+                prev_templates: vec![],
+                new_tokens: vec![],
+                prev_tokens: vec![],
+                prev_holder_amts: vec![],
+                register_keys: vec![],
             };
             txn.open_table(UNDO)
                 .unwrap()

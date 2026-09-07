@@ -365,6 +365,10 @@ pub struct BalanceRow {
     pub box_count: u64,
     pub first_seen: u32,
     pub last_seen: u32,
+    /// Count of distinct transactions that credited or debited this tree. Appended at the
+    /// end of the encoding (schema v2) so decode order of the pre-existing fields is
+    /// unchanged.
+    pub tx_count: u64,
 }
 
 impl BalanceRow {
@@ -374,6 +378,7 @@ impl BalanceRow {
         w.u64(self.box_count);
         w.u32(self.first_seen);
         w.u32(self.last_seen);
+        w.u64(self.tx_count);
     }
 
     fn decode_from(r: &mut R) -> Result<Self, StoreError> {
@@ -383,6 +388,127 @@ impl BalanceRow {
             box_count: r.u64()?,
             first_seen: r.u32()?,
             last_seen: r.u32()?,
+            tx_count: r.u64()?,
+        })
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut w = W::new();
+        self.encode_into(&mut w);
+        w.into_vec()
+    }
+
+    pub fn decode(buf: &[u8]) -> Result<Self, StoreError> {
+        let mut r = R::new(buf);
+        Self::decode_from(&mut r)
+    }
+}
+
+/// A distinct ergo-tree template (the tree with its constant segment blanked, as produced by
+/// `TreeRow::template_hash`): how many boxes across the chain used it and where it was first
+/// seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateRow {
+    pub box_count: u64,
+    pub unspent_count: u64,
+    pub first_seen: u32,
+    pub example_tree: Hash32,
+}
+
+impl TemplateRow {
+    fn encode_into(&self, w: &mut W) {
+        w.u64(self.box_count);
+        w.u64(self.unspent_count);
+        w.u32(self.first_seen);
+        w.hash(&self.example_tree);
+    }
+
+    fn decode_from(r: &mut R) -> Result<Self, StoreError> {
+        Ok(TemplateRow {
+            box_count: r.u64()?,
+            unspent_count: r.u64()?,
+            first_seen: r.u32()?,
+            example_tree: r.hash()?,
+        })
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut w = W::new();
+        self.encode_into(&mut w);
+        w.into_vec()
+    }
+
+    pub fn decode(buf: &[u8]) -> Result<Self, StoreError> {
+        let mut r = R::new(buf);
+        Self::decode_from(&mut r)
+    }
+}
+
+/// A token's mint provenance, EIP-4 metadata, and current aggregate state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenRow {
+    pub mint_tx: Hash32,
+    pub mint_box: Hash32,
+    pub mint_height: u32,
+    pub mint_gidx: Gidx,
+    pub name: String,
+    pub description: String,
+    pub decimals: Option<u8>,
+    pub token_type: Option<String>,
+    pub emission: u64,
+    pub burned: u64,
+    pub holder_count: u64,
+    pub box_count: u64,
+}
+
+impl TokenRow {
+    fn encode_into(&self, w: &mut W) {
+        w.hash(&self.mint_tx);
+        w.hash(&self.mint_box);
+        w.u32(self.mint_height);
+        w.u64(self.mint_gidx);
+        w.str(&self.name);
+        w.str(&self.description);
+        w.opt_flag(self.decimals.is_some());
+        if let Some(d) = self.decimals {
+            w.u8(d);
+        }
+        w.opt_flag(self.token_type.is_some());
+        if let Some(t) = &self.token_type {
+            w.str(t);
+        }
+        w.u64(self.emission);
+        w.u64(self.burned);
+        w.u64(self.holder_count);
+        w.u64(self.box_count);
+    }
+
+    fn decode_from(r: &mut R) -> Result<Self, StoreError> {
+        let mint_tx = r.hash()?;
+        let mint_box = r.hash()?;
+        let mint_height = r.u32()?;
+        let mint_gidx = r.u64()?;
+        let name = r.str()?;
+        let description = r.str()?;
+        let decimals = if r.opt_flag()? { Some(r.u8()?) } else { None };
+        let token_type = if r.opt_flag()? { Some(r.str()?) } else { None };
+        let emission = r.u64()?;
+        let burned = r.u64()?;
+        let holder_count = r.u64()?;
+        let box_count = r.u64()?;
+        Ok(TokenRow {
+            mint_tx,
+            mint_box,
+            mint_height,
+            mint_gidx,
+            name,
+            description,
+            decimals,
+            token_type,
+            emission,
+            burned,
+            holder_count,
+            box_count,
         })
     }
 
@@ -410,6 +536,24 @@ pub struct UndoRow {
     pub prev_next_box_gidx: Gidx,
     pub prev_next_tx_gidx: Gidx,
     pub new_trees: Vec<Hash32>,
+    /// Template hashes for which `TEMPLATES` gained a fresh row this block (rollback deletes
+    /// them rather than restoring a previous value).
+    pub new_templates: Vec<Hash32>,
+    /// Previous `TemplateRow` value for every template this block mutated (but did not
+    /// create), so rollback can restore it exactly.
+    pub prev_templates: Vec<(Hash32, TemplateRow)>,
+    /// Token ids for which `TOKENS` gained a fresh row this block (rollback deletes them
+    /// rather than restoring a previous value).
+    pub new_tokens: Vec<Hash32>,
+    /// Previous `TokenRow` value for every token this block mutated (but did not create), so
+    /// rollback can restore it exactly.
+    pub prev_tokens: Vec<(Hash32, TokenRow)>,
+    /// `(token_id, tree, prev_amount)` for every `TOKEN_HOLDER_AMT` entry this block touched;
+    /// `None` means the entry did not exist before this block (rollback deletes it).
+    pub prev_holder_amts: Vec<(Hash32, Hash32, Option<u64>)>,
+    /// `(reg, value_hash, gidx)` keys inserted into `REGISTER_IDX` by this block, so rollback
+    /// can remove exactly the keys this block added.
+    pub register_keys: Vec<(u8, Hash32, Gidx)>,
 }
 
 impl UndoRow {
@@ -430,6 +574,33 @@ impl UndoRow {
         w.u64(self.prev_next_box_gidx);
         w.u64(self.prev_next_tx_gidx);
         w.hash_vec(&self.new_trees);
+        w.hash_vec(&self.new_templates);
+        w.u32(self.prev_templates.len() as u32);
+        for (hash, row) in &self.prev_templates {
+            w.hash(hash);
+            row.encode_into(&mut w);
+        }
+        w.hash_vec(&self.new_tokens);
+        w.u32(self.prev_tokens.len() as u32);
+        for (id, row) in &self.prev_tokens {
+            w.hash(id);
+            row.encode_into(&mut w);
+        }
+        w.u32(self.prev_holder_amts.len() as u32);
+        for (token, tree, prev) in &self.prev_holder_amts {
+            w.hash(token);
+            w.hash(tree);
+            w.opt_flag(prev.is_some());
+            if let Some(amt) = prev {
+                w.u64(*amt);
+            }
+        }
+        w.u32(self.register_keys.len() as u32);
+        for (reg, value_hash, g) in &self.register_keys {
+            w.u8(*reg);
+            w.hash(value_hash);
+            w.u64(*g);
+        }
         w.into_vec()
     }
 
@@ -453,6 +624,38 @@ impl UndoRow {
         let prev_next_box_gidx = r.u64()?;
         let prev_next_tx_gidx = r.u64()?;
         let new_trees = r.hash_vec()?;
+        let new_templates = r.hash_vec()?;
+        let n = r.u32()? as usize;
+        let mut prev_templates = Vec::with_capacity(n.min(1024));
+        for _ in 0..n {
+            let hash = r.hash()?;
+            let row = TemplateRow::decode_from(&mut r)?;
+            prev_templates.push((hash, row));
+        }
+        let new_tokens = r.hash_vec()?;
+        let n = r.u32()? as usize;
+        let mut prev_tokens = Vec::with_capacity(n.min(1024));
+        for _ in 0..n {
+            let id = r.hash()?;
+            let row = TokenRow::decode_from(&mut r)?;
+            prev_tokens.push((id, row));
+        }
+        let n = r.u32()? as usize;
+        let mut prev_holder_amts = Vec::with_capacity(n.min(1024));
+        for _ in 0..n {
+            let token = r.hash()?;
+            let tree = r.hash()?;
+            let prev = if r.opt_flag()? { Some(r.u64()?) } else { None };
+            prev_holder_amts.push((token, tree, prev));
+        }
+        let n = r.u32()? as usize;
+        let mut register_keys = Vec::with_capacity(n.min(1024));
+        for _ in 0..n {
+            let reg = r.u8()?;
+            let value_hash = r.hash()?;
+            let g = r.u64()?;
+            register_keys.push((reg, value_hash, g));
+        }
         Ok(UndoRow {
             created_boxes,
             spent_boxes,
@@ -462,6 +665,12 @@ impl UndoRow {
             prev_next_box_gidx,
             prev_next_tx_gidx,
             new_trees,
+            new_templates,
+            prev_templates,
+            new_tokens,
+            prev_tokens,
+            prev_holder_amts,
+            register_keys,
         })
     }
 }
@@ -485,9 +694,22 @@ mod tests {
             prop_assert_eq!(d, r);
         }
         #[test]
-        fn balance_row_roundtrip(nano in any::<u64>(), toks in proptest::collection::vec((arb_hash(), any::<u64>()), 0..4), bc in any::<u64>(), f in any::<u32>(), l in any::<u32>()) {
-            let r = BalanceRow { nano, tokens: toks, box_count: bc, first_seen: f, last_seen: l };
+        fn balance_row_roundtrip(nano in any::<u64>(), toks in proptest::collection::vec((arb_hash(), any::<u64>()), 0..4), bc in any::<u64>(), f in any::<u32>(), l in any::<u32>(), tc in any::<u64>()) {
+            let r = BalanceRow { nano, tokens: toks, box_count: bc, first_seen: f, last_seen: l, tx_count: tc };
             prop_assert_eq!(BalanceRow::decode(&r.encode()).unwrap(), r);
+        }
+        #[test]
+        fn template_row_roundtrip(box_count in any::<u64>(), unspent_count in any::<u64>(), first_seen in any::<u32>(), example_tree in arb_hash()) {
+            let r = TemplateRow { box_count, unspent_count, first_seen, example_tree };
+            prop_assert_eq!(TemplateRow::decode(&r.encode()).unwrap(), r);
+        }
+        #[test]
+        fn token_row_roundtrip(mint_tx in arb_hash(), mint_box in arb_hash(), mint_height in any::<u32>(), mint_gidx in any::<u64>(),
+                               name in ".*", description in ".*", decimals in proptest::option::of(any::<u8>()),
+                               token_type in proptest::option::of(".*"), emission in any::<u64>(), burned in any::<u64>(),
+                               holder_count in any::<u64>(), box_count in any::<u64>()) {
+            let r = TokenRow { mint_tx, mint_box, mint_height, mint_gidx, name, description, decimals, token_type, emission, burned, holder_count, box_count };
+            prop_assert_eq!(TokenRow::decode(&r.encode()).unwrap(), r);
         }
         #[test]
         fn header_row_roundtrip(id in arb_hash(), parent_id in arb_hash(), timestamp in any::<u64>(), difficulty in any::<u128>(),
@@ -528,12 +750,43 @@ mod tests {
                         box_count: 1,
                         first_seen: 1,
                         last_seen: 2,
+                        tx_count: 1,
                     }),
                 ),
             ],
             prev_next_box_gidx: 10,
             prev_next_tx_gidx: 11,
             new_trees: vec![[8; 32]],
+            new_templates: vec![[11; 32]],
+            prev_templates: vec![(
+                [12; 32],
+                TemplateRow {
+                    box_count: 2,
+                    unspent_count: 1,
+                    first_seen: 3,
+                    example_tree: [13; 32],
+                },
+            )],
+            new_tokens: vec![[14; 32]],
+            prev_tokens: vec![(
+                [15; 32],
+                TokenRow {
+                    mint_tx: [16; 32],
+                    mint_box: [17; 32],
+                    mint_height: 4,
+                    mint_gidx: 5,
+                    name: "n".into(),
+                    description: "d".into(),
+                    decimals: Some(2),
+                    token_type: Some("EIP-004".into()),
+                    emission: 6,
+                    burned: 7,
+                    holder_count: 8,
+                    box_count: 9,
+                },
+            )],
+            prev_holder_amts: vec![([18; 32], [19; 32], None), ([20; 32], [21; 32], Some(42))],
+            register_keys: vec![(0, [22; 32], 23), (4, [24; 32], 25)],
         };
         assert_eq!(UndoRow::decode(&r.encode()).unwrap(), r);
     }
@@ -631,6 +884,7 @@ mod tests {
             box_count: 4,
             first_seen: 5,
             last_seen: 6,
+            tx_count: 7,
         };
         let full = r.encode();
         assert!(matches!(
@@ -639,6 +893,61 @@ mod tests {
         ));
         assert!(matches!(
             BalanceRow::decode(&[]),
+            Err(StoreError::Corrupt(_))
+        ));
+    }
+
+    #[test]
+    fn template_row_decode_truncated_is_corrupt() {
+        let r = TemplateRow {
+            box_count: 1,
+            unspent_count: 2,
+            first_seen: 3,
+            example_tree: [4; 32],
+        };
+        let full = r.encode();
+        assert!(matches!(
+            TemplateRow::decode(&full[..full.len() - 1]),
+            Err(StoreError::Corrupt(_))
+        ));
+        assert!(matches!(
+            TemplateRow::decode(&[]),
+            Err(StoreError::Corrupt(_))
+        ));
+    }
+
+    #[test]
+    fn token_row_decode_truncated_is_corrupt() {
+        let r = TokenRow {
+            mint_tx: [1; 32],
+            mint_box: [2; 32],
+            mint_height: 3,
+            mint_gidx: 4,
+            name: "n".into(),
+            description: "d".into(),
+            decimals: Some(2),
+            token_type: Some("EIP-004".into()),
+            emission: 5,
+            burned: 6,
+            holder_count: 7,
+            box_count: 8,
+        };
+        let full = r.encode();
+        assert!(matches!(
+            TokenRow::decode(&full[..full.len() - 1]),
+            Err(StoreError::Corrupt(_))
+        ));
+        assert!(matches!(TokenRow::decode(&[]), Err(StoreError::Corrupt(_))));
+
+        // None-variant options exercise the shorter encoding path too.
+        let r_none = TokenRow {
+            decimals: None,
+            token_type: None,
+            ..r
+        };
+        let full_none = r_none.encode();
+        assert!(matches!(
+            TokenRow::decode(&full_none[..full_none.len() - 1]),
             Err(StoreError::Corrupt(_))
         ));
     }
@@ -658,11 +967,42 @@ mod tests {
                     box_count: 1,
                     first_seen: 1,
                     last_seen: 2,
+                    tx_count: 1,
                 }),
             )],
             prev_next_box_gidx: 5,
             prev_next_tx_gidx: 6,
             new_trees: vec![[7; 32]],
+            new_templates: vec![[10; 32]],
+            prev_templates: vec![(
+                [11; 32],
+                TemplateRow {
+                    box_count: 1,
+                    unspent_count: 1,
+                    first_seen: 1,
+                    example_tree: [12; 32],
+                },
+            )],
+            new_tokens: vec![[13; 32]],
+            prev_tokens: vec![(
+                [14; 32],
+                TokenRow {
+                    mint_tx: [15; 32],
+                    mint_box: [16; 32],
+                    mint_height: 1,
+                    mint_gidx: 1,
+                    name: "n".into(),
+                    description: "d".into(),
+                    decimals: None,
+                    token_type: None,
+                    emission: 1,
+                    burned: 1,
+                    holder_count: 1,
+                    box_count: 1,
+                },
+            )],
+            prev_holder_amts: vec![([17; 32], [18; 32], Some(1))],
+            register_keys: vec![(0, [19; 32], 1)],
         };
         let full = r.encode();
         assert!(matches!(

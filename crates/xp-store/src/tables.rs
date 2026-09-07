@@ -18,7 +18,30 @@ pub const RICH: Tbl = TableDefinition::new("rich");
 pub const RENT_MATURES: Tbl = TableDefinition::new("rent_matures");
 pub const UNDO: Tbl = TableDefinition::new("undo");
 
-pub const ALL: [Tbl; 15] = [
+/// `template_hash -> TemplateRow`.
+pub const TEMPLATES: Tbl = TableDefinition::new("templates");
+/// `(template_hash, gidx) -> ()`: every box carrying this ergo-tree template.
+pub const TEMPLATE_BOXES: Tbl = TableDefinition::new("template_boxes");
+/// `(template_hash, gidx) -> ()`: the subset of `TEMPLATE_BOXES` still unspent.
+pub const TEMPLATE_UNSPENT: Tbl = TableDefinition::new("template_unspent");
+/// `token_id -> TokenRow`.
+pub const TOKENS: Tbl = TableDefinition::new("tokens");
+/// mint box gidx (`u64` BE) `-> token_id`: newest-first token listing.
+pub const TOKENS_BY_GIDX: Tbl = TableDefinition::new("tokens_by_gidx");
+/// `(holder_count u64 BE, token_id) -> ()`.
+pub const TOKENS_BY_HOLDERS: Tbl = TableDefinition::new("tokens_by_holders");
+/// `(token_id, gidx) -> ()`: every box carrying this token.
+pub const TOKEN_BOXES: Tbl = TableDefinition::new("token_boxes");
+/// `(token_id, gidx) -> ()`: the subset of `TOKEN_BOXES` still unspent.
+pub const TOKEN_UNSPENT: Tbl = TableDefinition::new("token_unspent");
+/// `(token_id, amount BE, tree) -> ()`: richest-holders listing for a token.
+pub const TOKEN_HOLDERS: Tbl = TableDefinition::new("token_holders");
+/// `(token_id, tree) -> u64 BE`: a tree's current balance of a token.
+pub const TOKEN_HOLDER_AMT: Tbl = TableDefinition::new("token_holder_amt");
+/// `(reg u8, blake2b256(raw value bytes), gidx) -> ()`: register-value index.
+pub const REGISTER_IDX: Tbl = TableDefinition::new("register_idx");
+
+pub const ALL: [Tbl; 26] = [
     META,
     HEADERS,
     HEADER_BY_ID,
@@ -34,6 +57,17 @@ pub const ALL: [Tbl; 15] = [
     RICH,
     RENT_MATURES,
     UNDO,
+    TEMPLATES,
+    TEMPLATE_BOXES,
+    TEMPLATE_UNSPENT,
+    TOKENS,
+    TOKENS_BY_GIDX,
+    TOKENS_BY_HOLDERS,
+    TOKEN_BOXES,
+    TOKEN_UNSPENT,
+    TOKEN_HOLDERS,
+    TOKEN_HOLDER_AMT,
+    REGISTER_IDX,
 ];
 
 pub const META_INDEXED_HEIGHT: &[u8] = b"indexed_height";
@@ -48,7 +82,7 @@ pub const META_GENESIS_SEEDED: &[u8] = b"genesis_seeded";
 /// `Store::seed_genesis`. Absent on a store that never seeded genesis (a partial store), in
 /// which case the API simply cannot label emission boxes.
 pub const META_EMISSION_TREE_HASH: &[u8] = b"emission_tree_hash";
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Present only on a store that began indexing later than chain genesis (written by
 /// `Store::seed_for_tests` in tests; a real full sync from height 1 never sets it). Its
