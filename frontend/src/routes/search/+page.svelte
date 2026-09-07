@@ -6,6 +6,7 @@
 	import SearchBox from '$lib/components/SearchBox.svelte';
 	import InfiniteList from '$lib/components/InfiniteList.svelte';
 	import BoxCard from '$lib/components/BoxCard.svelte';
+	import Skeleton from '$lib/components/Skeleton.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager, type Pager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
@@ -108,7 +109,7 @@
 	<form class="reg-form" onsubmit={submit}>
 		<div class="field">
 			<label for="reg-select">Register</label>
-			<select id="reg-select" bind:value={reg}>
+			<select id="reg-select" class="control" bind:value={reg}>
 				{#each REGISTER_KEYS as key (key)}
 					<option value={key}>{key}</option>
 				{/each}
@@ -119,7 +120,7 @@
 			<label for="reg-value">Value</label>
 			<input
 				id="reg-value"
-				class="mono"
+				class="control mono"
 				type="text"
 				bind:value
 				placeholder="0e0a4572676f2d6578706c"
@@ -143,7 +144,11 @@
 		</p>
 	{/if}
 
-	{#if pager}
+	{#if pager === null && query}
+		<!-- The URL asks for a lookup the effect has not started yet (first paint of a
+		     reloaded result page): hold the space rather than leaving the panel empty. -->
+		<div class="results"><Skeleton /></div>
+	{:else if pager}
 		<div class="results">
 			<p class="found">
 				Boxes whose <b>{query?.reg}</b> holds
@@ -190,30 +195,14 @@
 		color: var(--fg-muted);
 	}
 
-	select,
-	input {
-		height: 38px;
-		padding: 0 var(--space-3);
-		border: var(--rule);
-		border-radius: var(--radius-control);
-		background: var(--surface-solid);
-		color: var(--fg);
-		font-size: var(--fs-data);
-	}
-
-	select:focus-visible,
-	input:focus-visible {
-		outline: none;
-		border-color: var(--accent);
-		box-shadow: 0 0 0 3px var(--accent-wash);
-	}
-
-	input[aria-invalid='true'] {
-		border-color: var(--danger-ink);
+	/* The value is a hex string, so the field keeps the mono face `.control`'s font shorthand
+	   would otherwise reset. */
+	input.control {
+		font-family: var(--font-mono);
 	}
 
 	.reg-form .btn {
-		height: 38px;
+		height: 34px;
 		padding: 0 var(--space-5);
 		font-size: var(--fs-data);
 	}

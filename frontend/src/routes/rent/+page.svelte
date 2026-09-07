@@ -108,6 +108,7 @@
 				<label for="blocks">Horizon</label>
 				<select
 					id="blocks"
+					class="control"
 					value={upcomingBlocks}
 					disabled={upcomingLoading}
 					onchange={onBlocksChange}
@@ -230,14 +231,6 @@
 		gap: var(--space-2);
 		padding: var(--space-3) 0;
 		font-size: var(--fs-data);
-	}
-	.controls select {
-		font: inherit;
-		color: var(--fg);
-		background: var(--surface-solid);
-		border: var(--rule);
-		border-radius: var(--radius-control);
-		padding: var(--space-1) var(--space-2);
 	}
 	.sum {
 		color: var(--fg-muted);

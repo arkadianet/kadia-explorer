@@ -363,6 +363,34 @@ h4 {
 	box-shadow: var(--shadow-hair);
 }
 
+/* A form control — a `<select>` or a text field. `font: inherit` is the point of it: a
+   browser draws both in its own UI face otherwise, which reads as an unstyled page dropped
+   into a designed one. Shared by /rent's horizon selector and /search's register form. */
+.control {
+	height: 34px;
+	padding: 0 var(--space-3);
+	border: var(--rule);
+	border-radius: var(--radius-control);
+	background: var(--surface-solid);
+	color: var(--fg);
+	font: 400 var(--fs-data) / 1.4 var(--font-sans);
+}
+
+.control:focus-visible {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.control:disabled {
+	color: var(--fg-muted);
+	cursor: not-allowed;
+}
+
+.control[aria-invalid='true'] {
+	border-color: var(--danger-ink);
+}
+
 /* A quiet "see everything" link in a card head. */
 .more {
 	display: inline-flex;

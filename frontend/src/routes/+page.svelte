@@ -6,6 +6,7 @@
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import Amount from '$lib/components/Amount.svelte';
+	import Hash from '$lib/components/Hash.svelte';
 	import Age from '$lib/components/Age.svelte';
 	import MinerChip from '$lib/components/MinerChip.svelte';
 	import TokenBadge from '$lib/components/TokenBadge.svelte';
@@ -16,7 +17,6 @@
 	import { status as statusStore } from '$lib/status/status.svelte';
 	import { health } from '$lib/status/health';
 	import { txKind } from '$lib/tx/kind';
-	import { tokenDisplayName } from '$lib/token/kind';
 	import {
 		buckets,
 		chainWindow,
@@ -392,14 +392,28 @@
 						<th class="num">Value</th>
 						<th class="num">Due</th>
 						<th>Matures in</th>
+						<th class="rent-addr">Address</th>
 					</tr>
 				{/snippet}
 				{#each rentItems.slice(0, 5) as item (item.box.id)}
 					<tr>
-						<td class="num"><Amount nano={item.box.value} maxFrac={3} /></td>
+						<!-- The value is the row's link to the box it belongs to: without it a rent row
+						     names an amount and nothing that carries it. -->
+						<td class="num">
+							<a href={`/box/${item.box.id}`} title={item.box.id}>
+								<Amount nano={item.box.value} maxFrac={3} />
+							</a>
+						</td>
 						<td class="num"><Amount nano={item.box.rent.due_nano} maxFrac={3} /></td>
 						<td class="mono muted">
 							{tip !== null ? `${item.maturity_height - tip} blocks` : `at ${item.maturity_height}`}
+						</td>
+						<td class="rent-addr">
+							{#if item.box.address}
+								<Hash value={item.box.address} href={`/address/${item.box.address}`} copy={false} />
+							{:else}
+								<span class="muted" title="No P2PK/P2S address for this box">—</span>
+							{/if}
 						</td>
 					</tr>
 				{/each}
@@ -425,9 +439,17 @@
 				{#each data.tokens.data ?? [] as token, i (token.id)}
 					<li>
 						<span class="rank">{i + 1}</span>
-						<a class="token-name" href={`/token/${token.id}`} title={token.name.trim() || token.id}>
-							{tokenDisplayName(token.name, token.id)}
-						</a>
+						{#if token.name.trim()}
+							<a class="token-name" href={`/token/${token.id}`} title={token.name.trim()}>
+								{token.name.trim()}
+							</a>
+						{:else}
+							<!-- No minted name: the id stands in, in the mono face ids always take, and
+							     short enough that the cell never ellipsises an already-elided hash. -->
+							<a class="mono token-id" href={`/token/${token.id}`} title={token.id}>
+								{truncateMiddle(token.id, 4, 4)}
+							</a>
+						{/if}
 						<TokenBadge kind={token.kind} />
 						<span class="token-holders" title="Addresses holding this token">
 							{token.holder_count.toLocaleString('en-US')}<span class="unit">holders</span>
@@ -855,6 +877,11 @@
 		white-space: nowrap;
 	}
 
+	.token-id {
+		font-size: var(--fs-data);
+		white-space: nowrap;
+	}
+
 	.token-holders {
 		font-size: var(--fs-data);
 		font-weight: 600;
@@ -869,6 +896,15 @@
 		font-weight: 500;
 		color: var(--fg-muted);
 		margin-left: 4px;
+	}
+
+	/* The address is the first thing to go when the rent card is one of three across a
+	   desktop row: three narrow columns of figures still read, four do not. Below the
+	   breakpoint the card is full width again and the column comes back. */
+	@media (min-width: 1181px) {
+		.panels.three .rent-addr {
+			display: none;
+		}
 	}
 
 	/* -------------------------------------------------------------------------- holders */
