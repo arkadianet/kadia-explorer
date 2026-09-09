@@ -49,6 +49,17 @@ export const load: PageLoad = async ({ url, fetch }) => {
 	// hex32 — ambiguous between block/tx/box, ask the API.
 	try {
 		const result = await api.search(classified.value, fetch);
+		if (result.matches && result.matches.length > 1) {
+			return {
+				q,
+				reason: 'empty' as NotFoundReason,
+				registers,
+				matches: result.matches.map((match) => ({
+					...match,
+					href: destinationFor(match.kind, match.id)
+				}))
+			};
+		}
 		throw redirect(302, destinationFor(result.kind, result.id));
 	} catch (e) {
 		if (e instanceof ApiError) {

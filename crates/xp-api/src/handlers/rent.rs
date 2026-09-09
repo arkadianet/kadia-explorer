@@ -33,20 +33,32 @@ fn items_of(
     Ok(out)
 }
 
-/// Boxes maturing in `[indexed + 1, indexed + 1 + blocks)`, oldest first. Not cursor-paged:
-/// the window itself bounds the answer.
+#[derive(serde::Serialize)]
+pub struct UpcomingDto {
+    items: Vec<RentItemDto>,
+    next_cursor: Option<String>,
+    complete: bool,
+    indexed_height: Option<u32>,
+}
+
+/// Bounded prefix of boxes maturing in the requested window. `complete` distinguishes
+/// exact answers from lower bounds; null cursor does not imply completeness here.
 pub async fn upcoming(
     State(state): State<AppState>,
     Query(p): Query<RentUpcomingParams>,
-) -> Result<Json<PageDto<RentItemDto>>, ApiError> {
+) -> Result<Json<UpcomingDto>, ApiError> {
     let limit = parse_limit(p.limit.as_deref())?;
     let blocks = parse_u32_param(p.blocks.as_deref(), "blocks", DEFAULT_UPCOMING_BLOCKS)?;
     let page = blocking(&state, move |rd| {
         let emission = rd.emission_tree_hash()?;
         let tip = rd.indexed_height()?;
         let from = tip.unwrap_or(0).saturating_add(1);
-        let rows = rd.rent_matures_range(from, blocks, limit)?;
-        Ok(PageDto {
+        let mut rows = rd.rent_matures_range(from, blocks, limit + 1)?;
+        let complete = rows.len() <= limit;
+        rows.truncate(limit);
+        Ok(UpcomingDto {
+            complete,
+            indexed_height: tip,
             items: items_of(rd, rows, tip, emission.as_ref())?,
             next_cursor: None,
         })

@@ -76,6 +76,8 @@ fn app_with_state(
     // The sender is dropped immediately; `Receiver::borrow` still yields the last value, so
     // the handlers see the stub regardless.
     let (_tx, rx) = watch::channel(IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
         indexed: Some(1866002),
         best: 1866002,
         mode: Mode::Tip,
@@ -764,6 +766,8 @@ fn hash32(hex_str: &str) -> xp_types::Hash32 {
 
 fn router_over(store: Store, indexed: u32) -> Router {
     let (_tx, rx) = watch::channel(IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
         indexed: Some(indexed),
         best: indexed,
         mode: Mode::Tip,
@@ -1528,4 +1532,63 @@ async fn ipv6_clients_share_a_bucket_per_64_but_allowlist_matches_the_full_addre
             StatusCode::OK
         );
     }
+}
+
+#[tokio::test]
+async fn search_shared_mint_id_returns_box_and_token() {
+    let (_d, app, id) = app_two_tokens();
+    assert_eq!(get(&app, &format!("/v1/boxes/{id}")).await.0, 200);
+    assert_eq!(get(&app, &format!("/v1/tokens/{id}")).await.0, 200);
+    let (status, result) = get(&app, &format!("/v1/search?q={id}")).await;
+    assert_eq!(status, 200);
+    assert_eq!(result["kind"], "box");
+    assert_eq!(result["id"], id);
+    assert_eq!(
+        result["matches"],
+        serde_json::json!([
+            {"kind": "box", "id": id}, {"kind": "token", "id": id}
+        ])
+    );
+}
+
+#[tokio::test]
+async fn upcoming_rent_reports_truncation_and_exact_cap() {
+    let (_d, app) = app();
+    let (_, all) = get(&app, "/v1/rent/upcoming?blocks=2000000&limit=500").await;
+    let count = all["items"].as_array().unwrap().len();
+    assert!(count > 1 && count < 500);
+    assert_eq!(all["complete"], true);
+    let (_, capped) = get(&app, "/v1/rent/upcoming?blocks=2000000&limit=1").await;
+    assert_eq!(capped["complete"], false);
+    let (_, exact) = get(
+        &app,
+        &format!("/v1/rent/upcoming?blocks=2000000&limit={count}"),
+    )
+    .await;
+    assert_eq!(exact["complete"], true);
+}
+
+#[tokio::test]
+async fn upcoming_501_boxes_explicitly_marks_500_as_incomplete() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("rent.redb")).unwrap();
+    let mut block = fixture(1866000);
+    store
+        .seed_for_tests(1865999, block.header.parent_id.0)
+        .unwrap();
+    block.txs.truncate(1);
+    let output = block.txs[0].outputs[0].clone();
+    block.txs[0].outputs = (0u32..501)
+        .map(|i| {
+            let mut b = output.clone();
+            b.id.0[..4].copy_from_slice(&i.to_be_bytes());
+            b
+        })
+        .collect();
+    store.apply_batch(&[block], true).unwrap();
+    let app = router_over(store, 1866000);
+    let (status, page) = get(&app, "/v1/rent/upcoming?blocks=2000000&limit=500").await;
+    assert_eq!(status, 200);
+    assert_eq!(page["items"].as_array().unwrap().len(), 500);
+    assert_eq!(page["complete"], false);
 }

@@ -11,8 +11,7 @@
 //!     cargo test -p xp-api --test parity -- --ignored --nocapture
 //! ```
 //!
-//! Without both env vars set the test prints a message and returns (not a failure, so CI
-//! that happens to run ignored tests without a node configured stays green).
+//! Missing configuration or insufficient evidence is inconclusive and cannot pass a release run.
 
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -73,12 +72,148 @@ impl XorShift64 {
 
 /// Fisher-Yates shuffle driven by [`XorShift64`], so the same seed always produces the same
 /// permutation regardless of input order beyond the swap sequence itself.
-fn deterministic_shuffle<T>(items: &mut [T], seed: u64) {
+fn deterministic_shuffle<T: Ord>(items: &mut [T], seed: u64) {
+    items.sort();
     let mut rng = XorShift64::new(seed);
     for i in (1..items.len()).rev() {
         let j = (rng.next_u64() % (i as u64 + 1)) as usize;
         items.swap(i, j);
     }
+}
+
+fn strict_ids(items: &[Value], key: &str) -> Result<HashSet<String>, String> {
+    let mut ids = HashSet::new();
+    for item in items {
+        let id = item[key].as_str().ok_or("missing box ID")?;
+        if !ids.insert(id.to_string()) {
+            return Err("duplicate box ID".into());
+        }
+    }
+    Ok(ids)
+}
+
+fn supply_agrees(token: &Value, held: u128) -> Result<bool, String> {
+    let number = |key: &str| {
+        token[key]
+            .as_str()
+            .ok_or_else(|| format!("missing {key}"))?
+            .parse::<u128>()
+            .map_err(|_| format!("invalid {key}"))
+    };
+    let (emission, burned, supply) = (number("emission")?, number("burned")?, number("supply")?);
+    Ok(emission.checked_sub(burned) == Some(supply) && held == supply)
+}
+
+async fn holder_sum(client: &reqwest::Client, explorer: &str, token: &str) -> Result<u128, String> {
+    let mut cursor = None::<String>;
+    let mut seen = HashSet::new();
+    let mut total = 0u128;
+    for _ in 0..MAX_PAGES {
+        let suffix = cursor
+            .as_ref()
+            .map(|c| format!("&cursor={c}"))
+            .unwrap_or_default();
+        let (status, page) = get_json(
+            client,
+            &format!("{explorer}/v1/tokens/{token}/holders?limit={PAGE_LIMIT}{suffix}"),
+        )
+        .await?;
+        if status != 200 {
+            return Err(format!("holder status {status}"));
+        }
+        for item in page["items"].as_array().ok_or("missing holders")? {
+            let address = item["address"].as_str().ok_or("missing holder address")?;
+            if !seen.insert(address.to_string()) {
+                return Err("duplicate holder".into());
+            }
+            let amount = item["amount"]
+                .as_str()
+                .ok_or("missing holder amount")?
+                .parse::<u128>()
+                .map_err(|_| "invalid holder amount")?;
+            total = total.checked_add(amount).ok_or("holder sum overflow")?;
+        }
+        match page.get("next_cursor") {
+            Some(Value::Null) => return Ok(total),
+            Some(Value::String(c)) => cursor = Some(c.clone()),
+            _ => return Err("missing holder cursor".into()),
+        }
+    }
+    Err("holder page cap reached".into())
+}
+
+async fn snapshot(
+    client: &reqwest::Client,
+    explorer: &str,
+    node: &str,
+) -> Result<(u64, String), String> {
+    let (es, e) = get_json(client, &format!("{explorer}/v1/status")).await?;
+    let (ns, n) = get_json(client, &format!("{node}/blockchain/indexedHeight")).await?;
+    let height = e["indexed"].as_u64().ok_or("missing explorer height")?;
+    if es != 200 || ns != 200 || n["indexedHeight"].as_u64() != Some(height) {
+        return Err("unmatched tip heights".into());
+    }
+    let (es, e) = get_json(client, &format!("{explorer}/v1/blocks/{height}")).await?;
+    let (ns, n) = get_json(
+        client,
+        &format!("{node}/blocks/chainSlice?fromHeight={height}&toHeight={height}"),
+    )
+    .await?;
+    let id = e["id"].as_str().ok_or("missing explorer tip hash")?;
+    if es != 200 || ns != 200 || n[0]["id"].as_str() != Some(id) {
+        return Err("unmatched best-chain hashes".into());
+    }
+    Ok((height, id.into()))
+}
+
+#[derive(Default)]
+struct Evidence {
+    mismatches: Vec<Mismatch>,
+    skipped: Vec<Skipped>,
+    passed: Vec<&'static str>,
+}
+
+const FIELDS: [(&str, usize); 7] = [
+    ("balance.nano", 20),
+    ("tx_count", 20),
+    ("unspent_ids", 20),
+    ("token.emission", 5),
+    ("token.name", 5),
+    ("token.supply_internal", 5),
+    ("token.unspent_box_ids", 5),
+];
+
+fn coverage(e: &Evidence, addresses: usize, tokens: usize) -> Value {
+    let mut out = serde_json::Map::new();
+    for (field, floor) in FIELDS {
+        let attempted = if field.starts_with("token.") {
+            tokens
+        } else {
+            addresses
+        };
+        let passed = e.passed.iter().filter(|f| **f == field).count();
+        let failed = e.mismatches.iter().filter(|m| m.field == field).count();
+        out.insert(field.into(), serde_json::json!({ "attempted": attempted, "passed": passed,
+            "failed": failed, "skipped": attempted.saturating_sub(passed + failed), "floor": floor }));
+    }
+    Value::Object(out)
+}
+
+fn verdict(e: &Evidence, coverage: &Value) -> &'static str {
+    if !e.mismatches.is_empty() {
+        return "fail";
+    }
+    if FIELDS
+        .iter()
+        .any(|(field, floor)| coverage[*field]["passed"].as_u64().unwrap_or(0) < *floor as u64)
+    {
+        return "inconclusive";
+    }
+    // Only explicit reference/page caps may be excluded in a passing release run.
+    if e.skipped.iter().any(|s| !s.reason.contains("cap")) {
+        return "inconclusive";
+    }
+    "pass"
 }
 
 /// A real disagreement between explorer and node for one address/field — these are the only
@@ -97,8 +232,7 @@ impl std::fmt::Display for Mismatch {
 }
 
 /// An address/field that could not be compared at all (transport error, unparseable field,
-/// too many boxes for the node's cap, ...). These are reported but never fail the gate —
-/// "cannot compare" is not "disagrees".
+/// too many boxes for the node's cap, ...). Non-cap errors make the release inconclusive.
 #[derive(Debug)]
 struct Skipped {
     address: String,
@@ -159,27 +293,33 @@ async fn explorer_unspent_ids(
             }
         };
         let (status, json) = get_json(client, &url).await?;
-        if status == 404 {
-            return Ok((ids, Capped::Complete));
-        }
+
         if status != 200 {
             return Err(format!("unexpected status {status} from {url}"));
         }
-        let items = json["items"].as_array().cloned().unwrap_or_default();
+        let items = json["items"]
+            .as_array()
+            .cloned()
+            .ok_or("missing items array")?;
         for item in &items {
-            if let Some(id) = item["id"].as_str() {
-                ids.insert(id.to_string());
+            let id = item["id"].as_str().ok_or("missing box ID")?;
+            if !ids.insert(id.to_string()) {
+                return Err("duplicate box ID".into());
             }
             if let Some(collector) = token_ids.as_deref_mut() {
-                let tokens = item["tokens"].as_array().cloned().unwrap_or_default();
-                for tok in &tokens {
+                let tokens = item["tokens"].as_array().ok_or("missing box tokens")?;
+                for tok in tokens {
                     if let Some(tid) = tok["id"].as_str() {
                         collector.insert(tid.to_string());
                     }
                 }
             }
         }
-        cursor = json["next_cursor"].as_str().map(|s| s.to_string());
+        cursor = match json.get("next_cursor") {
+            Some(Value::Null) => None,
+            Some(Value::String(c)) => Some(c.clone()),
+            _ => return Err("missing or invalid cursor".into()),
+        };
         if cursor.is_none() {
             return Ok((ids, Capped::Complete));
         }
@@ -198,12 +338,12 @@ enum Capped {
 ///
 /// As with [`explorer_unspent_ids`], [`Capped::Truncated`] means the count is a lower bound
 /// (the walk hit [`MAX_PAGES`]), never a value to compare against the node's total.
-async fn explorer_token_unspent_count(
+async fn explorer_token_unspent_ids(
     client: &reqwest::Client,
     explorer: &str,
     token_id: &str,
-) -> Result<(u64, Capped), String> {
-    let mut count = 0u64;
+) -> Result<(HashSet<String>, Capped), String> {
+    let mut count = HashSet::new();
     let mut cursor: Option<String> = None;
     for _ in 0..MAX_PAGES {
         let url = match &cursor {
@@ -215,15 +355,24 @@ async fn explorer_token_unspent_count(
             }
         };
         let (status, json) = get_json(client, &url).await?;
-        if status == 404 {
-            return Ok((0, Capped::Complete));
-        }
+
         if status != 200 {
             return Err(format!("unexpected status {status} from {url}"));
         }
-        let items = json["items"].as_array().cloned().unwrap_or_default();
-        count += items.len() as u64;
-        cursor = json["next_cursor"].as_str().map(|s| s.to_string());
+        let items = json["items"]
+            .as_array()
+            .cloned()
+            .ok_or("missing items array")?;
+        for id in strict_ids(&items, "id")? {
+            if !count.insert(id) {
+                return Err("duplicate token box ID".into());
+            }
+        }
+        cursor = match json.get("next_cursor") {
+            Some(Value::Null) => None,
+            Some(Value::String(c)) => Some(c.clone()),
+            _ => return Err("missing or invalid cursor".into()),
+        };
         if cursor.is_none() {
             return Ok((count, Capped::Complete));
         }
@@ -245,26 +394,22 @@ async fn node_unspent_ids(
     if status != 200 {
         return Err(format!("unexpected status {status} from {url}"));
     }
-    let arr = json.as_array().cloned().unwrap_or_default();
+    let arr = json.as_array().cloned().ok_or("missing response array")?;
     if arr.len() == NODE_UNSPENT_CAP {
         return Ok(None);
     }
-    let ids = arr
-        .iter()
-        .filter_map(|b| b["boxId"].as_str().map(|s| s.to_string()))
-        .collect();
-    Ok(Some(ids))
+    Ok(Some(strict_ids(&arr, "boxId")?))
 }
 
 /// GET the node's unspent-by-token-id list; `None` means the node returned exactly its own
 /// cap ([`NODE_UNSPENT_CAP`]) worth of boxes, so the count may be a truncated prefix rather
 /// than the whole set — same convention as [`node_unspent_ids`], but only the count is
 /// needed here, not the ids.
-async fn node_token_unspent_count(
+async fn node_token_unspent_ids(
     client: &reqwest::Client,
     node: &str,
     token_id: &str,
-) -> Result<Option<u64>, String> {
+) -> Result<Option<HashSet<String>>, String> {
     let url = format!(
         "{node}/blockchain/box/unspent/byTokenId/{token_id}?offset=0&limit={NODE_UNSPENT_CAP}"
     );
@@ -272,11 +417,11 @@ async fn node_token_unspent_count(
     if status != 200 {
         return Err(format!("unexpected status {status} from {url}"));
     }
-    let arr = json.as_array().cloned().unwrap_or_default();
+    let arr = json.as_array().cloned().ok_or("missing response array")?;
     if arr.len() == NODE_UNSPENT_CAP {
         return Ok(None);
     }
-    Ok(Some(arr.len() as u64))
+    Ok(Some(strict_ids(&arr, "boxId")?))
 }
 
 /// Node's `confirmed.nanoErgs`. A missing or non-u64 field is a hard error — never coerced
@@ -326,10 +471,14 @@ async fn compare_address(
     explorer: &str,
     node: &str,
     addr: &str,
-    mismatches: &mut Vec<Mismatch>,
-    skipped: &mut Vec<Skipped>,
+    evidence: &mut Evidence,
     token_ids: &mut HashSet<String>,
 ) {
+    let Evidence {
+        mismatches,
+        skipped,
+        passed,
+    } = evidence;
     // --- balance + tx count ---
     let explorer_addr_url = format!("{explorer}/v1/addresses/{addr}");
     let explorer_get = get_json(client, &explorer_addr_url).await;
@@ -386,7 +535,7 @@ async fn compare_address(
                     address: addr.to_string(),
                     reason: format!("balance.nano: node query failed: {e}"),
                 }),
-                _ => {}
+                _ => passed.push("balance.nano"),
             }
 
             // `tx_count` now comes straight off the address response (Task 6), so unlike
@@ -409,7 +558,7 @@ async fn compare_address(
                     address: addr.to_string(),
                     reason: format!("tx_count: node query failed: {e}"),
                 }),
-                _ => {}
+                _ => passed.push("tx_count"),
             }
         }
         Ok((status, _)) => skipped.push(Skipped {
@@ -475,7 +624,7 @@ async fn compare_address(
                                         only_node.len()
                                     ),
                                 });
-                            }
+                            } else { passed.push("unspent_ids"); }
                         }
                         (Ok(None), _) => skipped.push(Skipped {
                             address: addr.to_string(),
@@ -493,7 +642,7 @@ async fn compare_address(
                         }),
                     }
                 }
-                Ok(_) => {}
+                Ok(_) => passed.push("unspent_ids"),
                 Err(e) => skipped.push(Skipped {
                     address: addr.to_string(),
                     reason: format!("unspent_ids: explorer query failed: {e}"),
@@ -510,8 +659,7 @@ async fn compare_address(
 /// One token's worth of comparisons: emission, name, and unspent box count against the
 /// node's `/blockchain/token/byId` and `/blockchain/box/unspent/byTokenId` endpoints.
 ///
-/// A token minted before the store's indexed range has no explorer row at all — a plain 404,
-/// not a disagreement — so that case is recorded as skipped rather than a mismatch. Reuses
+/// This release gate requires full history: a sampled token 404 is a mismatch. Reuses
 /// [`Mismatch`]/[`Skipped`] with `address` holding the token id, matching how address checks
 /// report, per the brief's "same summary structure" requirement.
 async fn compare_token(
@@ -519,20 +667,29 @@ async fn compare_token(
     explorer: &str,
     node: &str,
     token_id: &str,
-    mismatches: &mut Vec<Mismatch>,
-    skipped: &mut Vec<Skipped>,
+    evidence: &mut Evidence,
 ) {
+    let Evidence {
+        mismatches,
+        skipped,
+        passed,
+    } = evidence;
     let explorer_url = format!("{explorer}/v1/tokens/{token_id}");
     match get_json(client, &explorer_url).await {
         Ok((404, _)) => {
-            skipped.push(Skipped {
+            mismatches.push(Mismatch {
                 address: token_id.to_string(),
-                reason: "token: explorer 404s (minted before the store's indexed range)"
-                    .to_string(),
+                field: "token.existence",
+                detail: "sampled token missing from full-history explorer".into(),
             });
             return;
         }
         Ok((200, json)) => {
+            match holder_sum(client, explorer, token_id).await.and_then(|sum| supply_agrees(&json, sum)) {
+                Ok(true) => passed.push("token.supply_internal"),
+                Ok(false) => mismatches.push(Mismatch { address: token_id.into(), field: "token.supply_internal", detail: "holder sum / supply / emission minus burned disagree (internal consistency)".into() }),
+                Err(reason) => skipped.push(Skipped { address: token_id.into(), reason }),
+            }
             let explorer_name = json["name"].as_str().map(|s| s.to_string());
             let explorer_emission_raw = json["emission"].as_str().map(|s| s.to_string());
             let explorer_emission = explorer_emission_raw
@@ -571,7 +728,7 @@ async fn compare_token(
                                 node_json.get("emissionAmount")
                             ),
                         }),
-                        _ => {}
+                        _ => passed.push("token.emission"),
                     }
 
                     match (&explorer_name, &node_name) {
@@ -594,7 +751,7 @@ async fn compare_token(
                                 node_json.get("name")
                             ),
                         }),
-                        _ => {}
+                        _ => passed.push("token.name"),
                     }
                 }
                 Ok((status, _)) => skipped.push(Skipped {
@@ -624,36 +781,35 @@ async fn compare_token(
     }
 
     // --- unspent box count ---
-    match node_token_unspent_count(client, node, token_id).await {
+    match node_token_unspent_ids(client, node, token_id).await {
         Ok(None) => skipped.push(Skipped {
             address: token_id.to_string(),
-            reason:
-                "token.unspent_box_count: node returned exactly the cap; count may be truncated"
-                    .to_string(),
+            reason: "token.unspent_box_ids: node returned exactly the cap; count may be truncated"
+                .to_string(),
         }),
         Ok(Some(node_count)) => {
-            match explorer_token_unspent_count(client, explorer, token_id).await {
+            match explorer_token_unspent_ids(client, explorer, token_id).await {
                 Ok((_, Capped::Truncated)) => skipped.push(Skipped {
                     address: token_id.to_string(),
-                    reason: "token.unspent_box_count: explorer page cap reached".to_string(),
+                    reason: "token.unspent_box_ids: explorer page cap reached".to_string(),
                 }),
                 Ok((explorer_count, Capped::Complete)) if explorer_count != node_count => {
                     mismatches.push(Mismatch {
                         address: token_id.to_string(),
-                        field: "token.unspent_box_count",
-                        detail: format!("explorer={explorer_count} node={node_count}"),
+                        field: "token.unspent_box_ids",
+                        detail: format!("explorer={explorer_count:?} node={node_count:?}"),
                     })
                 }
-                Ok(_) => {}
+                Ok(_) => passed.push("token.unspent_box_ids"),
                 Err(e) => skipped.push(Skipped {
                     address: token_id.to_string(),
-                    reason: format!("token.unspent_box_count: explorer query failed: {e}"),
+                    reason: format!("token.unspent_box_ids: explorer query failed: {e}"),
                 }),
             }
         }
         Err(e) => skipped.push(Skipped {
             address: token_id.to_string(),
-            reason: format!("token.unspent_box_count: node query failed: {e}"),
+            reason: format!("token.unspent_box_ids: node query failed: {e}"),
         }),
     }
 }
@@ -724,18 +880,15 @@ async fn parity_against_node() {
     let explorer = match std::env::var("EXPLORER_URL") {
         Ok(v) => v,
         Err(_) => {
-            println!("parity: EXPLORER_URL not set, skipping");
-            return;
+            panic!("parity: inconclusive — EXPLORER_URL not set");
         }
     };
     let node = match std::env::var("NODE_URL") {
         Ok(v) => v,
         Err(_) => {
-            println!("parity: NODE_URL not set, skipping");
-            return;
+            panic!("parity: inconclusive — NODE_URL not set");
         }
     };
-    let force = std::env::var("PARITY_FORCE").is_ok();
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -757,15 +910,14 @@ async fn parity_against_node() {
     );
     let node_indexed = node_json["indexedHeight"].as_u64();
 
-    if !force && explorer_indexed != node_indexed {
-        println!(
-            "parity: height mismatch, skipping — explorer.indexed={explorer_indexed:?} \
-             node.indexedHeight={node_indexed:?}"
-        );
-        return;
-    }
-    println!("parity: heights explorer={explorer_indexed:?} node={node_indexed:?} force={force}");
+    assert!(
+        explorer_indexed.is_some() && explorer_indexed == node_indexed,
+        "parity: inconclusive — missing or mismatched indexed heights"
+    );
 
+    let anchor = snapshot(&client, &explorer, &node)
+        .await
+        .expect("parity: inconclusive — snapshot mismatch");
     let mut addresses = sample_addresses(&client, &explorer)
         .await
         .expect("sample addresses from recent blocks");
@@ -777,18 +929,16 @@ async fn parity_against_node() {
     addresses.truncate(SAMPLE_TARGET);
     println!("parity: comparing {} addresses", addresses.len());
 
-    let mut mismatches = Vec::new();
-    let mut skipped = Vec::new();
+    let mut evidence = Evidence::default();
     let mut token_ids: HashSet<String> = HashSet::new();
     for (i, addr) in addresses.iter().enumerate() {
-        let before = mismatches.len();
+        let before = evidence.mismatches.len();
         compare_address(
             &client,
             &explorer,
             &node,
             addr,
-            &mut mismatches,
-            &mut skipped,
+            &mut evidence,
             &mut token_ids,
         )
         .await;
@@ -796,7 +946,7 @@ async fn parity_against_node() {
             "parity: [{}/{}] {addr}: {} new mismatch(es)",
             i + 1,
             addresses.len(),
-            mismatches.len() - before
+            evidence.mismatches.len() - before
         );
     }
 
@@ -810,44 +960,35 @@ async fn parity_against_node() {
     println!("parity: comparing {} tokens", token_ids.len());
 
     for (i, token_id) in token_ids.iter().enumerate() {
-        let before = mismatches.len();
-        compare_token(
-            &client,
-            &explorer,
-            &node,
-            token_id,
-            &mut mismatches,
-            &mut skipped,
-        )
-        .await;
+        let before = evidence.mismatches.len();
+        compare_token(&client, &explorer, &node, token_id, &mut evidence).await;
         println!(
             "parity: [token {}/{}] {token_id}: {} new mismatch(es)",
             i + 1,
             token_ids.len(),
-            mismatches.len() - before
+            evidence.mismatches.len() - before
         );
     }
 
-    println!("parity: skipped {} address/field checks", skipped.len());
-    for s in &skipped {
-        println!("  {s}");
-    }
-
+    let coverage = coverage(&evidence, addresses.len(), token_ids.len());
+    let final_anchor = snapshot(&client, &explorer, &node).await;
+    let result = if final_anchor.as_ref().ok() == Some(&anchor) {
+        verdict(&evidence, &coverage)
+    } else {
+        "inconclusive"
+    };
     println!(
-        "parity: {} mismatches / {} addresses / {} tokens",
-        mismatches.len(),
-        addresses.len(),
-        token_ids.len()
+        "{}",
+        serde_json::json!({
+            "outcome": result, "coverage": coverage, "addresses": addresses, "tokens": token_ids,
+            "explorer": explorer, "reference": node, "indexed_height": explorer_indexed,
+            "full_history": true, "schema": 2, "commit": std::env::var("PARITY_COMMIT").ok(),
+        "matched_tip": anchor, "final_tip": final_anchor.ok(),
+            "mismatches": evidence.mismatches.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "skipped": evidence.skipped.iter().map(ToString::to_string).collect::<Vec<_>>()
+        })
     );
-    for m in &mismatches {
-        println!("  {m}");
-    }
-    assert_eq!(
-        mismatches.len(),
-        0,
-        "{} parity mismatches found",
-        mismatches.len()
-    );
+    assert_eq!(result, "pass", "parity release gate: {result}");
 }
 
 #[test]
@@ -882,4 +1023,55 @@ fn sample_excludes_the_fee_contract_and_addresses_in_too_many_blocks() {
     // The threshold is inclusive: "more than N blocks" is excluded, exactly N is kept.
     assert!(got.contains(&"warm".to_string()));
     assert_eq!(got.len(), BLOCKS_TO_SAMPLE as usize + 1);
+}
+
+#[test]
+fn shuffle_is_independent_of_candidate_insertion_order() {
+    let mut a = vec!["a", "b", "c", "d"];
+    let mut b = vec!["d", "c", "b", "a"];
+    deterministic_shuffle(&mut a, SHUFFLE_SEED);
+    deterministic_shuffle(&mut b, SHUFFLE_SEED);
+    assert_eq!(a, b);
+}
+
+#[test]
+fn release_verdict_requires_coverage_and_rejects_missing_fields() {
+    let mut e = Evidence::default();
+    assert_eq!(verdict(&e, &coverage(&e, 200, 20)), "inconclusive");
+    for (field, floor) in FIELDS {
+        e.passed.extend(std::iter::repeat_n(field, floor));
+    }
+    assert_eq!(verdict(&e, &coverage(&e, 200, 20)), "pass");
+    e.skipped.push(Skipped {
+        address: "fixture".into(),
+        reason: "missing required emission".into(),
+    });
+    assert_eq!(verdict(&e, &coverage(&e, 200, 20)), "inconclusive");
+    e.mismatches.push(Mismatch {
+        address: "fixture".into(),
+        field: "token.existence",
+        detail: "404 on full history".into(),
+    });
+    assert_eq!(verdict(&e, &coverage(&e, 200, 20)), "fail");
+}
+
+#[test]
+fn box_id_sets_detect_substitution_missing_ids_and_duplicates() {
+    let a = strict_ids(&[serde_json::json!({"id":"a"})], "id").unwrap();
+    let b = strict_ids(&[serde_json::json!({"id":"b"})], "id").unwrap();
+    assert_ne!(a, b);
+    assert!(strict_ids(&[serde_json::json!({})], "id").is_err());
+    assert!(strict_ids(
+        &[serde_json::json!({"id":"a"}), serde_json::json!({"id":"a"})],
+        "id"
+    )
+    .is_err());
+}
+
+#[test]
+fn holder_mutation_and_supply_arithmetic_are_detected_without_rounding() {
+    let token = serde_json::json!({ "emission": "9007199254740995", "burned": "2", "supply": "9007199254740993" });
+    assert_eq!(supply_agrees(&token, 9007199254740993), Ok(true));
+    assert_eq!(supply_agrees(&token, 9007199254740992), Ok(false));
+    assert!(supply_agrees(&serde_json::json!({}), 0).is_err());
 }

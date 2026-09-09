@@ -15,7 +15,6 @@
 	import { truncateMiddle } from '$lib/format/hash';
 	import { api } from '$lib/api/endpoints';
 	import { status as statusStore } from '$lib/status/status.svelte';
-	import { health } from '$lib/status/health';
 	import { txKind } from '$lib/tx/kind';
 	import {
 		buckets,
@@ -40,7 +39,7 @@
 	// `claimable_at_tip` is measured against the indexed tip too — using the node's `best`
 	// would make the countdown disagree with every other page by the current lag.
 	const tip = $derived(status?.indexed ?? null);
-	const h = $derived(health(status ?? null));
+	const h = $derived(statusStore.health);
 
 	const blocks = $derived(data.blocks.data ?? []);
 	const latest = $derived(blocks[0] ?? null);
@@ -61,7 +60,7 @@
 	);
 	const dayNote = $derived(
 		dayPartial
-			? `Only ${blocks.length} blocks are indexed above this point, so this covers the whole indexed stretch rather than a full day.`
+			? `Partial window: only ${blocks.length} blocks were loaded; the indexed history or request cap may limit coverage.`
 			: ''
 	);
 
@@ -78,7 +77,7 @@
 
 	const hashrate = $derived(latest ? formatHashrate(hashrateHs(latest.difficulty)) : '—');
 
-	const rentItems = $derived(data.rent.data ?? []);
+	const rentItems = $derived(data.rent.data?.items ?? []);
 	const rentDue = $derived(rentItems.reduce((t, i) => t + BigInt(i.box.rent.due_nano), 0n));
 
 	const recentBlocks = $derived(blocks.slice(0, 6));
@@ -172,7 +171,7 @@
 			<div class="tipcard">
 				<div class="tipcard-head">
 					<Icon name="box" size={20} />
-					<span>Indexed height</span>
+					<span>Snapshot indexed height</span>
 				</div>
 				<p class="tipcard-height">{latest.height.toLocaleString('en-US')}</p>
 				<p class="tipcard-age">{latestAge}</p>
@@ -203,14 +202,20 @@
 			class="stat-value"
 			title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
 		>
-			{dayTxs.toLocaleString('en-US')}
+			{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')}
 		</p>
 		<Sparkline
 			values={txPerHour}
 			kind="bars"
 			title="Transactions per hour across the last 24 hours of indexed chain."
 		/>
-		<p class="stat-foot">last 24 h of chain</p>
+		<p class="stat-foot">
+			{data.blocks.error
+				? 'Window unavailable'
+				: dayPartial
+					? 'Partial chain window'
+					: 'last 24 h of chain'}
+		</p>
 	</div>
 
 	<div class="stat glass">
@@ -219,14 +224,16 @@
 			class="stat-value"
 			title={`Blocks whose timestamp falls in the 24 hours below the indexed tip. ${dayNote}`}
 		>
-			{day.length.toLocaleString('en-US')}
+			{data.blocks.error ? 'Unavailable' : day.length.toLocaleString('en-US')}
 		</p>
 		<Sparkline
 			values={blocksPerHour}
 			kind="line"
 			title="Blocks per hour across the last 24 hours of indexed chain."
 		/>
-		<p class="stat-foot" title="Ergo targets one block every 120 seconds.">720 at target</p>
+		<p class="stat-foot" title="Ergo targets one block every 120 seconds.">
+			{dayPartial ? 'Partial chain window' : '720 at target'}
+		</p>
 	</div>
 
 	<div class="stat glass">
@@ -235,14 +242,16 @@
 			class="stat-value"
 			title={`Sum of the reward field over the ${day.length} indexed blocks in this window. ${dayNote}`}
 		>
-			{formatErg(dayReward, { maxFrac: 0 })}<span class="unit">ERG</span>
+			{data.blocks.error ? 'Unavailable' : formatErg(dayReward, { maxFrac: 0 })}<span class="unit"
+				>ERG</span
+			>
 		</p>
 		<Sparkline
 			values={rewardPerHour}
 			kind="line"
 			title="Reward paid per hour, in ERG, across the last 24 hours of indexed chain."
 		/>
-		<p class="stat-foot">paid to miners</p>
+		<p class="stat-foot">{dayPartial ? 'Partial chain window' : 'paid to miners'}</p>
 	</div>
 
 	<div class="stat glass">
@@ -251,12 +260,19 @@
 			class="stat-value"
 			title="Boxes whose storage-rent maturity falls within the next 720 blocks, from /v1/rent/upcoming."
 		>
-			{rentItems.length.toLocaleString('en-US')}
+			{data.rent.error
+				? 'Unavailable'
+				: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}
 		</p>
 		<p class="stat-sub">
-			<Amount nano={rentDue.toString()} maxFrac={3} /> due
+			{#if data.rent.error}Unavailable{:else}{data.rent.data?.complete === true ? '' : '≥ '}<Amount
+					nano={rentDue.toString()}
+					maxFrac={3}
+				/> due{/if}
 		</p>
-		<p class="stat-foot">maturing in 720 blocks</p>
+		<p class="stat-foot">
+			maturing in 720 blocks{data.rent.data?.complete === true ? '' : ' · incomplete'}
+		</p>
 	</div>
 
 	<div class="stat glass">
@@ -352,7 +368,9 @@
 				<span
 					title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
 				>
-					{dayTxs.toLocaleString('en-US')} transactions in the last 24 hours of chain
+					{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')} transactions · {dayPartial
+						? 'partial chain window'
+						: 'last 24 hours of chain'}
 				</span>
 				<span class="live-spark">
 					<Sparkline
@@ -383,7 +401,12 @@
 			</div>
 		{:else}
 			<p class="summary">
-				<b>{rentItems.length.toLocaleString('en-US')}</b> boxes mature in the next 720 blocks, owing
+				<b
+					>{data.rent.error
+						? 'Unavailable'
+						: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}</b
+				>
+				boxes mature in the next 720 blocks, owing at least
 				<b><Amount nano={rentDue.toString()} maxFrac={3} /></b> between them.
 			</p>
 			<Table dense>

@@ -2,7 +2,6 @@ import { api } from '$lib/api/endpoints';
 import type {
 	BlockDto,
 	PageDto,
-	RentItemDto,
 	RichlistItemDto,
 	StatusDto,
 	TokenInfoDto,
@@ -12,8 +11,6 @@ import type { PageLoad } from './$types';
 
 /** Largest page `/v1/blocks` will serve. */
 const PAGE = 500;
-/** Enough blocks to cover a day at Ergo's two-minute target, with headroom for fast runs. */
-const WANT_BLOCKS = 800;
 /** The home page's figures are all "over the last 24 hours of the indexed chain". */
 const DAY_MS = 86_400_000;
 
@@ -30,22 +27,12 @@ async function blockWindow(fetch: typeof globalThis.fetch): Promise<BlockDto[]> 
 		items.push(...page.items);
 		const newest = items[0]?.timestamp ?? 0;
 		const oldest = items[items.length - 1]?.timestamp ?? 0;
-		if (
-			page.next_cursor === null ||
-			items.length >= WANT_BLOCKS ||
-			newest - oldest >= DAY_MS ||
-			page.items.length === 0
-		) {
+		if (page.next_cursor === null || newest - oldest >= DAY_MS || page.items.length === 0) {
 			break;
 		}
 		cursor = page.next_cursor;
 	}
 	return items;
-}
-
-async function upcomingRentItems(fetch: typeof globalThis.fetch): Promise<RentItemDto[]> {
-	const page = await api.rentUpcoming(720, 500, fetch);
-	return page.items;
 }
 
 async function topHolders(fetch: typeof globalThis.fetch): Promise<RichlistItemDto[]> {
@@ -79,7 +66,7 @@ export const load: PageLoad = async ({ fetch }) => {
 	const [blocks, txs, rent, tokens, richlist, status] = await Promise.all([
 		safe<BlockDto[]>(blockWindow(fetch)),
 		safe<PageDto<TxDto>>(api.txs(undefined, 12, undefined, fetch)),
-		safe<RentItemDto[]>(upcomingRentItems(fetch)),
+		safe(api.rentUpcoming(720, 500, fetch)),
 		safe<TokenInfoDto[]>(topTokens(fetch)),
 		safe<RichlistItemDto[]>(topHolders(fetch)),
 		safe<StatusDto>(api.status(fetch))

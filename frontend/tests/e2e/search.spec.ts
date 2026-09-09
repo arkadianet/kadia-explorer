@@ -96,3 +96,29 @@ test('the in-page search box on /search still submits', async ({ page }) => {
 	await input.press('Enter');
 	await expect(page).toHaveURL(`/blocks/${block.height}`);
 });
+
+test('a shared mint input ID offers both token and box destinations', async ({ page }) => {
+	await page.route('**/v1/search?*', (route) =>
+		route.fulfill({
+			json: {
+				kind: 'box',
+				id: claimableBox.id,
+				matches: [
+					{ kind: 'box', id: claimableBox.id },
+					{ kind: 'token', id: claimableBox.id }
+				]
+			}
+		})
+	);
+	await page.goto(`/search?q=${claimableBox.id}`);
+	await expect(page.getByRole('link', { name: 'Mint input box', exact: true })).toHaveAttribute(
+		'href',
+		`/box/${claimableBox.id}`
+	);
+	await expect(page.getByRole('link', { name: 'Token', exact: true })).toHaveAttribute(
+		'href',
+		`/token/${claimableBox.id}`
+	);
+	await page.getByRole('link', { name: 'Mint input box', exact: true }).click();
+	await expect(page).toHaveURL(`/box/${claimableBox.id}`);
+});

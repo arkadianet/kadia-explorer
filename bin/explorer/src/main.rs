@@ -127,6 +127,8 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
 
     let indexed = store.indexed_height().context("reading indexed height")?;
     let (status_tx, status_rx) = watch::channel(IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
         indexed,
         best: 0,
         mode: Mode::Bulk,

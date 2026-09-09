@@ -59,6 +59,8 @@ async fn smoke_local_node() {
     );
 
     let (tx, mut rx) = watch::channel(IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
         indexed: None,
         best: 0,
         mode: Mode::Tip,

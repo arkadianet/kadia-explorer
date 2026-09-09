@@ -60,3 +60,33 @@ test('a block row links through to the block page', async ({ page }) => {
 	await expect(page).toHaveURL(`/blocks/${TIP}`);
 	await expect(page.getByRole('heading', { name: `Block ${TIP}` })).toBeVisible();
 });
+
+test('failed statistic dependencies show unavailable instead of zero', async ({ page }) => {
+	await page.route('**/v1/blocks?*', (route) =>
+		route.fulfill({ status: 503, json: { detail: 'offline' } })
+	);
+	await page.route('**/v1/rent/upcoming?*', (route) =>
+		route.fulfill({ status: 503, json: { detail: 'offline' } })
+	);
+	await page.goto('/');
+	for (const label of ['Transactions', 'Blocks', 'Miner rewards', 'Storage rent']) {
+		await expect(
+			page
+				.locator('.stat')
+				.filter({ has: page.locator('.stat-label', { hasText: label }) })
+				.locator('.stat-value')
+		).toContainText('Unavailable');
+	}
+});
+
+test('capped rent totals are visible lower bounds', async ({ page }) => {
+	await page.route('**/v1/rent/upcoming?*', async (route) => {
+		const response = await route.fetch();
+		const body = await response.json();
+		await route.fulfill({ json: { ...body, complete: false } });
+	});
+	await page.goto('/');
+	const card = page.locator('.stat').filter({ hasText: 'Storage rent' });
+	await expect(card.locator('.stat-value')).toContainText('≥');
+	await expect(card).toContainText('incomplete');
+});

@@ -172,6 +172,8 @@ mod inflight_guard_tests {
         // long-running process, so the leak is bounded and acceptable.
         std::mem::forget(dir);
         let (_tx, rx) = watch::channel(IngestStatus {
+            source_observed_at_ms: None,
+            source_error: None,
             indexed: None,
             best: 0,
             mode: xp_ingest::Mode::Tip,

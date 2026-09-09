@@ -73,6 +73,7 @@ struct FakeSource {
     /// never match the store — simulating a fork deeper than the rollback window.
     always_fork: bool,
     best: Mutex<u32>,
+    fail_best: std::sync::atomic::AtomicBool,
 }
 
 impl FakeSource {
@@ -82,6 +83,7 @@ impl FakeSource {
             chain: Mutex::new(chain),
             always_fork: false,
             best: Mutex::new(best),
+            fail_best: std::sync::atomic::AtomicBool::new(false),
         }
     }
     fn forking(best: u32) -> FakeSource {
@@ -89,6 +91,7 @@ impl FakeSource {
             chain: Mutex::new(Vec::new()),
             always_fork: true,
             best: Mutex::new(best),
+            fail_best: std::sync::atomic::AtomicBool::new(false),
         }
     }
     fn set_chain(&self, chain: Vec<FakeBlock>) {
@@ -103,6 +106,9 @@ impl BlockSource for FakeSource {
         "fake"
     }
     async fn best_height(&self) -> Result<u32, SourceError> {
+        if self.fail_best.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(SourceError::Unavailable);
+        }
         Ok(*self.best.lock().unwrap())
     }
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError> {
@@ -241,6 +247,8 @@ fn test_cfg() -> IngestConfig {
 
 fn initial_status() -> IngestStatus {
     IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
         indexed: None,
         best: 0,
         mode: Mode::Tip,
@@ -391,4 +399,37 @@ async fn mode_becomes_tip_once_caught_up_and_idle() {
     shutdown.cancel();
     handle.await.unwrap().unwrap();
     assert_eq!(store.indexed_height().unwrap(), Some(1866002));
+}
+
+#[tokio::test]
+async fn source_failure_preserves_observation_and_recovery_refreshes_it() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+    let source = Arc::new(FakeSource::new(Vec::new()));
+    let (tx, mut rx) = watch::channel(initial_status());
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(run(store, source.clone(), test_cfg(), tx, shutdown.clone()));
+    timeout(Duration::from_secs(5), async {
+        while rx.borrow().source_observed_at_ms.is_none() {
+            rx.changed().await.unwrap();
+        }
+        source.fail_best.store(true, Ordering::Relaxed);
+        while rx.borrow().source_error.is_none() {
+            rx.changed().await.unwrap();
+        }
+        let observed = rx.borrow().source_observed_at_ms.unwrap();
+        rx.changed().await.unwrap();
+        assert_eq!(rx.borrow().source_observed_at_ms, Some(observed));
+        assert_eq!(rx.borrow().best, 0);
+        source.fail_best.store(false, Ordering::Relaxed);
+        while rx.borrow().source_error.is_some() {
+            rx.changed().await.unwrap();
+        }
+        assert!(rx.borrow().source_observed_at_ms.unwrap() > observed);
+    })
+    .await
+    .unwrap();
+    shutdown.cancel();
+    task.await.unwrap().unwrap();
 }

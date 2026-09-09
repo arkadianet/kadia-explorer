@@ -1,4 +1,4 @@
-use crate::dto::{parse_id, SearchDto, SearchParams};
+use crate::dto::{parse_id, SearchDto, SearchMatchDto, SearchParams};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
 use axum::Json;
@@ -32,47 +32,39 @@ pub async fn search(
                 .parse()
                 .map_err(|_| ApiError::BadRequest(format!("height out of range: {q:?}")))?;
             return match rd.header_at(height)? {
-                Some(_) => Ok(SearchDto {
-                    kind: "block",
-                    id: height.to_string(),
-                }),
+                Some(_) => Ok(SearchDto::single("block", height.to_string())),
                 None => Err(ApiError::NotFound),
             };
         }
         if q.len() == 64 {
             let id = parse_id(&q)?;
-            if rd.height_of_header(&id)?.is_some() {
+            let mut matches = Vec::new();
+            for (kind, found) in [
+                ("block", rd.height_of_header(&id)?.is_some()),
+                ("tx", rd.tx_by_id(&id)?.is_some()),
+                ("box", rd.box_by_id(&id)?.is_some()),
+                ("token", rd.token(&id)?.is_some()),
+                ("template", rd.template(&id)?.is_some()),
+            ] {
+                if found {
+                    matches.push(SearchMatchDto {
+                        kind,
+                        id: q.clone(),
+                    });
+                }
+            }
+            if let Some(first) = matches.first() {
                 return Ok(SearchDto {
-                    kind: "block",
+                    kind: first.kind,
                     id: q,
-                });
-            }
-            if rd.tx_by_id(&id)?.is_some() {
-                return Ok(SearchDto { kind: "tx", id: q });
-            }
-            if rd.box_by_id(&id)?.is_some() {
-                return Ok(SearchDto { kind: "box", id: q });
-            }
-            if rd.token(&id)?.is_some() {
-                return Ok(SearchDto {
-                    kind: "token",
-                    id: q,
-                });
-            }
-            if rd.template(&id)?.is_some() {
-                return Ok(SearchDto {
-                    kind: "template",
-                    id: q,
+                    matches,
                 });
             }
             return Err(ApiError::NotFound);
         }
         if looks_like_address(&q) {
             return match rd.tree_by_address(&q)? {
-                Some(_) => Ok(SearchDto {
-                    kind: "address",
-                    id: q,
-                }),
+                Some(_) => Ok(SearchDto::single("address", q)),
                 None => Err(ApiError::NotFound),
             };
         }

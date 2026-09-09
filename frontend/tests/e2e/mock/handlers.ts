@@ -231,6 +231,8 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		const indexed = d.status.indexed ?? d.status.best;
 		sendJson(res, 200, {
 			...d.status,
+			source_observed_at_ms: Date.now(),
+			source_error: null,
 			lag_blocks: lag,
 			best: d.status.best + lag,
 			stalled: stallRequested(req, url)
@@ -396,7 +398,11 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 
 	if (path === '/v1/rent/upcoming') {
 		// The `blocks` window is ignored on purpose — see the rent note in fixtures.ts.
-		sendJson(res, 200, { items: d.rentUpcoming.slice(0, limit), next_cursor: null });
+		sendJson(res, 200, {
+			items: d.rentUpcoming.slice(0, limit),
+			next_cursor: null,
+			complete: d.rentUpcoming.length <= limit
+		});
 		return;
 	}
 

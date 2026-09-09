@@ -222,6 +222,8 @@ pub struct PageDto<T> {
 
 #[derive(Debug, Serialize)]
 pub struct StatusDto {
+    pub source_observed_at_ms: Option<u64>,
+    pub source_error: Option<String>,
     pub indexed: Option<u32>,
     pub best: u32,
     pub mode: &'static str,
@@ -627,9 +629,26 @@ pub struct RichlistItemDto {
 }
 
 #[derive(Debug, Serialize)]
+pub struct SearchMatchDto {
+    pub kind: &'static str,
+    pub id: String,
+}
+
+#[derive(Serialize)]
 pub struct SearchDto {
     pub kind: &'static str,
     pub id: String,
+    pub matches: Vec<SearchMatchDto>,
+}
+
+impl SearchDto {
+    pub fn single(kind: &'static str, id: String) -> Self {
+        Self {
+            kind,
+            id: id.clone(),
+            matches: vec![SearchMatchDto { kind, id }],
+        }
+    }
 }
 
 /// EIP-4's R7 `Coll[Byte]` type tag, as stored on [`TokenRow::token_type`] (hex of the

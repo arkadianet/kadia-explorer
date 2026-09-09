@@ -11,6 +11,8 @@ pub async fn status(State(state): State<AppState>) -> Result<Json<StatusDto>, Ap
     // than underflow.
     let lag_blocks = s.best.saturating_sub(s.indexed.unwrap_or(0));
     Ok(Json(StatusDto {
+        source_observed_at_ms: s.source_observed_at_ms,
+        source_error: s.source_error,
         indexed: s.indexed,
         best: s.best,
         mode: match s.mode {

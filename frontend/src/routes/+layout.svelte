@@ -4,7 +4,6 @@
 	import { page } from '$app/state';
 	import { theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
-	import { health } from '$lib/status/health';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import SearchBox from '$lib/components/SearchBox.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
@@ -20,7 +19,7 @@
 		return s !== null && (s.lag_blocks > 100 || s.halted !== null);
 	});
 
-	const h = $derived(health(status.current));
+	const h = $derived(status.health);
 
 	/** The header floats over the page's first section and the lag banner floats under it, so
 	 * both have to be reserved as space: `--banner-h` on the main column is what every page

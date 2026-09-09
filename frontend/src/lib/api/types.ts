@@ -13,6 +13,8 @@ export interface StatusStalledDto {
 }
 
 export interface StatusDto {
+	source_observed_at_ms?: number | null;
+	source_error?: string | null;
 	indexed: number | null;
 	best: number;
 	mode: 'bulk' | 'tip';
@@ -137,6 +139,7 @@ export interface RichlistItemDto {
 }
 
 export interface SearchDto {
+	matches?: { kind: SearchDto['kind']; id: string }[];
 	kind: 'block' | 'tx' | 'box' | 'address' | 'token' | 'template';
 	id: string;
 }

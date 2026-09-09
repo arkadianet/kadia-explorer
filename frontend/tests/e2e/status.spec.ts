@@ -33,3 +33,20 @@ test('/status shows the stall callout when the indexer is stuck', async ({ page 
 	await expect(stalled).toContainText('137s');
 	await expect(stalled).toContainText('node has not served this block yet');
 });
+
+test('a failed browser poll removes Live, retains height and recovers', async ({ page }) => {
+	await page.clock.install();
+	await page.goto('/status');
+	await expect(page.locator('a.live')).toHaveText('Live');
+	await page.route('**/v1/status', (route) =>
+		route.fulfill({ status: 503, json: { detail: 'offline' } })
+	);
+	await page.clock.fastForward(5000);
+	await expect(page.locator('a.live')).toHaveText('Unavailable');
+	await expect(page.locator('table.table').getByRole('row', { name: /^Indexed/ })).toContainText(
+		String(TIP)
+	);
+	await page.unroute('**/v1/status');
+	await page.clock.fastForward(5000);
+	await expect(page.locator('a.live')).toHaveText('Live');
+});

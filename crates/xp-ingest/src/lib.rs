@@ -53,6 +53,8 @@ pub enum Mode {
 
 #[derive(Clone, Debug)]
 pub struct IngestStatus {
+    pub source_observed_at_ms: Option<u64>,
+    pub source_error: Option<String>,
     pub indexed: Option<u32>,
     pub best: u32,
     pub mode: Mode,
@@ -203,7 +205,10 @@ pub async fn run(
                    mode: Mode,
                    halted: Option<String>,
                    stalled: Option<StalledInfo>| {
+        let previous = status.borrow().clone();
         let _ = status.send(IngestStatus {
+            source_observed_at_ms: previous.source_observed_at_ms,
+            source_error: previous.source_error,
             indexed,
             best,
             mode,
@@ -317,9 +322,21 @@ pub async fn run(
         }
 
         best = match source.best_height().await {
-            Ok(b) => b,
+            Ok(b) => {
+                status.send_modify(|s| {
+                    s.source_observed_at_ms = Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    );
+                    s.source_error = None;
+                });
+                b
+            }
             Err(e) => {
                 warn!(source = %source_name, error = %e, "best_height failed; retrying");
+                status.send_modify(|s| s.source_error = Some(e.to_string()));
                 let cur = match store.indexed_height() {
                     Ok(v) => v,
                     Err(se) => halt_store!(None, se),

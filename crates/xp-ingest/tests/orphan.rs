@@ -164,6 +164,8 @@ impl BlockSource for OrphanSource {
 
 fn initial_status() -> IngestStatus {
     IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
         indexed: None,
         best: 0,
         mode: Mode::Tip,

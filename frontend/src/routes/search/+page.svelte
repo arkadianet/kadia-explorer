@@ -90,7 +90,22 @@
 </svelte:head>
 
 <Panel title="Search">
-	{#if data.q}
+	{#if data.matches}
+		<p>This ID identifies multiple entities. Choose a result:</p>
+		<ul>
+			{#each data.matches as match (match.kind)}
+				<li>
+					<a href={match.href}
+						>{match.kind === 'token'
+							? 'Token'
+							: match.kind === 'box'
+								? 'Mint input box'
+								: match.kind}</a
+					>
+				</li>
+			{/each}
+		</ul>
+	{:else if data.q}
 		<EmptyState message={`No match for "${data.q}". ${hint}`} />
 	{:else}
 		<EmptyState message={hint} />

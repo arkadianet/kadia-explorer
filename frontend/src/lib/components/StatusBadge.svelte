@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { status } from '$lib/status/status.svelte';
-	import { health } from '$lib/status/health';
 
-	const h = $derived(health(status.current));
+	const h = $derived(status.health);
 	const title = $derived(status.error && !status.current ? 'Status unavailable' : h.detail);
 </script>
 

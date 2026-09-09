@@ -14,9 +14,10 @@ const DEFAULT_UPCOMING_BLOCKS = 720;
 export const load: PageLoad = async ({ fetch }) => {
 	try {
 		const page = await api.rentUpcoming(DEFAULT_UPCOMING_BLOCKS, 100, fetch);
-		return { upcoming: page.items, error: null as unknown };
+		return { complete: page.complete === true, upcoming: page.items, error: null as unknown };
 	} catch (e) {
-		if (e instanceof ApiError) return { upcoming: [] as RentItemDto[], error: e as unknown };
+		if (e instanceof ApiError)
+			return { complete: false, upcoming: [] as RentItemDto[], error: e as unknown };
 		throw e;
 	}
 };

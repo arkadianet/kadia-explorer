@@ -1,6 +1,6 @@
 import type { StatusDto } from '$lib/api/types';
 
-export type HealthState = 'unknown' | 'healthy' | 'syncing' | 'behind' | 'stalled';
+export type HealthState = 'unavailable' | 'unknown' | 'healthy' | 'syncing' | 'behind' | 'stalled';
 
 export interface Health {
 	state: HealthState;
@@ -22,7 +22,28 @@ export interface Health {
  * far enough behind that every age and balance on the page should be read with suspicion.
  * `stalled` and `halted` come straight from the indexer and always win.
  */
-export function health(s: StatusDto | null): Health {
+export const FRESH_MS = 15_000;
+export function health(
+	s: StatusDto | null,
+	poll?: { lastSuccess: number | null; now: number; error: unknown }
+): Health {
+	if (
+		poll &&
+		(poll.error ||
+			poll.lastSuccess === null ||
+			poll.now - poll.lastSuccess > FRESH_MS ||
+			s?.source_error ||
+			s?.source_observed_at_ms == null ||
+			(s?.source_observed_at_ms !== undefined && poll.now - s.source_observed_at_ms > FRESH_MS))
+	) {
+		return {
+			state: 'unavailable',
+			label: 'Status unavailable',
+			live: 'Unavailable',
+			tone: 'warn',
+			detail: `Status unavailable — last checked ${poll.lastSuccess === null ? 'never' : new Date(poll.lastSuccess).toISOString()}. Last source observation: ${s?.source_observed_at_ms ? new Date(s.source_observed_at_ms).toISOString() : 'unknown'}.`
+		};
+	}
 	if (s === null) {
 		return {
 			state: 'unknown',

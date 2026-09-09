@@ -43,6 +43,7 @@
 	// default (720) renders without a client round trip.
 	let upcomingBlocks = $state(720);
 	let upcomingItems = $state<RentItemDto[]>(untrack(() => data.upcoming));
+	let upcomingComplete = $state(untrack(() => data.complete));
 	let upcomingLoading = $state(false);
 	// Seeded from the load function, which returns an `ApiError` as data rather than throwing
 	// so the tabs still render (and the Eligible tab still works) when `/rent/upcoming` is down.
@@ -60,6 +61,7 @@
 			const page = await api.rentUpcoming(upcomingBlocks, 100);
 			if (my !== upcomingGen) return;
 			upcomingItems = page.items;
+			upcomingComplete = page.complete === true;
 		} catch (e) {
 			if (my !== upcomingGen) return;
 			upcomingError = e;
@@ -128,7 +130,9 @@
 				<ErrorState error={upcomingError} retry={() => void loadUpcoming()} />
 			{:else if upcomingItems.length > 0}
 				<p class="sum">
-					{upcomingItems.length} boxes, total due <span class="mono">{upcomingTotalDue}</span> ERG
+					{upcomingComplete ? '' : 'Incomplete: at least '}{upcomingItems.length} boxes, {upcomingComplete
+						? 'total'
+						: 'at least'} due <span class="mono">{upcomingTotalDue}</span> ERG
 				</p>
 				<Table dense>
 					{#snippet head()}

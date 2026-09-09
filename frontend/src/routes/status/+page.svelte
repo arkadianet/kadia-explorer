@@ -17,13 +17,7 @@
 	// from the store supersedes it.
 	const loadError = $derived(current ? null : (data.error ?? status.error));
 
-	const tone = $derived.by((): 'ok' | 'warn' | 'danger' | 'neutral' => {
-		if (!current) return 'neutral';
-		if (current.halted !== null || current.stalled !== null) return 'danger';
-		if (current.lag_blocks > 100) return 'danger';
-		if (current.lag_blocks > 3) return 'warn';
-		return 'ok';
-	});
+	const tone = $derived(status.health.tone);
 </script>
 
 <svelte:head>
@@ -31,6 +25,8 @@
 </svelte:head>
 
 <Panel title="Indexer status">
+	<p title={status.health.detail}>{status.health.label}</p>
+	<p>{status.health.detail}</p>
 	{#if !current}
 		<ErrorState error={loadError} />
 	{:else}
