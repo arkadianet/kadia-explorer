@@ -41,7 +41,7 @@
 		{ href: '/richlist', label: 'Rich list', icon: 'richlist' },
 		{ href: '/tokens', label: 'Tokens', icon: 'token' },
 		{ href: '/rent', label: 'Storage rent', icon: 'rent-coin', primary: true },
-		{ href: '/status', label: 'Status', icon: 'status', primary: true }
+		{ href: '/status', label: 'Status', icon: 'status' }
 	];
 
 	function isActive(href: string): boolean {
@@ -61,6 +61,21 @@
 		return SECTION_OF[first] === href;
 	}
 
+	let moreOpen = $state(false);
+	let moreButton: HTMLButtonElement;
+
+	$effect(() => {
+		void page.url.pathname;
+		moreOpen = false;
+	});
+
+	function dismissMore(event: KeyboardEvent) {
+		if (event.key === 'Escape' && moreOpen) {
+			moreOpen = false;
+			moreButton?.focus();
+		}
+	}
+
 	const year = new Date().getFullYear();
 
 	onMount(() => {
@@ -69,6 +84,8 @@
 		return () => status.stop();
 	});
 </script>
+
+<svelte:window onkeydown={dismissMore} />
 
 <div class="shell">
 	<aside class="rail">
@@ -200,6 +217,32 @@
 			>
 		</a>
 	{/each}
+	<div class="nav-more">
+		<button
+			type="button"
+			class="more-toggle"
+			aria-expanded={moreOpen}
+			aria-controls="more-navigation"
+			onclick={() => (moreOpen = !moreOpen)}
+			bind:this={moreButton}
+			class:current={navLinks.some((l) => !l.primary && isCurrent(l.href))}
+		>
+			<Icon name="menu" size={20} />
+			<span>More</span>
+		</button>
+		<div class="more-links" id="more-navigation" hidden={!moreOpen}>
+			{#each navLinks.filter((l) => !l.primary) as link (link.href)}
+				<a
+					href={link.href}
+					class:current={isCurrent(link.href)}
+					aria-current={isActive(link.href) ? 'page' : undefined}
+					onclick={() => (moreOpen = false)}
+				>
+					<Icon name={link.icon} size={20} />{link.label}
+				</a>
+			{/each}
+		</div>
+	</div>
 </nav>
 
 <style>
@@ -547,7 +590,8 @@
 		padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
 	}
 
-	.tabbar a {
+	.tabbar > a,
+	.nav-more .more-toggle {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
@@ -560,8 +604,48 @@
 		color: inherit;
 	}
 
-	.tabbar a.current {
+	.tabbar a.current,
+	.nav-more .more-toggle.current {
 		color: var(--accent);
+	}
+
+	.nav-more {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.nav-more .more-toggle {
+		cursor: pointer;
+		border: 0;
+		background: none;
+		width: 100%;
+	}
+
+	.more-links {
+		position: absolute;
+		bottom: calc(100% + 8px);
+		right: 8px;
+		width: min(240px, calc(100vw - 16px));
+		padding: 8px;
+		border: 1px solid var(--ink-fg-muted);
+		border-radius: var(--radius-control);
+		background: var(--ink-panel);
+		box-shadow: var(--shadow-lift);
+	}
+
+	.more-links a {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		min-height: 44px;
+		padding: 8px 12px;
+		border-radius: var(--radius-control);
+		font-size: var(--fs-body);
+		color: var(--ink-fg);
+	}
+
+	.more-links a:hover {
+		background: var(--ink-hairline);
 	}
 
 	@media (min-width: 900px) {

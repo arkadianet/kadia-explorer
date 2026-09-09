@@ -15,7 +15,7 @@
 
 <header class="page-head">
 	<div class="row">
-		<h1>{title}</h1>
+		<h1><bdi dir="auto">{title}</bdi></h1>
 		{#if aside}<div class="aside">{@render aside()}</div>{/if}
 	</div>
 	{#if id}
@@ -46,6 +46,9 @@
 	}
 
 	h1 {
+		min-width: 0;
+		max-width: 100%;
+		overflow-wrap: anywhere;
 		font-size: var(--fs-page);
 		font-weight: 600;
 		letter-spacing: -0.02em;
