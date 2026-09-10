@@ -1592,3 +1592,21 @@ async fn upcoming_501_boxes_explicitly_marks_500_as_incomplete() {
     assert_eq!(page["items"].as_array().unwrap().len(), 500);
     assert_eq!(page["complete"], false);
 }
+
+#[tokio::test]
+async fn supply_is_derived_from_the_emission_contract_not_a_schedule() {
+    // The fixture store is seeded above genesis, so it has no emission box and must say so
+    // rather than invent a number.
+    let (_d, app) = app();
+    let (st, v) = get(&app, "/v1/supply").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["genesis_total_nano"], "97739925000000000");
+    assert_eq!(v["complete"], false);
+    assert!(v["emitted_nano"].is_null(), "no genesis ⇒ no honest figure");
+    assert!(v["emission_remaining_nano"].is_null());
+    // The constant itself is the sum of the three chain-spec genesis boxes.
+    assert_eq!(
+        xp_types::GENESIS_TOTAL_NANO,
+        93_409_132_500_000_000 + 4_330_791_500_000_000 + 1_000_000_000
+    );
+}

@@ -145,6 +145,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
             get(handlers::registers::boxes),
         )
         .route("/v1/richlist", get(handlers::richlist::list))
+        .route("/v1/supply", get(handlers::supply::supply))
         .route("/v1/rent/upcoming", get(handlers::rent::upcoming))
         .route("/v1/rent/eligible", get(handlers::rent::eligible))
         .route("/v1/search", get(handlers::search::search))

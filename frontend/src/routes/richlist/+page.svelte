@@ -5,9 +5,7 @@
 	import Amount from '$lib/components/Amount.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager } from '$lib/pager/pager.svelte';
-	import { status } from '$lib/status/status.svelte';
-	import { circulatingAt } from '$lib/format/supply';
-	import type { RichlistItemDto } from '$lib/api/types';
+	import type { RichlistItemDto, SupplyDto } from '$lib/api/types';
 
 	const pager = createPager<RichlistItemDto>((cursor) => api.richlist(cursor, 50));
 
@@ -15,8 +13,17 @@
 		if (pager.items.length === 0) void pager.loadMore();
 	});
 
-	const tip = $derived(status.current?.indexed ?? null);
-	const supply = $derived(tip === null ? null : circulatingAt(tip));
+	// Supply comes from the chain (emission contract balance), not an emission schedule: a
+	// hardcoded schedule was wrong about both the early foundation share and EIP-27.
+	let supplyDto = $state<SupplyDto | null>(null);
+	$effect(() => {
+		void api
+			.supply()
+			.then((s) => (supplyDto = s))
+			.catch(() => (supplyDto = null));
+	});
+
+	const supply = $derived(supplyDto?.emitted_nano == null ? null : BigInt(supplyDto.emitted_nano));
 
 	function pctOfSupply(nano: string): string {
 		if (supply === null || supply === 0n) return '—';

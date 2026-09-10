@@ -40,6 +40,24 @@ pub fn hex32(h: &Hash32) -> String {
     hex::encode(h)
 }
 
+/// Mainnet genesis allocation, in nanoERG, from the three chain-spec boxes served by
+/// `/utxo/genesis`. Verified against a live node on 2026-09-10.
+///
+/// The emission contract pays the miner (and, in the first years, the foundation) out of
+/// `GENESIS_EMISSION_NANO` block by block, so the ERG that actually exists at any height is
+/// `GENESIS_TOTAL_NANO` minus whatever the emission contract still holds. Deriving it that way
+/// is exact and needs no emission schedule — which matters because the hardcoded pre-EIP-27
+/// schedule this replaced was wrong: it assumed 75 ERG/block where the chain paid 67.5 (10%
+/// went to the foundation), and ignored EIP-27 re-emission entirely.
+pub const GENESIS_EMISSION_NANO: u64 = 93_409_132_500_000_000;
+/// Foundation box at genesis (`4,330,791.5 ERG`).
+pub const GENESIS_FOUNDATION_NANO: u64 = 4_330_791_500_000_000;
+/// The "no premine" proof box at genesis (`1 ERG`).
+pub const GENESIS_NO_PREMINE_NANO: u64 = 1_000_000_000;
+/// Every nanoERG the chain started with: 97,739,925 ERG.
+pub const GENESIS_TOTAL_NANO: u64 =
+    GENESIS_EMISSION_NANO + GENESIS_FOUNDATION_NANO + GENESIS_NO_PREMINE_NANO;
+
 #[cfg(test)]
 mod tests {
     use super::*;

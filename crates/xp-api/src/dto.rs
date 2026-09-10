@@ -220,6 +220,20 @@ pub struct PageDto<T> {
     pub next_cursor: Option<String>,
 }
 
+/// ERG in existence at the indexed tip, derived from the emission contract's remaining
+/// balance rather than an emission schedule (see `handlers::supply`).
+#[derive(Serialize)]
+pub struct SupplyDto {
+    pub indexed_height: Option<u32>,
+    /// Still held by the emission contract, i.e. not yet emitted. `null` without genesis.
+    pub emission_remaining_nano: Option<String>,
+    /// `genesis_total_nano - emission_remaining_nano`. `null` without genesis.
+    pub emitted_nano: Option<String>,
+    pub genesis_total_nano: String,
+    /// False when the store lacks the genesis emission box, so the figures are unavailable.
+    pub complete: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct StatusDto {
     pub source_observed_at_ms: Option<u64>,

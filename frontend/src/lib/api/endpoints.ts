@@ -10,6 +10,7 @@ import type {
 	RichlistItemDto,
 	SearchDto,
 	StatusDto,
+	SupplyDto,
 	TemplateDto,
 	TokenHolderDto,
 	TokenInfoDto,
@@ -21,6 +22,8 @@ type Fetch = typeof fetch;
 
 export const api = {
 	status: (f?: Fetch) => apiGet<StatusDto>('/status', undefined, f),
+
+	supply: (f?: Fetch) => apiGet<SupplyDto>('/supply', undefined, f),
 
 	blocks: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
 		apiGet<PageDto<BlockDto>>('/blocks', { cursor, limit, dir }, f),

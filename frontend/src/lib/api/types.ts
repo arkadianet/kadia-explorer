@@ -178,3 +178,12 @@ export interface TemplateDto {
 	first_seen: number;
 	example_address: string | null;
 }
+
+/** Chain-derived supply figures (`/v1/supply`). Amounts are decimal strings of nanoERG. */
+export interface SupplyDto {
+	indexed_height: number | null;
+	emission_remaining_nano: string | null;
+	emitted_nano: string | null;
+	genesis_total_nano: string;
+	complete: boolean;
+}
