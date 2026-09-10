@@ -1,12 +1,12 @@
 # Explorer historical balances and storage-rent reporting — Design
 
-Date: 2026-09-10. Status: proposed; rent verification has explicit release gates.
+Date: 2026-09-10. Status: historical reads implemented in the working tree, awaiting Rust execution gates; rent verification remains gated. See `WORK-REPORT.md` for delivery status.
 
 ## 1. Goal and recommendation
 
 Answer two operator questions well: “What did this address hold at block H?” and “Which expired boxes were actually consumed through the rent rule, and what value left them?” Complete the useful reporting routes already promised in the explorer design, without making the 89 GB index resync for these features.
 
-This is a design only. Neither repository is changed. Paths below are relative to `/home/rkadias/coding/development/arkadianet/ergo-explorer` unless stated otherwise. The inspected checkout is `feat/explorer-core`, commit `3802ace95fc7a3844a7e611fb2ea3364206d8bbc`. The legacy input is `/home/rkadias/coding/archive/kadia.io/docs/explorer_api_contract.md`, including all 16 endpoints; it specifies neither the historical selector parameters nor a detailed collections response. Examples below define a new contract, not undocumented legacy compatibility.
+The original investigation below was design-only. The September 10 implementation adds historical reads without changing the core schema; its validation status is recorded in `WORK-REPORT.md`. Paths below are relative to `/home/rkadias/coding/development/arkadianet/ergo-explorer` unless stated otherwise. The inspected checkout is `feat/explorer-core`, commit `3802ace95fc7a3844a7e611fb2ea3364206d8bbc`. The legacy input is `/home/rkadias/coding/archive/kadia.io/docs/explorer_api_contract.md`, including all 16 endpoints; it specifies neither the historical selector parameters nor a detailed collections response. Examples below define a new contract, not undocumented legacy compatibility.
 
 | Rank by value for effort | Gap | Decision | Core schema v3? |
 |---|---|---|---|
@@ -51,7 +51,7 @@ Use axum `/v1`, existing per-IP limits, `blocking()` and one core `Reader` snaps
 
 Lists return `{items, next_cursor}` plus documented snapshot/coverage metadata. Default `limit=50`, valid range 1–500; apply the existing parser's house behavior for oversized values. New structured cursors are versioned, opaque base64url encodings with strict length/type validation. They bind the route, normalized filters, ordering, anchor height and block id, reporting generation/classifier version where applicable, and the exclusive last examined key. They contain no accumulating monetary totals. Reject malformed/mismatched cursors with 400. A replaced or unavailable anchor is 409 `snapshot_changed`, requiring a restart. An anchor outside the currently published reporting generation/coverage also requires a restart, even if its core block still exists. New blocks above an unchanged anchor do not invalidate it. Reused gidx values on a fork cannot silently join two histories.
 
-Use the existing RFC 7807-shaped `type`, `title`, `status`, `detail` object. Proposed typed failures add stable `code` and relevant bounded metadata; publish problem responses as `application/problem+json` for these routes (the current generic renderer uses JSON). Preserve 429 and 503 with `Retry-After`. The five-second outer timeout is not cancellation of `spawn_blocking`: every scan also checks its work budget and a cooperative deadline, at least every 128 rows. Initial scan deadline is 250 ms, subject to benchmarks. Exhaustion returns a problem, never an apparently exact truncated sum.
+Use the existing RFC 7807-shaped `type`, `title`, `status`, `detail` object. Proposed typed failures add stable `code` and relevant bounded metadata; publish problem responses as `application/problem+json` for these routes (the current generic renderer uses JSON). Preserve 429 and 503 with `Retry-After`. The five-second outer timeout is not cancellation of `spawn_blocking`: every scan also checks its work budget and a cooperative deadline, at least every 128 rows. Historical scalar scans have a four-second cooperative deadline (below the five-second outer timeout); pages yield after 250 ms, after consuming at least one candidate. Exhaustion returns a problem, never an apparently exact truncated sum.
 
 Suggested rejection:
 
@@ -99,6 +99,8 @@ Add an expensive-read admission ceiling of 2 within the existing global ceiling,
 
 Require `height` as u32. Accept height 0 only for a genesis-seeded full store, with `block_id: null` and explicitly defined pre-block genesis state. A future height is 400 `height_not_indexed`. An uninitialized or partial store is 503 `history_unavailable`; partial ingestion tolerates missing inputs and cannot establish exact ownership, even at its current tip. A valid unseen address has a zero balance; malformed/wrong-network addresses receive 400. This deliberately improves on the current helper that conflates invalid and unseen addresses as 404; validation must derive the tree hash independently of whether `ERGO_TREES` contains it. A tree first seen after H also has zero balance at H.
 
+**Implementation clarification (September 10):** This explorer currently encodes and validates mainnet addresses and has no persisted network identity. Exact history therefore requires the three recognized retained mainnet genesis records as well as the genesis-seeded flag and absence of `partial_from`. Other genesis identities, including testnet, receive `history_unavailable`; a generic seeded flag alone cannot authenticate zero-creator boxes. This adds no metadata or migration. Token lists are sorted by token id. `history_response_limit` is the stable 422 code for an oversized result, distinct from `history_scan_limit`. The shared error renderer now uses `application/problem+json` for existing errors as well as these routes.
+
 An optional `block_id` binds the requested height to the caller's intended canonical block; mismatch returns 409. The response anchors even single-shot calculations so clients can interpret subsequent changes.
 
 **Timestamp lookup is deferred**, rather than pretending timestamp order equals height order. The old contract mentions timestamps but gives no precise semantics. A later `timestamp` selector should resolve to the greatest canonical height whose header timestamp is at or before the requested instant, returning that height/id and explicitly saying it is header time. Do not binary-search heights on an unproven monotonicity assumption. The reporting timestamp index in §6 could support a bounded resolver later; this release rejects `timestamp` with 400 and documents height-only support.
@@ -115,7 +117,7 @@ No new table, row encoding, undo record, backfill or schema v3. Per applied bloc
 
 ### 4.3 Large-address escape hatch
 
-The scalar endpoint examines at most 10,000 candidate boxes and 100,000 token entries, also subject to time/memory limits. It either returns the complete balance or 422 `history_scan_limit`. A cap is acceptable only with a complete, bounded way to obtain the result:
+The scalar endpoint examines at most 100,000 candidate boxes and aggregates at most 100,000 qualifying token entries, also subject to time/memory limits. It either returns the complete balance or 422 `history_scan_limit`. A cap is acceptable only with a complete, bounded way to obtain the result:
 
 `GET /v1/addresses/{address}/boxes/at?height=1866000&limit=500`
 
@@ -137,7 +139,7 @@ The scalar endpoint examines at most 10,000 candidate boxes and 100,000 token en
 }
 ```
 
-This is a minimal historical UTXO projection, not today's `BoxDto` with potentially misleading current spent/rent fields. Scan at most 1,000 candidate boxes per page, returning at most `limit` qualifying boxes; token/response budgets can end a page earlier. Cursor advances over the **last examined** candidate, even if none qualified. Empty `items` with a non-null cursor is valid. `next_cursor: null` alone means the address's candidate range through H is exhausted. Before consuming a candidate, ensure it fits the page's token budget; if a single box cannot fit, return a typed size error. This prevents dropping part of a box or livelock.
+This is a minimal historical UTXO projection, not today's `BoxDto` with potentially misleading current spent/rent fields. Scan at most 1,000 candidate boxes per page, returning at most `limit` qualifying boxes; token/response budgets can end a page earlier. At the indexed tip, pages scan `TREE_UNSPENT`; older anchors scan `TREE_BOXES`. Candidates spent by H are skipped before creator lookup; candidates born after H are skipped without ending the walk. Deadlines yield a continuation rather than a scan-limit error. Cursor advances over the **last examined** candidate, even if none qualified. Empty `items` with a non-null cursor is valid. `next_cursor: null` alone means the address's candidate range through H is exhausted. Before consuming a candidate, ensure it fits the page's token budget; if a single box cannot fit, return a typed size error. This prevents dropping part of a box or livelock.
 
 Clients sum all pages at the same anchor. Later spends above H do not change membership at H; any reorg changing H invalidates the anchor. No HTTP session holds an MVCC snapshot open across pages. This is preferable to resumable scalar sums embedded in client-controlled cursors.
 
@@ -416,10 +418,14 @@ These bounds and few numeric sums do not justify a SQL engine: month pages touch
 
 ## 10. Delivery gates and unresolved questions
 
-1. Ship historical balance and box pages first. Benchmark small and worst-case addresses and validate inclusion/genesis semantics against a fixture oracle. No store migration.
-2. Ship bounded miners reads. Build the reporting lifecycle and header-only backfill, then stats 24h/daily. Verify fork and crash behavior before exposing ranges.
-3. Establish current and historical rent validation rules, effective parameters and authenticated evidence acquisition. Pin golden fixtures and classifier version. This is a blocking accuracy gate for verified rent history, not an invitation to ship the old heuristic under a new name.
-4. Backfill a recent rent interval, publish its explicit coverage, then build full history. Ship recent feed, summary and daily from the same event/contribution definitions. Track unknown amounts and archive gaps operationally.
+The task's strict implementation priority supersedes the earlier suggestion to ship miners/header statistics ahead of rent:
+
+1. Ship historical balance and box pages first. Validate against a fixture UTXO oracle, including logical apply/rollback fingerprints, bounded scans and forked cursors. Run all required Rust/frontend gates before declaring this feature release-ready. Benchmark small and worst-case addresses; no migration.
+2. Establish historical rent validation rules, effective parameters and authenticated evidence acquisition. Pin recreate/absorb fixtures and classifier versions. Then build the separately versioned reporting lifecycle and fixture-proven backfill, before exposing `/v1/rent/recent`. Missing authenticated evidence is a blocking accuracy gate, not permission to publish an age heuristic. A human runs every real backfill.
+3. Only after rent history, implement `/v1/rent/summary`, `/v1/rent/daily`, `/v1/stats/24h`, `/v1/stats/daily`, and `/v1/miners`, with their coverage and rollback gates.
+4. Do not implement `/v1/network/stats`.
+
+The supply review is a prerequisite outside that feature sequence: `/v1/supply` reports explicitly defined gross allocation outside the original emission reserve, retains `emitted_nano` only as a deprecated alias, and leaves `circulating_nano` null. The rich list includes protocol reserves and labels its percentage against total genesis allocation. Neither is the deferred circulating-supply dashboard.
 
 Acceptance measurements must include cold/warm p50/p95, rows/bytes examined, cancellation completion time, blocking-pool occupancy, writer throughput and redb growth under concurrent ingestion. Use the brief's existing p50 11 ms / p95 25 ms as the regression baseline for existing routes, not as evidence for the new routes. Initial rollout gate: no more than 20% p95 regression on the same existing-route workload during throttled backfill; tune or pause the worker if exceeded. Verify ≥10,000-row cursor walks, no duplicate keys, and repeat with append and fork events.
 

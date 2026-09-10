@@ -4,6 +4,7 @@
 	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import { api } from '$lib/api/endpoints';
+	import { pctOfGenesis } from '$lib/format/supply';
 	import { createPager } from '$lib/pager/pager.svelte';
 	import type { RichlistItemDto, SupplyDto } from '$lib/api/types';
 
@@ -13,8 +14,7 @@
 		if (pager.items.length === 0) void pager.loadMore();
 	});
 
-	// Supply comes from the chain (emission contract balance), not an emission schedule: a
-	// hardcoded schedule was wrong about both the early foundation share and EIP-27.
+	// The list includes protocol reserves; its denominator includes them too.
 	let supplyDto = $state<SupplyDto | null>(null);
 	$effect(() => {
 		void api
@@ -23,13 +23,7 @@
 			.catch(() => (supplyDto = null));
 	});
 
-	const supply = $derived(supplyDto?.emitted_nano == null ? null : BigInt(supplyDto.emitted_nano));
-
-	function pctOfSupply(nano: string): string {
-		if (supply === null || supply === 0n) return '—';
-		const pct = Number((BigInt(nano) * 10_000n) / supply) / 100;
-		return `${pct.toFixed(2)}%`;
-	}
+	const supply = $derived(supplyDto?.complete ? supplyDto.genesis_total_nano : null);
 </script>
 
 <svelte:head>
@@ -37,7 +31,10 @@
 </svelte:head>
 
 <Panel title="Rich list">
-	<p class="note">Supply estimate ignores EIP‑27 re-emission</p>
+	<p class="note">
+		Share of total genesis allocation, including emission, re-emission and treasury reserves. This
+		is not circulating supply.
+	</p>
 	<InfiniteList
 		table
 		columns={4}
@@ -50,7 +47,7 @@
 				<th class="num">Rank</th>
 				<th>Address</th>
 				<th class="num">Balance</th>
-				<th class="num">≈ % of supply</th>
+				<th class="num">% of genesis allocation</th>
 			</tr>
 		{/snippet}
 		{#snippet children(item: RichlistItemDto, i: number)}
@@ -66,7 +63,7 @@
 					{/if}
 				</td>
 				<td class="num"><Amount nano={item.nano} maxFrac={9} /></td>
-				<td class="num mono">{pctOfSupply(item.nano)}</td>
+				<td class="num mono">{pctOfGenesis(item.nano, supply)}</td>
 			</tr>
 		{/snippet}
 	</InfiniteList>

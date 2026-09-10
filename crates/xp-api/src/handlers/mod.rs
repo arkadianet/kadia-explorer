@@ -10,3 +10,5 @@ pub mod supply;
 pub mod templates;
 pub mod tokens;
 pub mod txs;
+
+pub mod history;

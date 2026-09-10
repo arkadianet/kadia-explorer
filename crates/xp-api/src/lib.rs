@@ -48,10 +48,39 @@ impl Default for ApiConfig {
 }
 
 /// Process-lifetime counters surfaced on `/v1/status`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Counters {
     pub rate_limited_total: AtomicU64,
     pub inflight_reads: AtomicU32,
+    history_permits: Arc<Semaphore>,
+}
+
+impl Default for Counters {
+    fn default() -> Self {
+        Self {
+            rate_limited_total: AtomicU64::new(0),
+            inflight_reads: AtomicU32::new(0),
+            history_permits: Arc::new(Semaphore::new(2)),
+        }
+    }
+}
+
+pub(crate) async fn history_blocking<T, F>(state: &AppState, f: F) -> Result<T, ApiError>
+where
+    F: FnOnce(&Reader) -> Result<T, ApiError> + Send + 'static,
+    T: Send + 'static,
+{
+    let permit = state
+        .counters
+        .history_permits
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError::Overloaded)?;
+    blocking(state, move |rd| {
+        let _permit = permit;
+        f(rd)
+    })
+    .await
 }
 
 #[derive(Clone)]
@@ -128,6 +157,14 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .route(
             "/v1/addresses/{addr}/boxes",
             get(handlers::addresses::boxes),
+        )
+        .route(
+            "/v1/addresses/{addr}/balance/at",
+            get(handlers::history::balance),
+        )
+        .route(
+            "/v1/addresses/{addr}/boxes/at",
+            get(handlers::history::boxes),
         )
         .route("/v1/addresses/{addr}/txs", get(handlers::addresses::txs))
         .route("/v1/addresses/{addr}/rent", get(handlers::addresses::rent))
@@ -242,5 +279,51 @@ mod inflight_guard_tests {
             "inflight_reads must return to 0 once the cancelled read actually finishes"
         );
         assert_eq!(state.read_permits.available_permits(), 2);
+    }
+    #[tokio::test]
+    async fn historical_admission_survives_cancellation_and_releases_on_errors() {
+        let state = state(4);
+        let task_state = state.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+        let task = tokio::spawn(async move {
+            history_blocking(&task_state, move |_| {
+                started_tx.send(()).unwrap();
+                finish_rx.recv().unwrap();
+                Ok(())
+            })
+            .await
+        });
+        started_rx.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_eq!(state.counters.history_permits.available_permits(), 1);
+        let second = state
+            .counters
+            .history_permits
+            .clone()
+            .try_acquire_owned()
+            .unwrap();
+        assert!(matches!(
+            history_blocking(&state, |_| Ok(())).await,
+            Err(ApiError::Overloaded)
+        ));
+        assert_eq!(state.read_permits.available_permits(), 3);
+        drop(second);
+        finish_tx.send(()).unwrap();
+        for _ in 0..200 {
+            if state.counters.history_permits.available_permits() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(state.counters.history_permits.available_permits(), 2);
+        assert_eq!(state.read_permits.available_permits(), 4);
+        assert!(
+            history_blocking::<(), _>(&state, |_| Err(ApiError::NotFound))
+                .await
+                .is_err()
+        );
+        assert_eq!(state.counters.history_permits.available_permits(), 2);
     }
 }

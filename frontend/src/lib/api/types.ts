@@ -183,7 +183,11 @@ export interface TemplateDto {
 export interface SupplyDto {
 	indexed_height: number | null;
 	emission_remaining_nano: string | null;
+	/** Deprecated alias for outside_emission_nano; not circulating supply. */
 	emitted_nano: string | null;
+	outside_emission_nano: string | null;
+	circulating_nano: null;
+	definition: 'genesis_allocation_minus_original_emission_reserve';
 	genesis_total_nano: string;
 	complete: boolean;
 }

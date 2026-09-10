@@ -220,17 +220,19 @@ pub struct PageDto<T> {
     pub next_cursor: Option<String>,
 }
 
-/// ERG in existence at the indexed tip, derived from the emission contract's remaining
-/// balance rather than an emission schedule (see `handlers::supply`).
+/// Mainnet gross reserve accounting; no circulating-supply claim.
 #[derive(Serialize)]
 pub struct SupplyDto {
     pub indexed_height: Option<u32>,
-    /// Still held by the emission contract, i.e. not yet emitted. `null` without genesis.
+    /// Total held on the original emission tree. `null` without recognized mainnet genesis.
     pub emission_remaining_nano: Option<String>,
-    /// `genesis_total_nano - emission_remaining_nano`. `null` without genesis.
+    /// Deprecated alias for `outside_emission_nano`; never circulating supply.
     pub emitted_nano: Option<String>,
+    pub outside_emission_nano: Option<String>,
+    pub circulating_nano: Option<String>,
+    pub definition: &'static str,
     pub genesis_total_nano: String,
-    /// False when the store lacks the genesis emission box, so the figures are unavailable.
+    /// Completeness of gross reserve accounting only; does not certify circulating supply.
     pub complete: bool,
 }
 

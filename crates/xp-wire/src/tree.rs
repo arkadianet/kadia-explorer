@@ -60,3 +60,15 @@ pub fn tree_info(tree_bytes: &[u8]) -> Result<TreeInfo, WireError> {
         kind,
     })
 }
+
+/// Validate the supported network without requiring this tree to have appeared on chain.
+pub fn address_tree_hash(address: &str) -> Result<TreeHash, WireError> {
+    let addr = AddressEncoder::new(NetworkPrefix::Mainnet)
+        .parse_address_from_str(address)
+        .map_err(|e| WireError::Tree(e.to_string()))?;
+    let tree = addr.script().map_err(|e| WireError::Tree(e.to_string()))?;
+    let bytes = tree
+        .sigma_serialize_bytes()
+        .map_err(|e| WireError::Tree(e.to_string()))?;
+    Ok(tree_hash(&bytes))
+}

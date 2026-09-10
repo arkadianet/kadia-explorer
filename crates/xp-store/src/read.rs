@@ -56,6 +56,32 @@ impl Reader {
             .transpose()
     }
 
+    /// Exact historical ownership is unavailable on partial/uninitialized stores.
+    pub fn full_history(&self) -> Result<bool, StoreError> {
+        let meta = self.txn.open_table(META)?;
+        Ok(meta.get(META_GENESIS_SEEDED)?.is_some() && meta.get(META_PARTIAL_FROM)?.is_none())
+    }
+
+    /// Recognize the retained mainnet genesis records, including on a spent genesis.
+    /// The store has no network metadata: never apply mainnet supply constants merely
+    /// because seeding picked a largest box on some other chain.
+    pub fn mainnet_genesis(&self) -> Result<bool, StoreError> {
+        if !self.full_history()? {
+            return Ok(false);
+        }
+        for (id, value) in MAINNET_GENESIS {
+            let id = hex::decode(id).expect("static genesis id");
+            let id = as_hash32(&id)?;
+            let Some(b) = self.box_by_id(&id)? else {
+                return Ok(false);
+            };
+            if b.value != value || b.tx_id != [0; 32] || b.creation_height != 0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub fn header_at(&self, height: u32) -> Result<Option<HeaderRow>, StoreError> {
         let table = self.txn.open_table(HEADERS)?;
         match table.get(k_u32(height).as_slice())? {
@@ -372,6 +398,48 @@ impl Reader {
         })
     }
 
+    /// Stream historical candidates without buffering an address's whole history.
+    /// Returning false stops before the next indexed row is decoded.
+    pub fn visit_history_candidates<E: From<StoreError>>(
+        &self,
+        tree: &Hash32,
+        after: Option<Gidx>,
+        unspent_only: bool,
+        mut visit: impl FnMut(Hash32, BoxRow) -> Result<bool, E>,
+    ) -> Result<(), E> {
+        let index = self
+            .txn
+            .open_table(if unspent_only {
+                TREE_UNSPENT
+            } else {
+                TREE_BOXES
+            })
+            .map_err(StoreError::from)?;
+        let boxes = BoxResolver::open(&self.txn)?;
+        let (lo, hi) = prefix_range(tree);
+        let lo = after.map(|g| k_prefix_gidx(tree, g)).unwrap_or(lo);
+        let bound = if after.is_some() {
+            Bound::Excluded(lo.as_slice())
+        } else {
+            Bound::Included(lo.as_slice())
+        };
+        for entry in index
+            .range::<&[u8]>((bound, Bound::Excluded(hi.as_slice())))
+            .map_err(StoreError::from)?
+        {
+            let (k, _) = entry.map_err(StoreError::from)?;
+            let gidx = crate::keys::gidx_of_composite(k.value())?;
+            let (id, row) = boxes.get(gidx)?;
+            if row.gidx != gidx || row.tree_hash != *tree {
+                return Err(StoreError::Corrupt("historical box index mismatch").into());
+            }
+            if !visit(id, row)? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     pub fn tree_txs(
         &self,
         tree: &Hash32,
@@ -549,3 +617,19 @@ fn tx_by_gidx_lookup(
             "dangling tree index -> tx_by_gidx entry",
         ))
 }
+
+/// Identities are retained in BOXES even after spending; not inferred from tx id zero.
+pub const MAINNET_GENESIS: [(&str, u64); 3] = [
+    (
+        "b69575e11c5c43400bfead5976ee0d6245a1168396b2e2a4f384691f275d501c",
+        xp_types::GENESIS_EMISSION_NANO,
+    ),
+    (
+        "b8ce8cfe331e5eadfb0783bdc375c94413433f65e1e45857d71550d42e4d83bd",
+        xp_types::GENESIS_NO_PREMINE_NANO,
+    ),
+    (
+        "5527430474b673e4aafb08e0079c639de23e6a17e87edd00f78662b43c88aeda",
+        xp_types::GENESIS_FOUNDATION_NANO,
+    ),
+];

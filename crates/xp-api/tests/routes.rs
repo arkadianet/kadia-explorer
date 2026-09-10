@@ -1610,3 +1610,814 @@ async fn supply_is_derived_from_the_emission_contract_not_a_schedule() {
         93_409_132_500_000_000 + 4_330_791_500_000_000 + 1_000_000_000
     );
 }
+
+fn mainnet_genesis() -> Vec<xp_wire::DecodedBox> {
+    xp_wire::decode_genesis_boxes(include_str!("../../../tests/fixtures/genesis.json")).unwrap()
+}
+
+fn genesis_app(boxes: &[xp_wire::DecodedBox]) -> (tempfile::TempDir, Router, Arc<Store>) {
+    let (dir, _, mut state) = app_with_state(unlimited(), None);
+    let store = Arc::new(Store::open(&dir.path().join("genesis.redb")).unwrap());
+    store.seed_genesis(boxes).unwrap();
+    state.store = store.clone();
+    (dir, xp_api::router(state, &unlimited()), store)
+}
+
+#[tokio::test]
+async fn supply_defines_gross_reserves_without_claiming_circulation() {
+    let (_d, app, store) = genesis_app(&mainnet_genesis());
+    let before = store.fingerprint().unwrap();
+    let (st, v) = get(&app, "/v1/supply").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["complete"], true);
+    assert_eq!(
+        v["definition"],
+        "genesis_allocation_minus_original_emission_reserve"
+    );
+    assert_eq!(v["outside_emission_nano"], "4330792500000000");
+    assert!(v["circulating_nano"].is_null());
+    assert_eq!(store.fingerprint().unwrap(), before);
+}
+
+#[tokio::test]
+async fn supply_does_not_apply_mainnet_constants_to_other_genesis() {
+    let mut boxes = mainnet_genesis();
+    boxes[0].id = xp_types::BoxId([0xab; 32]);
+    let (_d, app, _) = genesis_app(&boxes);
+    let (st, v) = get(&app, "/v1/supply").await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["complete"], false);
+    assert!(v["emitted_nano"].is_null());
+}
+
+#[tokio::test]
+async fn history_genesis_unseen_and_invalid_selectors() {
+    let boxes = mainnet_genesis();
+    let address = xp_wire::tree_info(&boxes[0].tree_bytes).unwrap().address;
+    let (_d, app, store) = genesis_app(&boxes);
+    let before = store.fingerprint().unwrap();
+    let path = format!("/v1/addresses/{address}");
+    let (st, v) = get(&app, &format!("{path}/balance/at?height=0")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["balance"]["nano"], boxes[0].value.to_string());
+    assert_eq!(v["at"]["height"], 0);
+    assert!(v["at"]["block_id"].is_null());
+    let (st, p) = get(&app, &format!("{path}/boxes/at?height=0")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(p["items"][0]["inclusion_height"], 0);
+    assert_eq!(p["items"][0]["nano"], v["balance"]["nano"]);
+    for query in [
+        "",
+        "height=-1",
+        "height=4294967296",
+        "height=0&timestamp=1",
+        "height=1",
+        "height=0&limit=0",
+    ] {
+        assert_eq!(
+            get(&app, &format!("{path}/balance/at?{query}")).await.0,
+            StatusCode::BAD_REQUEST,
+            "{query}"
+        );
+    }
+    assert_eq!(
+        get(&app, "/v1/addresses/garbage/balance/at?height=0")
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+    let unseen = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let (st, v) = get(&app, &format!("/v1/addresses/{unseen}/balance/at?height=0")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["balance"]["nano"], "0");
+    assert_eq!(v["balance"]["tokens"], serde_json::json!([]));
+    assert_eq!(store.fingerprint().unwrap(), before);
+}
+
+#[tokio::test]
+async fn history_rejects_partial_store_and_legacy_network_stats_stays_absent() {
+    let (_d, app) = app();
+    let address = xp_wire::tree_info(&mainnet_genesis()[0].tree_bytes)
+        .unwrap()
+        .address;
+    let (st, v) = get(
+        &app,
+        &format!("/v1/addresses/{address}/balance/at?height=1866000"),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(v["code"], "history_unavailable");
+    assert_eq!(
+        get(&app, "/v1/network/stats").await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+fn history_id(n: u32) -> [u8; 32] {
+    let mut id = [0x7e; 32];
+    id[..4].copy_from_slice(&n.to_be_bytes());
+    id
+}
+
+fn history_output(n: u32, value: u64, tokens: Vec<([u8; 32], u64)>) -> xp_wire::DecodedBox {
+    let mut out = mainnet_genesis()[0].clone();
+    out.id = xp_types::BoxId(history_id(n));
+    out.value = value;
+    out.tree_bytes = vec![0, 8, 0xd3];
+    out.tree_hash = xp_wire::tree_hash(&out.tree_bytes);
+    out.creation_height = 0; // deliberately older than inclusion
+    out.tokens = tokens;
+    out
+}
+
+fn history_tx(
+    n: u32,
+    inputs: Vec<xp_types::BoxId>,
+    mut outputs: Vec<xp_wire::DecodedBox>,
+) -> xp_wire::DecodedTx {
+    let id = xp_types::TxId(history_id(n));
+    for (i, out) in outputs.iter_mut().enumerate() {
+        out.tx_id = id;
+        out.index = i as u16;
+    }
+    xp_wire::DecodedTx {
+        id,
+        inputs,
+        data_inputs: vec![],
+        outputs,
+        size: 100,
+    }
+}
+
+fn history_block(
+    h: u32,
+    id: u32,
+    parent: [u8; 32],
+    txs: Vec<xp_wire::DecodedTx>,
+) -> xp_wire::DecodedBlock {
+    let mut block = fixture(1866000);
+    block.header.height = h;
+    block.header.id = xp_types::HeaderId(history_id(id));
+    block.header.parent_id = xp_types::HeaderId(parent);
+    block.txs = txs;
+    block
+}
+
+async fn history_pages(app: &Router, address: &str, h: u32, limit: usize) -> Vec<Value> {
+    let mut cursor = None;
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+    loop {
+        let suffix = cursor
+            .as_ref()
+            .map(|c| format!("&cursor={c}"))
+            .unwrap_or_default();
+        let (st, page) = get(
+            app,
+            &format!("/v1/addresses/{address}/boxes/at?height={h}&limit={limit}{suffix}"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{page}");
+        items.extend(page["items"].as_array().unwrap().clone());
+        cursor = page["next_cursor"].as_str().map(str::to_owned);
+        if let Some(ref c) = cursor {
+            assert!(seen.insert(c.clone()), "history cursor did not advance");
+        } else {
+            break;
+        }
+    }
+    items
+}
+
+#[tokio::test]
+async fn history_matches_utxo_oracle_at_every_height_and_after_forks() {
+    use std::collections::BTreeMap;
+    let genesis = mainnet_genesis();
+    let (_d, app, store) = genesis_app(&genesis);
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let token = genesis[2].id.0;
+    let one = history_block(
+        1,
+        100,
+        [0; 32],
+        vec![history_tx(
+            200,
+            vec![genesis[2].id],
+            vec![
+                history_output(1, 4_000_000_000_000_000, vec![(token, 100)]),
+                history_output(2, 1000, vec![]),
+            ],
+        )],
+    );
+    let two = history_block(
+        2,
+        101,
+        one.header.id.0,
+        vec![
+            history_tx(
+                201,
+                vec![
+                    xp_types::BoxId(history_id(1)),
+                    xp_types::BoxId(history_id(2)),
+                ],
+                vec![
+                    history_output(3, 3_000_000_000_000_000, vec![(token, 80)]),
+                    history_output(4, 1000, vec![]),
+                ],
+            ),
+            history_tx(
+                202,
+                vec![xp_types::BoxId(history_id(3))],
+                vec![history_output(5, 3_000_000_000_000_000, vec![(token, 60)])],
+            ),
+        ],
+    );
+    let three = history_block(
+        3,
+        102,
+        two.header.id.0,
+        vec![history_tx(
+            203,
+            vec![xp_types::BoxId(history_id(5))],
+            vec![],
+        )],
+    );
+    let mut utxos = BTreeMap::new();
+    let mut expected = vec![utxos.clone()];
+    for block in [&one, &two, &three] {
+        for tx in &block.txs {
+            for input in &tx.inputs {
+                utxos.remove(&input.0);
+            }
+            for out in &tx.outputs {
+                utxos.insert(out.id.0, out.clone());
+            }
+        }
+        expected.push(utxos.clone());
+    }
+    store
+        .apply_batch(&[one.clone(), two.clone()], true)
+        .unwrap();
+    let before_three = store.fingerprint().unwrap();
+    let (_, page) = get(
+        &app,
+        &format!("/v1/addresses/{address}/boxes/at?height=2&limit=1"),
+    )
+    .await;
+    let cursor = page["next_cursor"].as_str().unwrap().to_owned();
+    store
+        .apply_batch(std::slice::from_ref(&three), true)
+        .unwrap();
+    assert_eq!(
+        get(
+            &app,
+            &format!("/v1/addresses/{address}/boxes/at?height=2&cursor={cursor}")
+        )
+        .await
+        .0,
+        StatusCode::OK,
+        "append preserves anchor"
+    );
+    for (h, oracle) in expected.iter().enumerate() {
+        let (st, v) = get(
+            &app,
+            &format!("/v1/addresses/{address}/balance/at?height={h}"),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{v}");
+        assert_eq!(
+            v["balance"]["nano"],
+            oracle
+                .values()
+                .map(|o| u128::from(o.value))
+                .sum::<u128>()
+                .to_string()
+        );
+        assert_eq!(v["balance"]["box_count"], oracle.len());
+        let total = oracle
+            .values()
+            .flat_map(|o| o.tokens.iter())
+            .map(|(_, n)| u128::from(*n))
+            .sum::<u128>();
+        let tokens = if total == 0 {
+            serde_json::json!([])
+        } else {
+            serde_json::json!([{ "token_id": hex::encode(token), "amount": total.to_string() }])
+        };
+        assert_eq!(v["balance"]["tokens"], tokens);
+        let items = history_pages(&app, &address, h as u32, 1).await;
+        let ids: HashSet<_> = items
+            .iter()
+            .map(|i| i["box_id"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(ids, oracle.keys().map(hex::encode).collect());
+        assert_eq!(items.len(), oracle.len());
+    }
+    store.rollback_to(2).unwrap();
+    assert_eq!(
+        store.fingerprint().unwrap(),
+        before_three,
+        "apply/rollback logical bytes unchanged"
+    );
+    store.rollback_to(1).unwrap();
+    assert_eq!(
+        get(
+            &app,
+            &format!("/v1/addresses/{address}/boxes/at?height=2&cursor={cursor}")
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    let fork = history_block(
+        2,
+        110,
+        one.header.id.0,
+        vec![history_tx(
+            210,
+            vec![xp_types::BoxId(history_id(1))],
+            vec![history_output(6, 999, vec![(token, 20)])],
+        )],
+    );
+    let before_fork = store.fingerprint().unwrap();
+    store
+        .apply_batch(std::slice::from_ref(&fork), true)
+        .unwrap();
+    assert_eq!(
+        get(
+            &app,
+            &format!("/v1/addresses/{address}/boxes/at?height=2&cursor={cursor}")
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT,
+        "reused gidx cannot join forks"
+    );
+    let (_d2, fresh_app, fresh) = genesis_app(&genesis);
+    fresh.apply_batch(&[one, fork], true).unwrap();
+    for h in 0..=2 {
+        let url = format!("/v1/addresses/{address}/balance/at?height={h}");
+        assert_eq!(get(&app, &url).await.1, get(&fresh_app, &url).await.1);
+        assert_eq!(
+            history_pages(&app, &address, h, 1).await,
+            history_pages(&fresh_app, &address, h, 1).await
+        );
+    }
+    store.rollback_to(1).unwrap();
+    assert_eq!(store.fingerprint().unwrap(), before_fork);
+}
+
+#[tokio::test]
+async fn history_walks_ten_thousand_candidates_and_sparse_empty_pages() {
+    let genesis = mainnet_genesis();
+    let (_d, app, store) = genesis_app(&genesis);
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let outputs: Vec<_> = (1..=10_001)
+        .map(|i| history_output(i, 1000, vec![]))
+        .collect();
+    let inputs = outputs.iter().take(10_000).map(|o| o.id).collect();
+    let one = history_block(
+        1,
+        100_000,
+        [0; 32],
+        vec![history_tx(200_000, vec![genesis[2].id], outputs)],
+    );
+    let two = history_block(
+        2,
+        100_001,
+        one.header.id.0,
+        vec![history_tx(200_001, inputs, vec![])],
+    );
+    let three = history_block(3, 100_002, two.header.id.0, vec![]);
+    store.apply_batch(&[one, two], true).unwrap();
+    let fp = store.fingerprint().unwrap();
+    store.apply_batch(&[three], true).unwrap();
+    let path = format!("/v1/addresses/{address}");
+    let (st, balance) = get(&app, &format!("{path}/balance/at?height=1")).await;
+    assert_eq!(st, StatusCode::OK, "{balance}");
+    assert_eq!(balance["balance"]["box_count"], 10_001);
+    assert_eq!(balance["balance"]["nano"], "10001000");
+    let start = std::time::Instant::now();
+    let items = history_pages(&app, &address, 1, 500).await;
+    eprintln!("10,001 historical boxes paged in {:?}", start.elapsed());
+    assert_eq!(items.len(), 10_001);
+    assert_eq!(
+        items
+            .iter()
+            .map(|b| b["box_id"].as_str().unwrap())
+            .collect::<HashSet<_>>()
+            .len(),
+        items.len()
+    );
+    let (st, sparse) = get(&app, &format!("{path}/boxes/at?height=2")).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(sparse["items"].as_array().unwrap().is_empty());
+    assert!(sparse["next_cursor"].is_string());
+    let items = history_pages(&app, &address, 2, 500).await;
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["box_id"], hex::encode(history_id(10_001)));
+    store.rollback_to(2).unwrap();
+    assert_eq!(store.fingerprint().unwrap(), fp);
+}
+
+#[tokio::test]
+async fn history_spent_candidates_do_not_exhaust_scalar_budget() {
+    let genesis = mainnet_genesis();
+    let (_d, app, store) = genesis_app(&genesis);
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let outputs: Vec<_> = (1..=36_140)
+        .map(|i| history_output(i, 1000, vec![]))
+        .collect();
+    let inputs = outputs.iter().take(36_137).map(|o| o.id).collect();
+    let one = history_block(
+        1,
+        100_000,
+        [0; 32],
+        vec![history_tx(200_000, vec![genesis[2].id], outputs)],
+    );
+    let two = history_block(
+        2,
+        100_001,
+        one.header.id.0,
+        vec![history_tx(200_001, inputs, vec![])],
+    );
+    let three = history_block(3, 100_002, two.header.id.0, vec![]);
+    store.apply_batch(&[one, two, three], true).unwrap();
+    let (status, balance) = get(
+        &app,
+        &format!("/v1/addresses/{address}/balance/at?height=2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{balance}");
+    assert_eq!(balance["balance"]["nano"], "3000");
+    assert_eq!(balance["balance"]["box_count"], 3);
+    assert_eq!(history_pages(&app, &address, 2, 2).await.len(), 3);
+    assert_eq!(history_pages(&app, &address, 3, 2).await.len(), 3);
+}
+
+#[tokio::test]
+async fn history_future_birth_before_live_candidate_does_not_end_walk() {
+    use redb::ReadableTable;
+    use xp_store::{
+        keys::k_u32,
+        rows::{HeaderRow, TxRow},
+        tables::{HEADERS, META, META_INDEXED_HEIGHT, TXS},
+    };
+    // gidx is an iteration key, not a license for the handler to discard the tail.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("reordered.redb");
+    {
+        let local = Store::open(&path).unwrap();
+        local.seed_genesis(&mainnet_genesis()).unwrap();
+        let one = history_block(
+            1,
+            100_000,
+            [0; 32],
+            vec![history_tx(
+                200_000,
+                vec![mainnet_genesis()[2].id],
+                (1..=1001)
+                    .map(|i| history_output(i, 1000, vec![]))
+                    .collect(),
+            )],
+        );
+        let two = history_block(
+            2,
+            100_001,
+            one.header.id.0,
+            vec![history_tx(
+                200_001,
+                vec![],
+                vec![history_output(1002, 2000, vec![])],
+            )],
+        );
+        local.apply_batch(&[one, two], true).unwrap();
+    }
+    {
+        let db = redb::Database::create(&path).unwrap();
+        let tx = db.begin_write().unwrap();
+        {
+            let mut rows = tx.open_table(TXS).unwrap();
+            for (id, height) in [(200_000, 2), (200_001, 1)] {
+                let key = history_id(id);
+                let mut row =
+                    TxRow::decode(rows.get(key.as_slice()).unwrap().unwrap().value()).unwrap();
+                row.height = height;
+                rows.insert(key.as_slice(), row.encode().as_slice())
+                    .unwrap();
+            }
+            let mut headers = tx.open_table(HEADERS).unwrap();
+            let row = HeaderRow::decode(headers.get(k_u32(2).as_slice()).unwrap().unwrap().value())
+                .unwrap();
+            headers
+                .insert(k_u32(3).as_slice(), row.encode().as_slice())
+                .unwrap();
+            tx.open_table(META)
+                .unwrap()
+                .insert(META_INDEXED_HEIGHT, k_u32(3).as_slice())
+                .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    let (_, _, mut state) = app_with_state(unlimited(), None);
+    state.store = Arc::new(Store::open(&path).unwrap());
+    let app = xp_api::router(state, &unlimited());
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let (status, first) = get(
+        &app,
+        &format!("/v1/addresses/{address}/boxes/at?height=1&limit=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(first["items"].as_array().unwrap().is_empty());
+    assert!(first["next_cursor"].is_string());
+    let items = history_pages(&app, &address, 1, 1).await;
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["box_id"], hex::encode(history_id(1002)));
+    let (status, balance) = get(
+        &app,
+        &format!("/v1/addresses/{address}/balance/at?height=1"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(balance["balance"]["nano"], "2000");
+}
+
+/// Export public data with scripts/capture-history-fixture.py, then run with
+/// HISTORY_HTTP_FIXTURE=/tmp/history-mainnet.json cargo test -p xp-api
+/// --test routes history_http_snapshot_replay -- --ignored --nocapture.
+/// Only a fresh temporary database is written; the serving database is never opened.
+#[tokio::test]
+#[ignore = "requires an explicit public HTTP snapshot export"]
+async fn history_http_snapshot_replay() {
+    use xp_store::{
+        keys::{k_hash_gidx, k_u32, k_u64},
+        rows::{BoxRow, TxRow},
+        tables::*,
+    };
+    fn hash(v: &Value) -> [u8; 32] {
+        hex::decode(v.as_str().unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+    let input = std::env::var("HISTORY_HTTP_FIXTURE").expect("set HISTORY_HTTP_FIXTURE");
+    let data: Value = serde_json::from_slice(&std::fs::read(input).unwrap()).unwrap();
+    let tip = data["tip"].as_u64().unwrap() as u32;
+    let (_dir, app) = edited_genesis_app(|tx| {
+        let mut gidx = 3u64;
+        for address in data["addresses"].as_array().unwrap() {
+            for b in address["boxes"].as_array().unwrap() {
+                let id = hash(&b["id"]);
+                let row = BoxRow {
+                    gidx,
+                    value: b["value"].as_str().unwrap().parse().unwrap(),
+                    tree_hash: hash(&b["tree_hash"]),
+                    creation_height: b["creation_height"].as_u64().unwrap() as u32,
+                    tx_id: hash(&b["tx_id"]),
+                    index: b["index"].as_u64().unwrap() as u16,
+                    size: b["size"].as_u64().unwrap() as u32,
+                    tokens: b["tokens"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|t| {
+                            (
+                                hash(&t["id"]),
+                                t["amount"].as_str().unwrap().parse().unwrap(),
+                            )
+                        })
+                        .collect(),
+                    registers_json: b["registers"].to_string(),
+                    spent: b["spent_height"]
+                        .as_u64()
+                        .map(|h| (hash(&b["spent_by"]), h as u32)),
+                };
+                tx.open_table(BOXES)
+                    .unwrap()
+                    .insert(id.as_slice(), row.encode().as_slice())
+                    .unwrap();
+                tx.open_table(BOX_BY_GIDX)
+                    .unwrap()
+                    .insert(k_u64(gidx).as_slice(), id.as_slice())
+                    .unwrap();
+                let key = k_hash_gidx(&row.tree_hash, gidx);
+                tx.open_table(TREE_BOXES)
+                    .unwrap()
+                    .insert(key.as_slice(), &[][..])
+                    .unwrap();
+                if row.spent.is_none() {
+                    tx.open_table(TREE_UNSPENT)
+                        .unwrap()
+                        .insert(key.as_slice(), &[][..])
+                        .unwrap();
+                }
+                let creator = TxRow {
+                    height: b["inclusion_height"].as_u64().unwrap() as u32,
+                    index: 0,
+                    gidx,
+                    first_out_gidx: gidx,
+                    timestamp: 0,
+                    size: 0,
+                    fee: 0,
+                    inputs: vec![],
+                    data_inputs: vec![],
+                    output_count: 1,
+                };
+                tx.open_table(TXS)
+                    .unwrap()
+                    .insert(row.tx_id.as_slice(), creator.encode().as_slice())
+                    .unwrap();
+                gidx += 1;
+            }
+        }
+        // Only the anchor headers are needed by these read routes. Their identities
+        // are fixture identities, not a claim to reproduce an entire mainnet store.
+        for h in [1_500_000, 1_600_000, 1_800_000, tip] {
+            let header = xp_store::rows::HeaderRow {
+                id: history_id(h),
+                parent_id: [0; 32],
+                timestamp: 0,
+                difficulty: 0,
+                miner_pk: [0; 33],
+                tx_count: 0,
+                first_tx_gidx: 0,
+                size: 0,
+                fees: 0,
+                reward: 0,
+                version: 1,
+                raw_json: "{}".into(),
+            };
+            tx.open_table(HEADERS)
+                .unwrap()
+                .insert(k_u32(h).as_slice(), header.encode().as_slice())
+                .unwrap();
+        }
+        tx.open_table(META)
+            .unwrap()
+            .insert(META_INDEXED_HEIGHT, k_u32(tip).as_slice())
+            .unwrap();
+    });
+    for address in data["addresses"].as_array().unwrap() {
+        let addr = address["address"].as_str().unwrap();
+        let rows = address["boxes"].as_array().unwrap();
+        for h in if address["full"] == true {
+            vec![1_500_000, 1_600_000, 1_800_000, tip]
+        } else {
+            vec![tip]
+        } {
+            let expected: HashSet<_> = if h == tip {
+                address["live"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.as_str().unwrap())
+                    .collect()
+            } else {
+                rows.iter()
+                    .filter(|b| {
+                        b["inclusion_height"].as_u64().unwrap() <= h as u64
+                            && b["spent_height"].as_u64().is_none_or(|s| s > h as u64)
+                    })
+                    .map(|b| b["id"].as_str().unwrap())
+                    .collect()
+            };
+            let started = std::time::Instant::now();
+            let items = history_pages(&app, addr, h, 500).await;
+            let actual: HashSet<_> = items
+                .iter()
+                .map(|b| b["box_id"].as_str().unwrap())
+                .collect();
+            assert_eq!(actual.len(), items.len(), "duplicate boxes");
+            assert_eq!(actual, expected, "membership at {h} for {addr}");
+            let nano: u128 = rows
+                .iter()
+                .filter(|b| expected.contains(b["id"].as_str().unwrap()))
+                .map(|b| b["value"].as_str().unwrap().parse::<u128>().unwrap())
+                .sum();
+            let paged_nano: u128 = items
+                .iter()
+                .map(|b| b["nano"].as_str().unwrap().parse::<u128>().unwrap())
+                .sum();
+            assert_eq!(paged_nano, nano);
+            let mut expected_tokens = std::collections::BTreeMap::<String, u128>::new();
+            for b in rows
+                .iter()
+                .filter(|b| expected.contains(b["id"].as_str().unwrap()))
+            {
+                for t in b["tokens"].as_array().unwrap() {
+                    *expected_tokens
+                        .entry(t["id"].as_str().unwrap().into())
+                        .or_default() += t["amount"].as_str().unwrap().parse::<u128>().unwrap();
+                }
+            }
+            if h != tip {
+                let (status, balance) =
+                    get(&app, &format!("/v1/addresses/{addr}/balance/at?height={h}")).await;
+                assert_eq!(status, StatusCode::OK, "{balance}");
+                assert_eq!(balance["balance"]["nano"], nano.to_string());
+                assert_eq!(balance["balance"]["box_count"], expected.len());
+                let actual_tokens: std::collections::BTreeMap<String, u128> = balance["balance"]
+                    ["tokens"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|t| {
+                        (
+                            t["token_id"].as_str().unwrap().into(),
+                            t["amount"].as_str().unwrap().parse().unwrap(),
+                        )
+                    })
+                    .collect();
+                assert_eq!(actual_tokens, expected_tokens);
+            }
+            eprintln!(
+                "{addr} height={h} candidates={} boxes={} nano={nano} elapsed={:?}",
+                rows.len(),
+                items.len(),
+                started.elapsed()
+            );
+        }
+    }
+}
+
+/// Corrupt only a newly created fixture file, while no Store owns it.
+fn edited_genesis_app(edit: impl FnOnce(&redb::WriteTransaction)) -> (tempfile::TempDir, Router) {
+    let (dir, _, mut state) = app_with_state(unlimited(), None);
+    let path = dir.path().join("edited.redb");
+    {
+        let store = Store::open(&path).unwrap();
+        store.seed_genesis(&mainnet_genesis()).unwrap();
+    }
+    {
+        let db = redb::Database::create(&path).unwrap();
+        let tx = db.begin_write().unwrap();
+        edit(&tx);
+        tx.commit().unwrap();
+    }
+    state.store = Arc::new(Store::open(&path).unwrap());
+    (dir, xp_api::router(state, &unlimited()))
+}
+
+#[tokio::test]
+async fn supply_missing_balance_and_impossible_total_are_errors_but_zero_is_valid() {
+    use redb::ReadableTable;
+    use xp_store::{rows::BalanceRow, tables::TREE_BALANCE};
+    let tree = mainnet_genesis()[0].tree_hash.0;
+    for amount in [None, Some(xp_types::GENESIS_TOTAL_NANO + 1), Some(0)] {
+        let (_d, app) = edited_genesis_app(|tx| {
+            let mut table = tx.open_table(TREE_BALANCE).unwrap();
+            let mut balance =
+                BalanceRow::decode(table.get(tree.as_slice()).unwrap().unwrap().value()).unwrap();
+            match amount {
+                None => {
+                    table.remove(tree.as_slice()).unwrap();
+                }
+                Some(nano) => {
+                    balance.nano = nano;
+                    table
+                        .insert(tree.as_slice(), balance.encode().as_slice())
+                        .unwrap();
+                }
+            }
+        });
+        let (st, v) = get(&app, "/v1/supply").await;
+        if amount == Some(0) {
+            assert_eq!(st, StatusCode::OK);
+            assert_eq!(
+                v["outside_emission_nano"],
+                xp_types::GENESIS_TOTAL_NANO.to_string()
+            );
+        } else {
+            assert_eq!(st, StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+}
+
+#[tokio::test]
+async fn historical_tip_response_size_is_bounded_and_problem_headers_are_typed() {
+    use redb::ReadableTable;
+    use xp_store::{rows::BalanceRow, tables::TREE_BALANCE};
+    let genesis = mainnet_genesis();
+    let tree = genesis[0].tree_hash.0;
+    let address = xp_wire::tree_info(&genesis[0].tree_bytes).unwrap().address;
+    let (_d, app) = edited_genesis_app(|tx| {
+        let mut table = tx.open_table(TREE_BALANCE).unwrap();
+        let mut balance =
+            BalanceRow::decode(table.get(tree.as_slice()).unwrap().unwrap().value()).unwrap();
+        balance.tokens = (0..30_000).map(|n| (history_id(n), 1)).collect();
+        table
+            .insert(tree.as_slice(), balance.encode().as_slice())
+            .unwrap();
+    });
+    let (st, headers, v) = get_from(
+        &app,
+        &format!("/v1/addresses/{address}/balance/at?height=0"),
+        "127.0.0.1",
+        None,
+    )
+    .await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(v["code"], "history_response_limit");
+    assert_eq!(headers["content-type"], "application/problem+json");
+}

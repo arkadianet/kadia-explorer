@@ -8,6 +8,12 @@ use xp_store::StoreError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
+    #[error("{detail}")]
+    History {
+        status: StatusCode,
+        code: &'static str,
+        detail: String,
+    },
     #[error("not found")]
     NotFound,
     #[error("{0}")]
@@ -23,6 +29,7 @@ pub enum ApiError {
 impl ApiError {
     fn status(&self) -> StatusCode {
         match self {
+            ApiError::History { status, .. } => *status,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -33,6 +40,7 @@ impl ApiError {
 
     fn title(&self) -> &'static str {
         match self {
+            ApiError::History { status, .. } => status.canonical_reason().unwrap_or("Error"),
             ApiError::NotFound => "Not Found",
             ApiError::BadRequest(_) => "Bad Request",
             ApiError::Internal(_) => "Internal Server Error",
@@ -43,6 +51,7 @@ impl ApiError {
 
     fn detail(&self) -> String {
         match self {
+            ApiError::History { detail, .. } => detail.clone(),
             ApiError::NotFound => "the requested resource does not exist".to_owned(),
             ApiError::BadRequest(d) => d.clone(),
             // Never leak the internal cause to the client; it is logged instead.
@@ -63,6 +72,8 @@ struct Problem {
     title: &'static str,
     status: u16,
     detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'static str>,
 }
 
 impl IntoResponse for ApiError {
@@ -76,6 +87,10 @@ impl IntoResponse for ApiError {
         let retry_after = match &self {
             ApiError::TooManyRequests { retry_after } => Some(*retry_after),
             ApiError::Overloaded => Some(1),
+            ApiError::History {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                ..
+            } => Some(1),
             _ => None,
         };
         let body = Problem {
@@ -83,8 +98,16 @@ impl IntoResponse for ApiError {
             title: self.title(),
             status: status.as_u16(),
             detail: self.detail(),
+            code: match &self {
+                ApiError::History { code, .. } => Some(*code),
+                _ => None,
+            },
         };
         let mut resp = (status, Json(body)).into_response();
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/problem+json"),
+        );
         if let Some(s) = retry_after {
             resp.headers_mut()
                 .insert(header::RETRY_AFTER, HeaderValue::from(s));
