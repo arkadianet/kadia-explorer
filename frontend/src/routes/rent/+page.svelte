@@ -75,8 +75,16 @@
 		void loadUpcoming();
 	}
 
+	// Only collectible boxes are summed: consensus computes the storage fee as a wrapping
+	// i32, so a box of 1,718 bytes or more has a negative fee and can never be rent-claimed,
+	// however healthy its nominal rent looks.
 	const upcomingTotalDue = $derived(
-		formatErg(sumNano(upcomingItems.map((i) => i.box.rent.due_nano)))
+		formatErg(
+			sumNano(upcomingItems.filter((i) => i.box.rent.collectible).map((i) => i.box.rent.due_nano))
+		)
+	);
+	const upcomingUncollectible = $derived(
+		upcomingItems.filter((i) => !i.box.rent.collectible).length
 	);
 
 	const tip = $derived(status.current?.indexed ?? null);
@@ -93,7 +101,14 @@
 	});
 
 	const eligibleTotalDue = $derived(
-		formatErg(sumNano(eligiblePager.items.map((i) => i.box.rent.due_nano)))
+		formatErg(
+			sumNano(
+				eligiblePager.items.filter((i) => i.box.rent.collectible).map((i) => i.box.rent.due_nano)
+			)
+		)
+	);
+	const eligibleUncollectible = $derived(
+		eligiblePager.items.filter((i) => !i.box.rent.collectible).length
 	);
 </script>
 
@@ -133,6 +148,12 @@
 					{upcomingComplete ? '' : 'Incomplete: at least '}{upcomingItems.length} boxes, {upcomingComplete
 						? 'total'
 						: 'at least'} due <span class="mono">{upcomingTotalDue}</span> ERG
+					{#if upcomingUncollectible > 0}
+						<span class="note"
+							>&nbsp;— excludes {upcomingUncollectible} box{upcomingUncollectible === 1 ? '' : 'es'} whose
+							consensus storage fee is negative, so their rent cannot be collected at all</span
+						>
+					{/if}
 				</p>
 				<Table dense>
 					{#snippet head()}
@@ -185,6 +206,12 @@
 				<p class="sum">
 					{eligiblePager.items.length} boxes{#if !eligiblePager.done}&nbsp;loaded so far{/if}, total
 					due <span class="mono">{eligibleTotalDue}</span> ERG
+					{#if eligibleUncollectible > 0}
+						<span class="note"
+							>&nbsp;— excludes {eligibleUncollectible} box{eligibleUncollectible === 1 ? '' : 'es'} whose
+							consensus storage fee is negative, so their rent cannot be collected at all</span
+						>
+					{/if}
 				</p>
 			{/if}
 			<InfiniteList
@@ -240,6 +267,10 @@
 		color: var(--fg-muted);
 		padding-bottom: var(--space-3);
 		font-size: var(--fs-data);
+	}
+
+	.sum .note {
+		color: var(--fg-subtle, var(--fg-muted));
 	}
 	.muted {
 		color: var(--fg-muted);

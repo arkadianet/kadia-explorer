@@ -272,7 +272,11 @@ export function buildDataset(): Dataset {
 					rent: {
 						maturity_height: out.creationHeight + RENT_PERIOD,
 						due_nano: rentDue(size, value).toString(),
-						claimable_at_tip: false
+						claimable_at_tip: false,
+						// Consensus computes the fee as a wrapping i32, so it is negative above
+						// 1,717 bytes; fixture boxes are far smaller, hence collectible.
+						consensus_fee_nano: (((size * 1_250_000) | 0) as number).toString(),
+						collectible: ((size * 1_250_000) | 0) > 0
 					}
 				});
 			}

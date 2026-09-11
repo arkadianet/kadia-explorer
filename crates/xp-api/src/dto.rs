@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use xp_store::read::Dir;
 use xp_store::rows::{BalanceRow, BoxRow, HeaderRow, TemplateRow, TokenRow, TreeRow, TxRow};
 use xp_store::Reader;
-use xp_types::rent::{maturity_height, rent_due};
+use xp_types::rent::{consensus_storage_fee, maturity_height, rent_due};
 use xp_types::{hex32, parse_hex32, Gidx, Hash32};
 
 pub const DEFAULT_LIMIT: usize = 50;
@@ -394,17 +394,29 @@ pub fn enrich_balance(rd: &Reader, balance: &mut BalanceDto) -> Result<(), ApiEr
 #[derive(Debug, Serialize)]
 pub struct RentDto {
     pub maturity_height: u32,
+    /// Nominal rent, `min(size × 1_250_000, value)`. **Not proof of a collectible
+    /// opportunity** — read it with `collectible`.
     pub due_nano: String,
     /// True when the box is still unspent and the indexed tip has reached its maturity.
     pub claimable_at_tip: bool,
+    /// The storage fee as consensus computes it: a **wrapping i32** multiply, so it is
+    /// negative for any box of 1,718 bytes or more. Rendered as a decimal string that may
+    /// carry a leading `-`.
+    pub consensus_fee_nano: String,
+    /// False when `consensus_fee_nano` is not positive, i.e. the box cannot be rent-claimed
+    /// at all regardless of age: the recreate rule would require adding value, not taking it.
+    pub collectible: bool,
 }
 
 pub fn rent_dto(row: &BoxRow, tip: Option<u32>) -> RentDto {
     let maturity = maturity_height(row.creation_height);
+    let fee = consensus_storage_fee(row.size);
     RentDto {
         maturity_height: maturity,
         due_nano: rent_due(row.size, row.value).to_string(),
         claimable_at_tip: row.spent.is_none() && tip.is_some_and(|t| t >= maturity),
+        consensus_fee_nano: fee.to_string(),
+        collectible: fee > 0,
     }
 }
 

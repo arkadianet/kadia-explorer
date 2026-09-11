@@ -2421,3 +2421,33 @@ async fn historical_tip_response_size_is_bounded_and_problem_headers_are_typed()
     assert_eq!(v["code"], "history_response_limit");
     assert_eq!(headers["content-type"], "application/problem+json");
 }
+
+#[tokio::test]
+async fn rent_reports_the_signed_consensus_fee_not_just_nominal_rent() {
+    // Consensus computes the storage fee as a wrapping i32 multiply, so a box of 1,718 bytes
+    // or more has a NEGATIVE fee and cannot be rent-claimed at any age — while the nominal
+    // `min(size × 1_250_000, value)` still looks like a healthy opportunity. The rent DTO must
+    // carry both so the pages cannot advertise rent nobody can take.
+    use xp_types::rent::{consensus_storage_fee, is_rent_claimable, rent_due};
+    assert!(is_rent_claimable(1_717));
+    assert!(!is_rent_claimable(1_718));
+    assert_eq!(consensus_storage_fee(2_008), -1_784_967_296);
+    // Nominal rent on that same box looks collectible; that is the trap.
+    assert_eq!(rent_due(2_008, 10_000_000_000), 2_510_000_000);
+
+    // And the wire shape exposes it on a real fixture box.
+    let (_d, app) = app();
+    let (st, v) = get(&app, "/v1/rent/eligible?limit=1").await;
+    assert_eq!(st, StatusCode::OK);
+    if let Some(item) = v["items"].as_array().and_then(|a| a.first()) {
+        let rent = &item["box"]["rent"];
+        assert!(rent["consensus_fee_nano"].is_string(), "{rent}");
+        assert!(rent["collectible"].is_boolean(), "{rent}");
+        let fee: i64 = rent["consensus_fee_nano"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .expect("decimal i64");
+        assert_eq!(rent["collectible"].as_bool().unwrap(), fee > 0);
+    }
+}

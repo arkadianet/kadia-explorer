@@ -18,7 +18,13 @@ function box(over: Partial<BoxDto>): BoxDto {
 		size: 80,
 		spent_by: null,
 		spent_height: null,
-		rent: { maturity_height: 0, due_nano: '0', claimable_at_tip: false },
+		rent: {
+			maturity_height: 0,
+			due_nano: '0',
+			claimable_at_tip: false,
+			consensus_fee_nano: '100000000',
+			collectible: true
+		},
 		...over
 	};
 }

@@ -49,8 +49,13 @@ export interface TokenDto {
 
 export interface RentDto {
 	maturity_height: number;
+	/** Nominal rent. Not a collectible opportunity on its own — read with `collectible`. */
 	due_nano: string;
 	claimable_at_tip: boolean;
+	/** Storage fee as consensus computes it (wrapping i32), so negative above 1,717 bytes. */
+	consensus_fee_nano: string;
+	/** False when the consensus fee is not positive: the box cannot be rent-claimed at all. */
+	collectible: boolean;
 }
 
 export interface BoxDto {
