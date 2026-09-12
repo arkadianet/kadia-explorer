@@ -212,7 +212,9 @@ pub enum StoreError {
     Redb(String),
     #[error("corrupt row: {0}")]
     Corrupt(&'static str),
-    #[error("fork deeper than rollback window ({0} blocks): reindex required")]
+    /// Fork depth in blocks: the requested rollback distance, or the observed distance
+    /// searched without finding a common ancestor (a lower bound on the fork depth).
+    #[error("fork depth {0} blocks: rollback unavailable (rollback window: {ROLLBACK_WINDOW} blocks); reindex required")]
     ReindexRequired(u32),
     #[error("parent mismatch at height {height}: have {have}, block says {want}")]
     ParentMismatch {

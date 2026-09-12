@@ -219,13 +219,16 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         }
     };
 
-    let exit_code = match ingest_outcome {
+    Ok(ingest_exit_code(ingest_outcome))
+}
+
+fn ingest_exit_code(outcome: Result<anyhow::Result<()>, tokio::task::JoinError>) -> i32 {
+    match outcome {
         Ok(Ok(())) => 0,
         Ok(Err(e)) if needs_reindex(&e) => EXIT_REINDEX_REQUIRED,
         Ok(Err(_)) => 1,
         Err(_) => 1,
-    };
-    Ok(exit_code)
+    }
 }
 
 /// Whether an ingest error chain bottoms out in [`xp_store::StoreError::ReindexRequired`].
@@ -278,6 +281,27 @@ mod tests {
         );
         assert!(parse_args(["--config".to_string()].into_iter()).is_err());
         assert!(parse_args(["oops".to_string()].into_iter()).is_err());
+    }
+
+    #[test]
+    fn ingest_exit_code_reindex_required_returns_three() {
+        let err = anyhow::Error::from(xp_store::StoreError::ReindexRequired(
+            xp_store::ROLLBACK_WINDOW,
+        ))
+        .context("ingest loop");
+        assert!(needs_reindex(&err));
+        assert_eq!(ingest_exit_code(Ok(Err(err))), 3);
+    }
+
+    #[test]
+    fn ingest_exit_code_other_outcomes_preserve_codes() {
+        assert_eq!(ingest_exit_code(Ok(Ok(()))), 0);
+        assert_eq!(
+            ingest_exit_code(Ok(Err(anyhow::anyhow!("decode failed")))),
+            1
+        );
+        let err = xp_store::StoreError::Corrupt("input box missing").into();
+        assert_eq!(ingest_exit_code(Ok(Err(err))), 1);
     }
 
     /// `xp_ingest` wraps the store error before returning it, so the check has to walk the

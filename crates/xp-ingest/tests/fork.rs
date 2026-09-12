@@ -5,7 +5,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use xp_ingest::{run, IngestConfig, IngestStatus, Mode};
 use xp_source::{BlockSource, SourceError};
-use xp_store::Store;
+use xp_store::{Store, StoreError, ROLLBACK_WINDOW};
 use xp_types::Hash32;
 use xp_wire::decode_block;
 
@@ -337,26 +337,44 @@ async fn reorg_rolls_back_and_reapplies_the_new_chain() {
 }
 
 #[tokio::test]
-async fn fork_deeper_than_rollback_window_halts() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
-    store.seed_for_tests(1865999, [7u8; 32]).unwrap();
+async fn unresolvable_fork_reports_observed_depth() {
+    // Cover both the search limit and genesis before the limit. A window constant
+    // masquerading as the depth must fail the genesis case.
+    for (indexed, expected_depth) in [(1865999, 1000), (3, 3)] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+        store.seed_for_tests(indexed, [7u8; 32]).unwrap();
 
-    let source = Arc::new(FakeSource::forking(1866002));
-    let (tx, rx) = watch::channel(initial_status());
-    let shutdown = CancellationToken::new();
-    let err = timeout(
-        Duration::from_secs(10),
-        run(store, source, test_cfg(), tx, shutdown),
-    )
-    .await
-    .expect("run should return promptly")
-    .expect_err("run should fail on an unresolvable fork");
-    assert!(
-        err.to_string().contains("reindex required"),
-        "unexpected error: {err}"
-    );
-    assert!(rx.borrow().halted.is_some(), "halted status not published");
+        let source = Arc::new(FakeSource::forking(indexed + 3));
+        let (tx, rx) = watch::channel(initial_status());
+        let shutdown = CancellationToken::new();
+        let err = timeout(
+            Duration::from_secs(10),
+            run(store, source, test_cfg(), tx, shutdown),
+        )
+        .await
+        .expect("run should return promptly")
+        .expect_err("run should fail on an unresolvable fork");
+        assert!(
+            err.to_string().contains("reindex required"),
+            "unexpected error: {err}"
+        );
+        assert!(err.chain().any(|cause| matches!(
+            cause.downcast_ref::<StoreError>(),
+            Some(StoreError::ReindexRequired(depth)) if *depth == expected_depth
+        )));
+        let expected_reason = format!(
+            "reindex required: fork depth {expected_depth} blocks; rollback unavailable (rollback window: {ROLLBACK_WINDOW} blocks)"
+        );
+        assert_eq!(
+            rx.borrow().halted.as_deref(),
+            Some(expected_reason.as_str())
+        );
+        assert_eq!(
+            err.to_string(),
+            format!("fork depth {expected_depth} blocks: rollback unavailable (rollback window: {ROLLBACK_WINDOW} blocks); reindex required")
+        );
+    }
 }
 
 /// Once ingest has caught up, `/v1/status` must report `tip` — not whatever mode the last

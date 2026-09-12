@@ -1,8 +1,9 @@
 //! The ingest pipeline: fetch → fork-check → apply.
 //!
 //! [`run`] drives a [`Store`] towards a [`BlockSource`]'s best chain forever, until the
-//! supplied [`CancellationToken`] is cancelled or an unrecoverable condition (a fork deeper
-//! than [`ROLLBACK_WINDOW`], a corrupt store, an undecodable block) forces it to halt.
+//! supplied [`CancellationToken`] is cancelled or an unrecoverable condition (a fork with no
+//! common ancestor within [`ROLLBACK_WINDOW`] or at genesis, a corrupt store, an undecodable
+//! block) forces it to halt.
 //! Progress is published on a [`watch`] channel so a server can serve it as a health page.
 
 use futures::StreamExt;
@@ -169,8 +170,9 @@ enum ForkCheck {
     /// The source can't answer for a height the store has — it is behind us, or on a shorter
     /// chain. Wait rather than destroying indexed state.
     Wait,
-    /// The common ancestor is further back than [`ROLLBACK_WINDOW`]: unrecoverable.
-    TooDeep,
+    /// No common ancestor within the search window or at genesis. Carries the observed
+    /// depth searched from the indexed tip, a lower bound on the fork depth.
+    TooDeep(u32),
     /// A transient source error; wait and retry.
     SourceError(SourceError),
     /// The store itself failed to answer. Never a chain disagreement: hard failure.
@@ -180,8 +182,9 @@ enum ForkCheck {
 /// Drives `store` towards `source`'s best chain until `shutdown` is cancelled.
 ///
 /// Returns `Ok(())` on shutdown. Returns `Err` only for conditions that cannot be retried
-/// out of: a fork deeper than [`ROLLBACK_WINDOW`], an undecodable block body, or a store
-/// error other than [`StoreError::ParentMismatch`]. Source errors are always transient.
+/// out of: a fork with no common ancestor within [`ROLLBACK_WINDOW`] or at genesis, an
+/// undecodable block body, or a store error other than [`StoreError::ParentMismatch`].
+/// Source errors are always transient.
 pub async fn run(
     store: Arc<Store>,
     source: Arc<dyn BlockSource>,
@@ -239,11 +242,16 @@ pub async fn run(
     macro_rules! halt_store {
         ($indexed:expr, $err:expr) => {{
             let err: StoreError = $err;
+            let reason = err.to_string();
+            halt_store!($indexed, err, reason);
+        }};
+        ($indexed:expr, $err:expr, $reason:expr) => {{
+            let err: StoreError = $err;
             publish(
                 $indexed,
                 best,
                 mode,
-                Some(err.to_string()),
+                Some($reason),
                 stall.as_ref().map(Stall::info),
             );
             return Err(err.into());
@@ -373,9 +381,10 @@ pub async fn run(
                 );
                 retry!(cur);
             }
-            ForkCheck::TooDeep => halt!(
+            ForkCheck::TooDeep(depth) => halt_store!(
                 cur,
-                format!("reindex required: fork deeper than {ROLLBACK_WINDOW} blocks")
+                StoreError::ReindexRequired(depth),
+                format!("reindex required: fork depth {depth} blocks; rollback unavailable (rollback window: {ROLLBACK_WINDOW} blocks)")
             ),
             ForkCheck::StoreError(e) => halt_store!(cur, e),
             ForkCheck::SourceError(e) => {
@@ -550,7 +559,7 @@ async fn fork_check(
 ) -> ForkCheck {
     if distrust_tip && indexed <= 1 {
         // There is no height below 1 to fall back to — height 0 is not a block we hold, so
-        // walking there would read as a fork past the window and halt. Wait instead: a chain
+        // walking there could find no common ancestor and halt. Wait instead: a chain
         // this short cannot have the deep orphan problem `distrust_tip` exists for.
         return ForkCheck::Wait;
     }
@@ -579,7 +588,9 @@ async fn fork_check(
             }
             _ => {
                 if h == 0 || indexed - h >= ROLLBACK_WINDOW {
-                    return ForkCheck::TooDeep;
+                    // At genesis this is `indexed`: the distance searched to height 0,
+                    // not a fabricated distance to a common ancestor we never found.
+                    return ForkCheck::TooDeep(indexed - h);
                 }
                 h -= 1;
             }

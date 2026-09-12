@@ -29,7 +29,7 @@ supervisor notices.
 | `0` | Clean shutdown after `SIGTERM`/`Ctrl+C`. |
 | `1` | Ingest halted (a corrupt store, an undecodable block, ...). Restarting may help. |
 | `2` | Bad arguments, or the config/store/listener could not be set up at startup. |
-| `3` | Ingest halted needing a full reindex: a fork deeper than the rollback window. Restarting **cannot** help — the store must be deleted and re-synced. |
+| `3` | Ingest halted needing a full reindex: a fork with no common ancestor within the rollback window or at genesis, or unavailable rollback undo data. Restarting **cannot** help — the store must be deleted and re-synced. |
 
 Under systemd, exclude code 3 from the restart policy so the unit doesn't loop forever on a
 store that can only be fixed by hand:
