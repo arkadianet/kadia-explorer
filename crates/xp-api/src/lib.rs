@@ -10,6 +10,7 @@ pub mod error;
 pub mod handlers;
 pub mod limit;
 mod metrics;
+pub mod paging;
 
 use axum::http::StatusCode;
 use axum::routing::get;
