@@ -38,6 +38,40 @@ separate and unverified.
 
 | Milestone | State | Evidence |
 |---|---|---|
+| M1 — gates unavoidable (steps 1-3) | implemented | `scripts/check.sh all` exit 0, reviewer-run outside any sandbox |
+| M1 — steps 4-5 (enforcement, provisioning) | **planned / owner-blocked** | Needs a push and repo-admin rights. CI has NEVER executed. A committed workflow is not a gate. |
+| M2 — fail closed, integrity matrix, transition model | implemented | b2a83c0, cfb489e, 43f5941 |
+| M3 — summaries, budgets, frontend, telemetry (steps 1,3,4,5) | implemented | a0f8f09, 838d2cf, eacb509 |
+| M3 — steps 2, 6 (durable collection, load measurement) | **planned / infra-blocked** | Needs an external retention owner and a deployment-class host |
+| M4 — register ceiling (steps 1,3,4) | implemented | f6bf8f0; ceiling defaults UNSET so an upgrade cannot refuse to start |
+| M4 — steps 2, 5, 6, 7 (footprint, backup, restore drill, runbook) | **planned / infra-blocked** | Needs a maintenance window and an independent destination host |
+| M5 — strict continuation (all steps) | implemented | 2937523, b437259, 0824bc4 |
+| M6 — release evidence | **planned / blocked** | Includes a seven-day soak; cannot be compressed |
+| Pre-deploy integrity sweep | implemented | bf24823; exit 0 clean / 1 findings / 2 could-not-complete |
+| Rent history — design, phase 1, phase 2a | implemented, validated | 4b49b07, 3aaf289, 42ecad6; agrees with the owner's census to 0.098% on count |
+
+Nothing above is `verified` in the release sense: CI has never executed, live parity has never
+run, the restore drill has never run, and the production store has never been swept.
+
+### Deployment readiness — read before shipping this branch
+
+1. **Run the integrity sweep against a copy of the production store first.**
+   `integrity-sweep <store>` — exit 0 clean, 1 findings, 2 could-not-complete. Exit 2 must
+   never be treated as clean. cfb489e converts previously-silent incomplete answers into
+   `500 integrity_error`, so latent damage in an unaudited 72 GB index surfaces as user-facing
+   errors on first deploy unless this is run first.
+2. **CI has never run.** Every "green" in this ledger is a reviewer's local
+   `./scripts/check.sh all`. That is real evidence, not an enforced gate.
+3. **There is no API-side deploy procedure in this repo.** `scripts/deploy_frontend.sh` covers
+   the frontend only; the systemd unit the CHANGELOG claims was never committed.
+4. **No resync is required.** No SCHEMA_VERSION change was made anywhere on this branch, and
+   the register ceiling defaults to unset, so ingest cannot halt on a ceiling nobody chose.
+5. **Wire contract is additive-only** throughout: no field was renamed or removed.
+
+
+
+| Milestone | State | Evidence |
+|---|---|---|
 | M1 — make gates unavoidable (steps 1-3) | implemented | `scripts/check.sh all` exit 0, reviewer-run outside any sandbox on Rust 1.96.0 / Node v22.22.2 |
 | M1 — steps 4-5 (enforcement, provisioning) | planned | Blocked on owner: needs a push and repo-admin rights. A committed workflow is not a gate until it runs and is required. |
 | M2 steps 1-2 — fail closed on canonical selection | implemented | `scripts/check.sh all` exit 0; 12 new/adjusted source and ingest tests pass, reviewer-run |
