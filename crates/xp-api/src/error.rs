@@ -8,6 +8,8 @@ use xp_store::StoreError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
+    #[error("legacy transaction expansion exceeded {0}")]
+    Expansion(&'static str),
     #[error("{detail}")]
     History {
         status: StatusCode,
@@ -32,6 +34,7 @@ impl ApiError {
     fn status(&self) -> StatusCode {
         match self {
             ApiError::History { status, .. } => *status,
+            ApiError::Expansion(_) => StatusCode::UNPROCESSABLE_ENTITY,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Internal(_) | ApiError::Integrity(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -43,6 +46,7 @@ impl ApiError {
     fn title(&self) -> &'static str {
         match self {
             ApiError::History { status, .. } => status.canonical_reason().unwrap_or("Error"),
+            ApiError::Expansion(_) => "Unprocessable Entity",
             ApiError::NotFound => "Not Found",
             ApiError::BadRequest(_) => "Bad Request",
             ApiError::Internal(_) | ApiError::Integrity(_) => "Internal Server Error",
@@ -54,6 +58,9 @@ impl ApiError {
     fn detail(&self) -> String {
         match self {
             ApiError::History { detail, .. } => detail.clone(),
+            ApiError::Expansion(_) => {
+                "transaction expansion limit exceeded; use transaction summaries".into()
+            }
             ApiError::NotFound => "the requested resource does not exist".to_owned(),
             ApiError::BadRequest(d) => d.clone(),
             // Never leak the internal cause to the client; it is logged instead.
@@ -103,6 +110,7 @@ impl IntoResponse for ApiError {
             code: match &self {
                 ApiError::History { code, .. } => Some(*code),
                 ApiError::Integrity(_) => Some("integrity_error"),
+                ApiError::Expansion(code) => Some(*code),
                 _ => None,
             },
         };
@@ -124,6 +132,7 @@ impl IntoResponse for ApiError {
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> ApiError {
         match e {
+            StoreError::ReadLimit(code) => ApiError::Expansion(code),
             StoreError::Corrupt(_) => ApiError::Integrity(format!("store: {e}")),
             _ => ApiError::Internal(format!("store: {e}")),
         }

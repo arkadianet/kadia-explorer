@@ -44,6 +44,7 @@ fn register_prefix(reg: u8, value_hash: &Hash32) -> Vec<u8> {
 
 impl Reader {
     pub fn token(&self, id: &Hash32) -> Result<Option<TokenRow>, StoreError> {
+        self.count_lookup(2, 1);
         let table = self.txn.open_table(TOKENS)?;
         match table.get(id.as_slice())? {
             Some(v) => Ok(Some(TokenRow::decode(v.value())?)),
@@ -57,6 +58,7 @@ impl Reader {
         tokens: &impl ReadableTable<&'static [u8], &'static [u8]>,
         id: Hash32,
     ) -> Result<(Hash32, TokenRow), StoreError> {
+        self.count_lookup(2, 1);
         let row = tokens
             .get(id.as_slice())?
             .map(|v| TokenRow::decode(v.value()))
@@ -268,16 +270,26 @@ impl Reader {
         &self,
         ids: &[Hash32],
     ) -> Result<Vec<(Hash32, String, Option<u8>)>, StoreError> {
+        self.token_names_checked(ids, || Ok(()))
+    }
+
+    pub fn token_names_checked(
+        &self,
+        ids: &[Hash32],
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Vec<(Hash32, String, Option<u8>)>, StoreError> {
         let tokens = self.txn.open_table(TOKENS)?;
+        self.count_lookup(2, ids.len() as u64);
         let mut out = Vec::with_capacity(ids.len());
         for id in ids {
+            check()?;
             let Some(v) = tokens.get(id.as_slice())? else {
                 if self.partial_from()?.is_none() {
                     return Err(StoreError::Corrupt("referenced token row missing"));
                 }
                 continue;
             };
-            let row = TokenRow::decode(v.value())?;
+            let row = TokenRow::decode_checked(v.value(), &mut check)?;
             out.push((*id, row.name, row.decimals));
         }
         Ok(out)

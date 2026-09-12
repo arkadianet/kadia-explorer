@@ -4,6 +4,7 @@
 //! [`Reader`] (a point-in-time snapshot) inside `spawn_blocking`, since redb reads are
 //! synchronous and may touch disk.
 
+mod budget;
 pub mod dto;
 pub mod error;
 pub mod handlers;
@@ -182,6 +183,11 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
             "/v1/blocks/{height_or_id}/txs",
             get(handlers::blocks::block_txs),
         )
+        .route("/v1/tx-summaries", get(handlers::txs::summaries))
+        .route(
+            "/v1/blocks/{height_or_id}/tx-summaries",
+            get(handlers::blocks::summaries),
+        )
         .route("/v1/txs", get(handlers::txs::list))
         .route("/v1/txs/{id}", get(handlers::txs::get_one))
         .route("/v1/boxes/{id}", get(handlers::boxes::get_one))
@@ -298,6 +304,8 @@ mod inflight_guard_tests {
         // The blocking task is still running (parked on `unblock_rx.recv()`); the permit and
         // counter must not yet be released just because the awaiting future was dropped —
         // they live inside the still-running spawn_blocking closure.
+        assert_eq!(state.read_permits.available_permits(), 1);
+        assert_eq!(state.counters.inflight_reads.load(Ordering::Relaxed), 1);
         unblock_tx.send(()).unwrap();
 
         // Give the still-running spawn_blocking task a moment to finish and drop its guard.

@@ -1,6 +1,6 @@
 use crate::dto::{
-    block_dto, enrich_txs, parse_dir, parse_limit, parse_u64_cursor, tx_dto, BlockDto, ListParams,
-    PageDto, TxDto,
+    block_dto, checked_tx_summary_dto, parse_dir, parse_limit, parse_u64_cursor, BlockDto,
+    ListParams, PageDto, TxSummaryDto,
 };
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
@@ -69,27 +69,59 @@ pub async fn get_one(
     Ok(Json(dto))
 }
 
-/// Every tx of the block, in in-block order. Blocks are bounded (a few hundred txs at most),
-/// so this is deliberately unpaginated.
+pub async fn summaries(
+    State(state): State<AppState>,
+    Path(raw): Path<String>,
+    Query(p): Query<ListParams>,
+) -> Result<Json<PageDto<TxSummaryDto>>, ApiError> {
+    let limit = parse_limit(p.limit.as_deref())?;
+    let cursor = parse_u64_cursor(p.cursor.as_deref())?;
+    let dir = parse_dir(p.dir.as_deref())?;
+    Ok(Json(
+        blocking(&state, move |rd| {
+            let height = resolve_height(rd, &raw)?;
+            rd.header_at(height)?.ok_or(ApiError::NotFound)?;
+            let page = rd.txs_in_block_page(height, cursor, limit, dir)?;
+            Ok(PageDto {
+                items: page
+                    .items
+                    .iter()
+                    .map(|(id, row)| checked_tx_summary_dto(id, row))
+                    .collect::<Result<_, _>>()?,
+                next_cursor: page.next_cursor.map(|c| c.to_string()),
+            })
+        })
+        .await?,
+    ))
+}
+
+/// Every tx in block order: either the complete legacy array or an explicit problem.
 pub async fn block_txs(
     State(state): State<AppState>,
     Path(raw): Path<String>,
-) -> Result<Json<Vec<TxDto>>, ApiError> {
-    let out = blocking(&state, move |rd| {
+) -> Result<axum::response::Response, ApiError> {
+    blocking(&state, move |rd| {
+        let mut budget = crate::budget::Budget::new();
         let emission = rd.emission_tree_hash()?;
         let height = resolve_height(rd, &raw)?;
-        if rd.header_at(height)?.is_none() {
-            return Err(ApiError::NotFound);
-        }
+        rd.header_at(height)?.ok_or(ApiError::NotFound)?;
         let tip = rd.indexed_height()?;
-        let mut items = rd
-            .txs_in_block(height)?
-            .iter()
-            .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        enrich_txs(rd, items.iter_mut())?;
-        Ok(items)
+        let mut items = Vec::new();
+        let mut cursor = None;
+        loop {
+            budget.check()?;
+            let page = rd.txs_in_block_page_admitted(height, cursor, 1, Dir::Asc, |bytes| {
+                budget.admit_tx_row(bytes)
+            })?;
+            for (id, row) in &page.items {
+                items.push(budget.tx(rd, id, row, tip, emission.as_ref())?);
+            }
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        budget.json(&items)
     })
-    .await?;
-    Ok(Json(out))
+    .await
 }

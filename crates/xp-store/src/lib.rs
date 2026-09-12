@@ -45,10 +45,18 @@ pub(crate) fn meta_u64(b: &[u8]) -> Result<u64, StoreError> {
 }
 
 pub struct Store {
+    #[cfg(feature = "test-lookup-counts")]
+    pub(crate) lookups: std::sync::Arc<[std::sync::atomic::AtomicU64; 3]>,
     db: Database,
 }
 
 impl Store {
+    /// Test-only box/tree/token enrichment reads, scoped to this store.
+    #[cfg(feature = "test-lookup-counts")]
+    pub fn lookup_counts(&self) -> [u64; 3] {
+        std::array::from_fn(|i| self.lookups[i].load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     /// Opens (creating if absent) the redb database at `path`, ensuring every table in
     /// [`tables::ALL`] exists. On a fresh database the current [`tables::SCHEMA_VERSION`] is
     /// recorded; on an existing one a mismatched version is refused.
@@ -88,7 +96,11 @@ impl Store {
             }
         }
         txn.commit()?;
-        Ok(Store { db })
+        Ok(Store {
+            db,
+            #[cfg(feature = "test-lookup-counts")]
+            lookups: Default::default(),
+        })
     }
 
     /// Height of the last block applied, or `None` for an empty store.
@@ -208,6 +220,8 @@ impl Store {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("read admission: {0}")]
+    ReadLimit(&'static str),
     #[error("redb: {0}")]
     Redb(String),
     #[error("corrupt row: {0}")]

@@ -5,8 +5,9 @@ Updated 2026-09-12. This is the delivery-status authority referenced by the
 Historical design text is unchanged. Current scope is the accepted
 [completion design](docs/superpowers/specs/2026-09-12-explorer-done-design.md) and
 [M1–M6 plan](docs/superpowers/plans/2026-09-12-explorer-done-plan.md), subject to the
-owner's scoped implementation requests below. This session implements M2 steps 5–7;
-M2 steps 1–2 (`b2a83c0`) and 3–4 (`cfb489e`) are committed prerequisites.
+owner's scoped implementation requests below. This session implements **M3 steps 3–4 only**.
+M2 is committed (`b2a83c0`, `cfb489e`, `43f5941`); the reviewer reports all five
+gates passed outside the sandbox in 118 seconds. M3 steps 1, 2, 5 and 6 remain deferred.
 
 States: `planned` = agreed work without implementation; `implemented` = code or
 procedure exists; `verified` = specified acceptance evidence exists for the named
@@ -14,8 +15,8 @@ revision; `released` = deployment plus post-deployment smoke is evidenced.
 An implemented item is not necessarily verified. Missing evidence never means pass.
 CUT is a scope decision, not a delivery state. No release is certified here.
 
-Working revision: `cfb489e49faa10b85d017300b1c11a60af3f9f8f` plus the uncommitted
-M2 steps 5–7 diff, branch `fix/explorer-exit-code-and-rent-truth`. No commit, push or production operation was
+Working revision: `43f594188b45e139005c89d0c2507edb57c90337` plus the uncommitted
+M3 steps 3–4 diff, branch `fix/explorer-exit-code-and-rent-truth`. No commit, push or production operation was
 performed in this implementation session. Earlier baseline evidence below retains
 its original provenance.
 
@@ -42,7 +43,8 @@ separate and unverified.
 | M2 steps 1-2 — fail closed on canonical selection | implemented | `scripts/check.sh all` exit 0; 12 new/adjusted source and ingest tests pass, reviewer-run |
 | M2 steps 3-4 — required-reference matrix and fail-closed reads | implemented | Committed at `cfb489e`; [matrix and fixture evidence](docs/superpowers/2026-09-12-m2-required-reference-matrix.md). Final G: `artifacts/check/all-q4clyPVj`, exit 1 only for sandbox socket refusals (`fallback`, `rust_node`, Playwright); other gates pass. |
 | M2 steps 5-7 — generated transition model, UNDO | implemented; deterministic tests verified | 256 × 32 histories, independent all-table oracle, retention boundaries and deliberate mutation pass. Current G evidence and sandbox limitations below. |
-| M3-M6 | planned | Not started |
+| M3 steps 3–4 — summary routes and legacy budgets | implemented; deterministic tests verified | Final G exit 1 for sandbox socket refusals only; evidence below. |
+| M3 steps 1, 2, 5, 6; M4–M6 | planned | Deferred; frontend, telemetry and production measurements not started. |
 
 ### M2 steps 5–7 — independent transition and UNDO evidence
 
@@ -428,7 +430,7 @@ M4 produces and reviews concrete recovery commands before the drill.
 | Scope | State | Required artifact / current blocker |
 |---|---|---|
 | M2 integrity and transition model | implemented; current G not verified in sandbox | Matrix and deterministic store/API cases pass; 256 histories, UNDO retention and mutation evidence below. Source socket suites and Playwright require outside-sandbox G. |
-| M3 bounded reads and telemetry | planned | Summary lookup counts, boundary tests, latency/RSS/drain and durable restart evidence: absent |
+| M3 bounded reads and telemetry | steps 3–4 implemented | Zero-lookup and boundary proofs below; frontend migration, latency/RSS/drain and durable restart evidence remain deferred. |
 | M4 capacity and recovery | planned | Table attribution, growth/headroom, atomic cap tests, full-size checksummed restore/catch-up: absent |
 | M5 continuation | planned | Route policy matrix, multi-page/409 compatibility, frontend reset tests and G: absent |
 | M6 release verification | planned | Final candidate manifest, required G, independent parity, real-API smoke, seven-day soak, recovery and rollout evidence: absent |
@@ -464,3 +466,68 @@ procurement. YAML alone cannot make gates unavoidable; steps 4–5 and a green h
 candidate remain outstanding. “Pin the version that passes” must not turn a local
 stable resolution into a claim about unrecorded reviewer versions. Full-size restore
 is the recovery obligation; resync is not. No historical planning text was rewritten.
+
+
+## M3 steps 3–4 — 2026-09-12 candidate
+
+Only the two additive summary routes and the legacy transaction expansion safety
+net are implemented in this round. No frontend edits, metrics package, external
+dependency additions, schema-version bump, row-encoding change, commit or push.
+The budget rationale, published block-size provenance, input-expansion envelope,
+limitations and exact accounting are in
+[transaction-budgets.md](docs/operations/transaction-budgets.md).
+These are engineering judgments, not measured mainnet maxima or ordinary-load
+containment. Summary routes perform zero enrichment; frontend adoption is deferred.
+The proposed 10,000 box resolutions became 10,000 shared work units; successful JSON
+and cumulative encoded-row admission each have a 2 MiB limit; the cooperative
+worker deadline is four seconds. Valid large legacy responses may return 422.
+
+Evidence from the final code candidate:
+
+- New global and block summary walks match every fixture summary field and full DTO
+  field/count, both directions, exclusive cursors, height/id paths and empty ranges.
+  Per-store test counters stay `[0, 0, 0]` for box/tree/token enrichment; full DTO
+  expansion increments all three as a positive control. Count 65,535 succeeds;
+  65,536 returns `integrity_error` for each newly exposed input count.
+- Exact/one-over work, decoded bytes, JSON bytes (including escaping), and deadline
+  tests pass. Real token/register DTO expansion is tested at/over the work threshold.
+  Oversized input/output transactions reject before enrichment. Oversized stored
+  register/tree/token rows reject before owned decoding. A two-transaction block
+  whose individual detail routes succeed fails cumulatively as a complete problem,
+  never a successful prefix. Legacy fixture JSON matches the original DTO path.
+- Stored decoding checks inside vectors and 128-byte string-copy chunks; a test
+  interrupts midway through input, token and byte vectors. Register parsing, hex
+  conversion and serialization also check cooperatively. Existing cancellation
+  tests retain worker-owned permits; the ordinary cancellation test now explicitly
+  asserts retention before unblocking. No existing test was weakened.
+- Focused API tests: 26 unit tests and 72 route tests pass, one preexisting ignored
+  route test. Store cooperative-decoder test passes. Final workspace gate also
+  passes the non-socket suites, including the M2 generated state model and existing
+  history limits. Live parity remains unrun as before.
+
+Final command (target override is needed because the configured Cargo cache is
+read-only here; this uses the existing repository `target`, not `/tmp`):
+
+```sh
+CARGO_TARGET_DIR="$PWD/target" ./scripts/check.sh all
+```
+
+Final evidence: [results](artifacts/check/all-pr2BIDoc/results.log),
+[revision/diff/tool manifest](artifacts/check/all-pr2BIDoc/manifest.log),
+[candidate source hashes](artifacts/check/all-pr2BIDoc/candidate-source-sha256.json).
+New source/document files are also copied under that artifact's `new-files/`, since
+`git diff` alone does not capture untracked files. This ledger update follows the
+run; the hashed code and budget document are unchanged from the tested candidate.
+
+| Gate | Result |
+|---|---|
+| Formatting | PASS |
+| Clippy, workspace/all targets with warnings denied | PASS |
+| Rust workspace tests | NOT VERIFIED overall: **not run: sandbox** for `xp-source` socket fixtures (`fallback`: 6 bind refusals; `rust_node`: 13 bind refusals). Other suites pass. |
+| Frontend tests/check/lint/build | PASS; 120 tests in 16 files. No `npm ci` was run. |
+| Playwright | **not run: sandbox** — mock-server listen at `127.0.0.1:18099` rejected with `EPERM`. |
+| Overall | Exit **1**, expected environment restriction; not a green G claim. |
+
+The earlier `all-HKuJGS7S` run predates the decoder deadline correction and is
+superseded by `all-pr2BIDoc`. No production database or performance/load measurement
+was used. M3 steps 1, 2, 5 and 6 remain separate tasks; M3 as a whole is incomplete.

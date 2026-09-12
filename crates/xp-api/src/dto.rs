@@ -472,20 +472,53 @@ pub fn box_dto(
     tip: Option<u32>,
     emission: Option<&Hash32>,
 ) -> Result<BoxDto, ApiError> {
+    box_dto_budgeted(id, row, tree, tip, emission, None)
+}
+
+pub(crate) fn box_dto_budgeted(
+    id: &Hash32,
+    row: &BoxRow,
+    tree: Option<&TreeRow>,
+    tip: Option<u32>,
+    emission: Option<&Hash32>,
+    budget: Option<&crate::budget::Budget>,
+) -> Result<BoxDto, ApiError> {
     let tree = tree.ok_or_else(|| ApiError::Integrity("missing box tree".into()))?;
-    let registers = serde_json::from_str(&row.registers_json)
-        .map_err(|_| ApiError::Integrity("invalid stored register JSON".into()))?;
+    let registers = match budget {
+        Some(budget) => budget.registers(&row.registers_json)?,
+        None => serde_json::from_str(&row.registers_json)
+            .map_err(|_| ApiError::Integrity("invalid stored register JSON".into()))?,
+    };
+    let tokens = match budget {
+        Some(budget) => row
+            .tokens
+            .iter()
+            .map(|(id, amount)| {
+                budget.check()?;
+                Ok(TokenDto {
+                    id: hex32(id),
+                    amount: amount.to_string(),
+                    name: None,
+                    decimals: None,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?,
+        None => token_dtos(&row.tokens),
+    };
     Ok(BoxDto {
         id: hex32(id),
         tx_id: hex32(&row.tx_id),
         index: row.index,
         value: row.value.to_string(),
         creation_height: row.creation_height,
-        ergo_tree: Some(hex::encode(&tree.tree_bytes)),
+        ergo_tree: Some(match budget {
+            Some(budget) => budget.hex(&tree.tree_bytes)?,
+            None => hex::encode(&tree.tree_bytes),
+        }),
         address: Some(tree.address.clone()),
         template_hash: Some(hex32(&tree.template_hash)),
         tree_hash: hex32(&row.tree_hash),
-        tokens: token_dtos(&row.tokens),
+        tokens,
         registers,
         size: row.size,
         spent_by: row.spent.map(|(tx, _)| hex32(&tx)),
@@ -556,6 +589,19 @@ pub fn tx_summary_dto(id: &Hash32, row: &TxRow) -> TxSummaryDto {
         data_input_count: u16::try_from(row.data_inputs.len()).unwrap_or(u16::MAX),
         output_count: row.output_count,
     }
+}
+
+/// Checked projection used by the additive summary routes.
+pub fn checked_tx_summary_dto(id: &Hash32, row: &TxRow) -> Result<TxSummaryDto, ApiError> {
+    let input_count = u16::try_from(row.inputs.len())
+        .map_err(|_| ApiError::Integrity("transaction input count overflow".into()))?;
+    let data_input_count = u16::try_from(row.data_inputs.len())
+        .map_err(|_| ApiError::Integrity("transaction data input count overflow".into()))?;
+    Ok(TxSummaryDto {
+        input_count,
+        data_input_count,
+        ..tx_summary_dto(id, row)
+    })
 }
 
 pub fn tx_dto(

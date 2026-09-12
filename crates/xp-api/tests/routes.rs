@@ -3029,3 +3029,351 @@ async fn integrity_rent_eligible_does_not_skip_a_missing_box() {
     });
     assert_integrity_routes(&router_over(store, 2), &["/v1/rent/eligible".into()]).await;
 }
+
+#[tokio::test]
+async fn summary_routes_match_all_fixture_fields_without_enrichment() {
+    use xp_store::{read::Dir, Reader};
+    let (_dir, app, state) = app_with_state(unlimited(), None);
+    let rd = Reader::new(&state.store).unwrap();
+    let rows = rd.txs_by_gidx(None, 500, Dir::Asc).unwrap().items;
+    let expected: Vec<Value> = rows
+        .iter()
+        .map(|(id, row)| {
+            serde_json::json!({
+                "id": hex::encode(id), "height": row.height, "index": row.index,
+                "timestamp": row.timestamp, "size": row.size, "fee": row.fee.to_string(),
+                "input_count": row.inputs.len(), "data_input_count": row.data_inputs.len(),
+                "output_count": row.output_count,
+            })
+        })
+        .collect();
+    assert!(!expected.is_empty());
+    assert_eq!(state.store.lookup_counts(), [0; 3]);
+    for dir in ["asc", "desc"] {
+        let mut routes = vec![("/v1/tx-summaries".to_string(), expected.clone())];
+        for height in 1866000..=1866002 {
+            let block: Vec<_> = expected
+                .iter()
+                .filter(|row| row["height"] == height)
+                .cloned()
+                .collect();
+            routes.push((format!("/v1/blocks/{height}/tx-summaries"), block.clone()));
+            let id = hex::encode(rd.header_at(height).unwrap().unwrap().id);
+            routes.push((format!("/v1/blocks/{id}/tx-summaries"), block));
+        }
+        for (route, mut wanted) in routes {
+            if dir == "desc" {
+                wanted.reverse();
+            }
+            let mut actual = Vec::new();
+            let mut cursor = None;
+            for _ in 0..=wanted.len() {
+                let path = format!(
+                    "{route}?limit=1&dir={dir}{}",
+                    cursor
+                        .as_ref()
+                        .map(|c| format!("&cursor={c}"))
+                        .unwrap_or_default()
+                );
+                let (status, value) = get(&app, &path).await;
+                assert_eq!(status, StatusCode::OK, "{path}: {value}");
+                actual.extend(value["items"].as_array().unwrap().iter().cloned());
+                let next = value["next_cursor"].as_str().map(str::to_owned);
+                if next.is_none() {
+                    break;
+                }
+                assert_ne!(next, cursor, "exclusive cursor must advance");
+                cursor = next;
+            }
+            assert_eq!(actual, wanted, "{route} {dir}");
+            assert_eq!(state.store.lookup_counts(), [0; 3], "{route} enriched rows");
+        }
+    }
+    for route in ["/v1/tx-summaries", "/v1/blocks/1866000/tx-summaries"] {
+        for query in ["limit=0", "limit=no", "cursor=no", "dir=no"] {
+            assert_eq!(
+                get(&app, &format!("{route}?{query}")).await.0,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        for query in ["cursor=18446744073709551615&dir=asc", "cursor=0&dir=desc"] {
+            assert_eq!(
+                get(&app, &format!("{route}?{query}")).await.1["items"],
+                serde_json::json!([])
+            );
+        }
+    }
+    assert_eq!(
+        get(&app, "/v1/blocks/999/tx-summaries").await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(state.store.lookup_counts(), [0; 3]);
+
+    // Compare the new implementation's complete legacy JSON with the original DTO path,
+    // and demonstrate that the same per-store counters detect actual enrichment.
+    let tip = rd.indexed_height().unwrap();
+    let emission = rd.emission_tree_hash().unwrap();
+    let mut full = rows
+        .iter()
+        .map(|(id, row)| xp_api::dto::tx_dto(&rd, id, row, tip, emission.as_ref()).unwrap())
+        .collect::<Vec<_>>();
+    xp_api::dto::enrich_txs(&rd, full.iter_mut()).unwrap();
+    let full = serde_json::to_value(full).unwrap();
+    assert_eq!(
+        get(&app, "/v1/txs?dir=asc&limit=500").await.1["items"],
+        full
+    );
+    for (summary, tx) in expected.iter().zip(full.as_array().unwrap()) {
+        for key in ["id", "height", "index", "timestamp", "size", "fee"] {
+            assert_eq!(summary[key], tx[key]);
+        }
+        for (count, field) in [
+            ("input_count", "inputs"),
+            ("data_input_count", "data_inputs"),
+            ("output_count", "outputs"),
+        ] {
+            assert_eq!(summary[count], tx[field].as_array().unwrap().len());
+        }
+        assert_eq!(
+            get(
+                &app,
+                &format!("/v1/txs/{}", summary["id"].as_str().unwrap())
+            )
+            .await
+            .1,
+            *tx
+        );
+    }
+    for height in 1866000..=1866002 {
+        let wanted: Vec<_> = full
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tx| tx["height"] == height)
+            .cloned()
+            .collect();
+        assert_eq!(
+            get(&app, &format!("/v1/blocks/{height}/txs")).await.1,
+            serde_json::json!(wanted)
+        );
+    }
+    let counts = state.store.lookup_counts();
+    assert!(
+        counts[0] > 0 && counts[1] > 0 && counts[2] > 0,
+        "positive control: {counts:?}"
+    );
+}
+
+#[tokio::test]
+async fn legacy_expansion_rejects_one_oversized_transaction_without_partial_arrays() {
+    use redb::ReadableTable;
+    use xp_store::{rows::TxRow, tables::TXS};
+    let (_dir, store) = integrity_store(false, |tx| {
+        let mut table = tx.open_table(TXS).unwrap();
+        let id = history_id(302);
+        let mut row = TxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+        row.inputs = vec![[0xff; 32]; 10_001];
+        table
+            .insert(id.as_slice(), row.encode().as_slice())
+            .unwrap();
+    });
+    let app = router_over(store, 2);
+    for path in [
+        format!("/v1/txs/{}", hex::encode(history_id(302))),
+        "/v1/txs?dir=asc".into(),
+        "/v1/blocks/2/txs".into(),
+    ] {
+        let (status, headers, body) = get_from(&app, &path, "127.0.0.1", None).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{path}: {body}");
+        assert_eq!(headers["content-type"], "application/problem+json");
+        assert_eq!(body["code"], "expansion_work_limit");
+        assert!(!body.is_array() && body.get("items").is_none());
+    }
+    assert_eq!(
+        get(&app, "/v1/blocks/2/tx-summaries").await.0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn summary_count_overflow_is_integrity_error_for_both_input_counts() {
+    use redb::ReadableTable;
+    use xp_store::{rows::TxRow, tables::TXS};
+    for data_inputs in [false, true] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            let mut table = tx.open_table(TXS).unwrap();
+            let id = history_id(302);
+            let mut row =
+                TxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+            let ids = vec![[0xff; 32]; usize::from(u16::MAX) + 1];
+            if data_inputs {
+                row.data_inputs = ids;
+            } else {
+                row.inputs = ids;
+            }
+            table
+                .insert(id.as_slice(), row.encode().as_slice())
+                .unwrap();
+        });
+        let app = router_over(store, 2);
+        for path in ["/v1/tx-summaries", "/v1/blocks/2/tx-summaries"] {
+            let (status, body) = get(&app, path).await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(body["code"], "integrity_error");
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_block_budget_is_cumulative_and_never_returns_a_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("cumulative.redb")).unwrap();
+    store.seed_genesis(&mainnet_genesis()).unwrap();
+    let mut txs: Vec<_> = integrity_blocks()
+        .into_iter()
+        .flat_map(|block| block.txs)
+        .collect();
+    for tx in &mut txs {
+        tx.data_inputs = vec![mainnet_genesis()[0].id; 5_000];
+    }
+    store
+        .apply_batch(&[history_block(1, 201, [0; 32], txs)], true)
+        .unwrap();
+    let app = router_over(store, 1);
+    for id in [301, 302] {
+        assert_eq!(
+            get(&app, &format!("/v1/txs/{}", hex::encode(history_id(id))))
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
+    for route in ["/v1/blocks/1/txs", "/v1/txs?dir=asc"] {
+        let (status, value) = get(&app, route).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{route}: {value}");
+        assert_eq!(value["code"], "expansion_work_limit");
+        assert!(!value.is_array() && value.get("items").is_none());
+    }
+    assert_eq!(
+        get(&app, "/v1/blocks/1/tx-summaries").await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn legacy_admission_rejects_oversized_enrichment_rows_before_decode() {
+    use redb::ReadableTable;
+    use xp_store::{
+        rows::{BoxRow, TokenRow, TreeRow},
+        tables::*,
+    };
+    for kind in ["registers", "tree", "token"] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            let huge = "x".repeat(2 * 1024 * 1024);
+            match kind {
+                "registers" => {
+                    let mut table = tx.open_table(BOXES).unwrap();
+                    let id = history_id(103);
+                    let mut row =
+                        BoxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+                    row.registers_json = serde_json::json!({"R4": huge}).to_string();
+                    table
+                        .insert(id.as_slice(), row.encode().as_slice())
+                        .unwrap();
+                }
+                "tree" => {
+                    let mut table = tx.open_table(ERGO_TREES).unwrap();
+                    let id = xp_wire::tree_hash(&[0, 8, 0xd3]).0;
+                    let mut row =
+                        TreeRow::decode(table.get(id.as_slice()).unwrap().unwrap().value())
+                            .unwrap();
+                    row.tree_bytes = huge.into_bytes();
+                    table
+                        .insert(id.as_slice(), row.encode().as_slice())
+                        .unwrap();
+                }
+                "token" => {
+                    let mut table = tx.open_table(TOKENS).unwrap();
+                    let id = mainnet_genesis()[0].id.0;
+                    let mut row =
+                        TokenRow::decode(table.get(id.as_slice()).unwrap().unwrap().value())
+                            .unwrap();
+                    row.name = huge;
+                    table
+                        .insert(id.as_slice(), row.encode().as_slice())
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+        });
+        let app = router_over(store, 2);
+        for route in [
+            format!("/v1/txs/{}", hex::encode(history_id(302))),
+            "/v1/blocks/2/txs".into(),
+        ] {
+            let (status, value) = get(&app, &route).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{kind}: {value}");
+            assert_eq!(value["code"], "expansion_decode_limit");
+        }
+        assert_eq!(
+            get(&app, "/v1/blocks/2/tx-summaries").await.0,
+            StatusCode::OK
+        );
+    }
+}
+
+#[tokio::test]
+async fn summary_block_empty_missing_range_and_exact_count_boundary() {
+    use redb::ReadableTable;
+    use xp_store::{
+        keys::k_u32,
+        rows::{HeaderRow, TxRow},
+        tables::{HEADERS, TXS},
+    };
+    for case in ["empty", "missing", "max_count"] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            if case == "max_count" {
+                let mut table = tx.open_table(TXS).unwrap();
+                let id = history_id(302);
+                let mut row =
+                    TxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+                row.inputs = vec![[0; 32]; usize::from(u16::MAX)];
+                row.data_inputs = vec![[0; 32]; usize::from(u16::MAX)];
+                table
+                    .insert(id.as_slice(), row.encode().as_slice())
+                    .unwrap();
+            } else {
+                let mut table = tx.open_table(HEADERS).unwrap();
+                let key = k_u32(2);
+                let mut row =
+                    HeaderRow::decode(table.get(key.as_slice()).unwrap().unwrap().value()).unwrap();
+                row.tx_count = if case == "empty" { 0 } else { 2 };
+                table
+                    .insert(key.as_slice(), row.encode().as_slice())
+                    .unwrap();
+            }
+        });
+        let app = router_over(store, 2);
+        let (status, value) = get(&app, "/v1/blocks/2/tx-summaries?dir=asc").await;
+        match case {
+            "empty" => {
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(value, serde_json::json!({"items": [], "next_cursor": null}));
+                assert_eq!(get(&app, "/v1/blocks/2/txs").await.1, serde_json::json!([]));
+            }
+            "missing" => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(value["code"], "integrity_error");
+            }
+            "max_count" => {
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(value["items"][0]["input_count"], u16::MAX);
+                assert_eq!(value["items"][0]["data_input_count"], u16::MAX);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
