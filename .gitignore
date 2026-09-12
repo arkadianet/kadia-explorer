@@ -5,3 +5,6 @@
 
 # Local UI review screenshots (regenerate with the live Playwright config)
 /frontend/.uishots
+
+# Local gate logs and fixture temporary files
+/artifacts/
