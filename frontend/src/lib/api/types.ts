@@ -4,6 +4,10 @@
 export interface PageDto<T> {
 	items: T[];
 	next_cursor: string | null;
+	next_snapshot?: string | null;
+	consistency?: 'strict' | 'best_effort';
+	anchor?: { height: number; block_id: string } | null;
+	observed_anchor?: { height: number; block_id: string } | null;
 }
 
 export interface StatusStalledDto {

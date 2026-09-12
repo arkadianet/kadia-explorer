@@ -106,15 +106,21 @@
 	$effect(() => {
 		if (info === null) return;
 		if (active === 'txs' && !txPager) {
-			const p = createPager<TxSummaryDto>((c) => api.addressTxs(addr, c, PAGE_SIZE));
+			const p = createPager<TxSummaryDto>((c, snapshot) =>
+				api.addressTxs(addr, c, PAGE_SIZE, undefined, undefined, snapshot)
+			);
 			txPager = p;
 			void p.loadMore();
 		} else if (active === 'unspent' && !unspentPager) {
-			const p = createPager<BoxDto>((c) => api.addressBoxes(addr, true, c, PAGE_SIZE));
+			const p = createPager<BoxDto>((c, snapshot) =>
+				api.addressBoxes(addr, true, c, PAGE_SIZE, undefined, undefined, snapshot)
+			);
 			unspentPager = p;
 			void p.loadMore();
 		} else if (active === 'boxes' && !boxPager) {
-			const p = createPager<BoxDto>((c) => api.addressBoxes(addr, false, c, PAGE_SIZE));
+			const p = createPager<BoxDto>((c, snapshot) =>
+				api.addressBoxes(addr, false, c, PAGE_SIZE, undefined, undefined, snapshot)
+			);
 			boxPager = p;
 			void p.loadMore();
 		} else if (active === 'rent' && rentItems === null && !rentLoading && rentError === null) {

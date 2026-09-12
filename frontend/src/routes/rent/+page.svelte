@@ -90,7 +90,9 @@
 	const tip = $derived(status.current?.indexed ?? null);
 
 	// Eligible: cursor pager, created lazily on first activation.
-	const eligiblePager = createPager<RentItemDto>((cursor) => api.rentEligible(cursor, 50));
+	const eligiblePager = createPager<RentItemDto>((cursor, snapshot) =>
+		api.rentEligible(cursor, 50, undefined, snapshot)
+	);
 	let eligibleStarted = false;
 
 	$effect(() => {

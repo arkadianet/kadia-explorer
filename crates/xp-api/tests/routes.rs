@@ -4049,3 +4049,85 @@ async fn m5_empty_genesis_and_headerless_partial_snapshots_do_not_invent_anchors
         }
     }
 }
+
+// A pre-M5 consumer knows only these fields; serde must ignore all strict additions.
+#[tokio::test]
+async fn m5_pre_m5_client_parses_legacy_pages_and_strict_amounts_and_ids() {
+    #[derive(serde::Deserialize)]
+    struct LegacyPage {
+        items: Vec<LegacyRichItem>,
+        next_cursor: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct LegacyRichItem {
+        address: Option<String>,
+        tree_hash: String,
+        nano: String,
+    }
+    let f = m5_fixture();
+    for strict in [false, true] {
+        let query = if strict { "&consistency=strict" } else { "" };
+        let (status, body) = get(&f.app, &format!("/v1/richlist?limit=2{query}")).await;
+        assert_eq!(status, StatusCode::OK);
+        let page: LegacyPage = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(page.items.len(), 2);
+        for item in &page.items {
+            assert!(item.address.is_some());
+            assert_eq!(item.tree_hash.len(), 64);
+            assert!(item
+                .tree_hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+            assert!(item.nano.bytes().all(|b| b.is_ascii_digit()));
+            assert!(item.nano.parse::<u64>().unwrap() > 0);
+        }
+        let cursor = page.next_cursor.unwrap();
+        let suffix = if strict {
+            format!(
+                "&consistency=strict&snapshot={}",
+                body["next_snapshot"].as_str().unwrap()
+            )
+        } else {
+            String::new()
+        };
+        // This is the unchanged pre-M5 request shape in the legacy iteration.
+        let (status, next) = get(
+            &f.app,
+            &format!("/v1/richlist?limit=2&cursor={cursor}{suffix}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let next: LegacyPage = serde_json::from_value(next).unwrap();
+        assert_eq!(next.items.len(), 2);
+        assert_ne!(page.items[0].tree_hash, next.items[0].tree_hash);
+    }
+}
+
+#[tokio::test]
+async fn m5_strict_expanded_wire_preserves_decimal_amounts_and_hex_ids() {
+    let f = m5_fixture();
+    let (status, body) = get(&f.app, "/v1/txs?dir=asc&limit=1&consistency=strict").await;
+    assert_eq!(status, StatusCode::OK);
+    let tx = &body["items"][0];
+    let hex_id = |value: &serde_json::Value| {
+        let value = value.as_str().expect("id must remain a JSON string");
+        assert_eq!(value.len(), 64);
+        assert!(value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+    };
+    let decimal = |value: &serde_json::Value| {
+        let value = value.as_str().expect("amount must remain a JSON string");
+        assert!(!value.is_empty());
+        assert!(value.bytes().all(|b| b.is_ascii_digit()));
+        value.parse::<u64>().unwrap();
+    };
+    hex_id(&tx["id"]);
+    decimal(&tx["fee"]);
+    let output = &tx["outputs"][0];
+    hex_id(&output["id"]);
+    hex_id(&output["tx_id"]);
+    decimal(&output["value"]);
+    hex_id(&output["tokens"][0]["id"]);
+    decimal(&output["tokens"][0]["amount"]);
+}

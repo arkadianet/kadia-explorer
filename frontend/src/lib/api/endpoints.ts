@@ -25,8 +25,12 @@ export const api = {
 
 	supply: (f?: Fetch) => apiGet<SupplyDto>('/supply', undefined, f),
 
-	blocks: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
-		apiGet<PageDto<BlockDto>>('/blocks', { cursor, limit, dir }, f),
+	blocks: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch, snapshot?: string) =>
+		apiGet<PageDto<BlockDto>>(
+			'/blocks',
+			{ cursor, limit, dir, consistency: 'strict', snapshot },
+			f
+		),
 
 	block: (heightOrId: string | number, f?: Fetch) =>
 		apiGet<BlockDto>(`/blocks/${encodeURIComponent(heightOrId)}`, undefined, f),
@@ -37,13 +41,17 @@ export const api = {
 	txs: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
 		apiGet<PageDto<TxDto>>('/txs', { cursor, limit, dir }, f),
 
-	txSummaries: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
-		apiGet<PageDto<TxSummaryDto>>('/tx-summaries', { cursor, limit, dir }, f),
+	txSummaries: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch, snapshot?: string) =>
+		apiGet<PageDto<TxSummaryDto>>(
+			'/tx-summaries',
+			{ cursor, limit, dir, consistency: 'strict', snapshot },
+			f
+		),
 
-	blockTxSummaries: (id: string, cursor?: string, limit = 50, f?: Fetch) =>
+	blockTxSummaries: (id: string, cursor?: string, limit = 50, f?: Fetch, snapshot?: string) =>
 		apiGet<PageDto<TxSummaryDto>>(
 			`/blocks/${encodeURIComponent(id)}/tx-summaries`,
-			{ cursor, limit },
+			{ cursor, limit, consistency: 'strict', snapshot },
 			f
 		),
 
@@ -63,26 +71,38 @@ export const api = {
 		cursor?: string,
 		limit = 50,
 		dir?: 'asc' | 'desc',
-		f?: Fetch
+		f?: Fetch,
+		snapshot?: string
 	) =>
 		apiGet<PageDto<BoxDto>>(
 			`/addresses/${encodeURIComponent(addr)}/boxes`,
-			{ unspent, cursor, limit, dir },
+			{ unspent, cursor, limit, dir, consistency: 'strict', snapshot },
 			f
 		),
 
-	addressTxs: (addr: string, cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
+	addressTxs: (
+		addr: string,
+		cursor?: string,
+		limit = 50,
+		dir?: 'asc' | 'desc',
+		f?: Fetch,
+		snapshot?: string
+	) =>
 		apiGet<PageDto<TxSummaryDto>>(
 			`/addresses/${encodeURIComponent(addr)}/txs`,
-			{ cursor, limit, dir },
+			{ cursor, limit, dir, consistency: 'strict', snapshot },
 			f
 		),
 
 	addressRent: (addr: string, f?: Fetch) =>
 		apiGet<AddressRentDto>(`/addresses/${encodeURIComponent(addr)}/rent`, undefined, f),
 
-	richlist: (cursor?: string, limit = 50, f?: Fetch) =>
-		apiGet<PageDto<RichlistItemDto>>('/richlist', { cursor, limit }, f),
+	richlist: (cursor?: string, limit = 50, f?: Fetch, snapshot?: string) =>
+		apiGet<PageDto<RichlistItemDto>>(
+			'/richlist',
+			{ cursor, limit, consistency: 'strict', snapshot },
+			f
+		),
 
 	rentUpcoming: (blocks = 720, limit = 50, f?: Fetch) =>
 		apiGet<PageDto<RentItemDto> & { complete?: boolean; indexed_height?: number | null }>(
@@ -91,21 +111,35 @@ export const api = {
 			f
 		),
 
-	rentEligible: (cursor?: string, limit = 50, f?: Fetch) =>
-		apiGet<PageDto<RentItemDto>>('/rent/eligible', { cursor, limit }, f),
+	rentEligible: (cursor?: string, limit = 50, f?: Fetch, snapshot?: string) =>
+		apiGet<PageDto<RentItemDto>>(
+			'/rent/eligible',
+			{ cursor, limit, consistency: 'strict', snapshot },
+			f
+		),
 
 	search: (q: string, f?: Fetch) => apiGet<SearchDto>('/search', { q }, f),
 
-	tokens: (sort?: 'newest' | 'holders', cursor?: string, limit = 50, f?: Fetch) =>
-		apiGet<PageDto<TokenInfoDto>>('/tokens', { sort, cursor, limit }, f),
+	tokens: (
+		sort?: 'newest' | 'holders',
+		cursor?: string,
+		limit = 50,
+		f?: Fetch,
+		snapshot?: string
+	) =>
+		apiGet<PageDto<TokenInfoDto>>(
+			'/tokens',
+			{ sort, cursor, limit, consistency: 'strict', snapshot },
+			f
+		),
 
 	token: (id: string, f?: Fetch) =>
 		apiGet<TokenInfoDto>(`/tokens/${encodeURIComponent(id)}`, undefined, f),
 
-	tokenHolders: (id: string, cursor?: string, limit = 50, f?: Fetch) =>
+	tokenHolders: (id: string, cursor?: string, limit = 50, f?: Fetch, snapshot?: string) =>
 		apiGet<PageDto<TokenHolderDto>>(
 			`/tokens/${encodeURIComponent(id)}/holders`,
-			{ cursor, limit },
+			{ cursor, limit, consistency: 'strict', snapshot },
 			f
 		),
 
@@ -115,11 +149,12 @@ export const api = {
 		cursor?: string,
 		limit = 50,
 		dir?: 'asc' | 'desc',
-		f?: Fetch
+		f?: Fetch,
+		snapshot?: string
 	) =>
 		apiGet<PageDto<BoxDto>>(
 			`/tokens/${encodeURIComponent(id)}/boxes`,
-			{ unspent, cursor, limit, dir },
+			{ unspent, cursor, limit, dir, consistency: 'strict', snapshot },
 			f
 		),
 
@@ -132,11 +167,12 @@ export const api = {
 		cursor?: string,
 		limit = 50,
 		dir?: 'asc' | 'desc',
-		f?: Fetch
+		f?: Fetch,
+		snapshot?: string
 	) =>
 		apiGet<PageDto<BoxDto>>(
 			`/templates/${encodeURIComponent(hash)}/boxes`,
-			{ unspent, cursor, limit, dir },
+			{ unspent, cursor, limit, dir, consistency: 'strict', snapshot },
 			f
 		),
 
@@ -146,11 +182,12 @@ export const api = {
 		cursor?: string,
 		limit = 50,
 		dir?: 'asc' | 'desc',
-		f?: Fetch
+		f?: Fetch,
+		snapshot?: string
 	) =>
 		apiGet<PageDto<BoxDto>>(
 			`/registers/${encodeURIComponent(reg)}/${encodeURIComponent(valueHex)}/boxes`,
-			{ cursor, limit, dir },
+			{ cursor, limit, dir, consistency: 'strict', snapshot },
 			f
 		)
 };

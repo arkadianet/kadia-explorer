@@ -70,7 +70,9 @@
 	$effect(() => {
 		if (token === null) return;
 		if (active === 'holders' && !holderPager) {
-			const p = createPager<TokenHolderDto>((c) => api.tokenHolders(id, c, PAGE_SIZE));
+			const p = createPager<TokenHolderDto>((c, snapshot) =>
+				api.tokenHolders(id, c, PAGE_SIZE, undefined, snapshot)
+			);
 			holderPager = p;
 			void p.loadMore();
 		} else if (active === 'boxes' && !boxPager) {
@@ -79,7 +81,9 @@
 	});
 
 	function startBoxes() {
-		const p = createPager<BoxDto>((c) => api.tokenBoxes(id, unspentOnly, c, PAGE_SIZE));
+		const p = createPager<BoxDto>((c, snapshot) =>
+			api.tokenBoxes(id, unspentOnly, c, PAGE_SIZE, undefined, undefined, snapshot)
+		);
 		boxPager = p;
 		void p.loadMore();
 	}

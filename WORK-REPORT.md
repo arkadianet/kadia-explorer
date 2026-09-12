@@ -458,7 +458,7 @@ M4 produces and reviews concrete recovery commands before the drill.
 | M2 integrity and transition model | implemented; current G not verified in sandbox | Matrix and deterministic store/API cases pass; 256 histories, UNDO retention and mutation evidence below. Source socket suites and Playwright require outside-sandbox G. |
 | M3 bounded reads and telemetry | steps 3–4 implemented | Zero-lookup and boundary proofs below; frontend migration, latency/RSS/drain and durable restart evidence remain deferred. |
 | M4 capacity and recovery | planned | Table attribution, growth/headroom, atomic cap tests, full-size checksummed restore/catch-up: absent |
-| M5 continuation | planned | Route policy matrix, multi-page/409 compatibility, frontend reset tests and G: absent |
+| M5 continuation | implemented; sandbox-limited verification | Steps 1–4 committed in 2937523 / b437259; steps 5–6 uncommitted. See M5 entry below; full G remains unverified in sandbox. |
 | M6 release verification | planned | Final candidate manifest, required G, independent parity, real-API smoke, seven-day soak, recovery and rollout evidence: absent |
 | Parity against live reference node | implemented harness; unverified operational gate | No live run or captured independent equivalent in this session |
 | Restore/resync drill | planned; unverified | No completed full-size restore. Production resync prohibited; isolated resync benchmark CUT, not a hidden passing gate |
@@ -621,3 +621,57 @@ are absent from `git diff`. This ledger update follows the tested code.
 
 No `npm ci` ran, and Cargo used the repository target directory, not `/tmp`.
 The earlier `all-dGGymv7R` run is superseded by `all-dui5p9Qy`.
+
+## M5 steps 5–6 — strict frontend continuation and compatibility (2026-09-12)
+
+Candidate: uncommitted changes on `fix/explorer-exit-code-and-rent-truth`, following
+2937523 / b437259. No commit, push, dependency installation or schema change.
+
+All ordinary first-party pagers send strict cursor/snapshot pairs. HTTP 409 clears
+rows and both continuation fields, then latches further loads until the user
+clicks Restart. The message is “The chain changed. Restart to load the updated list.”
+A generation guard discards in-flight results after filter resets; list rendering
+and filter-driven pager replacement remain unchanged. The homepage block-window
+walk also carries the pair and discards its result on error. Historical routes and
+capped samples keep their separate contracts. The expanded homepage transaction
+card (limit 12) and bounded expanded block transaction table remain exempt;
+their pinned tests are unchanged.
+
+Evidence tests:
+- `summaryLists.test.ts`: disjoint pre/post-409 IDs; repeated load attempts make
+  no request until explicit restart; final accumulated rows contain only the new
+  chain; cursor/snapshot pairs asserted.
+- `pager.test.ts`: late responses after filter reset cannot append stale rows.
+- `txs.spec.ts`: browser Restart message/button, empty rows after 409, only new
+  rows after restart. **not run: sandbox**.
+- `m5_pre_m5_client_parses_legacy_pages_and_strict_amounts_and_ids`: real router,
+  unchanged legacy cursor requests deserialized into pre-M5 structs, then strict
+  responses deserialized into the same structs.
+- `m5_strict_expanded_wire_preserves_decimal_amounts_and_hex_ids`: transaction,
+  box and token IDs stay lowercase hex strings; fee, value and token amount stay
+  decimal strings. Both new Rust tests passed.
+- Five existing client URL assertions and the summary URL assertions now require
+  strict parameters and paired tokens; their response assertions were retained.
+  These encoded pre-strict frontend requests and were updated for the opt-in.
+
+The deliberate bare-cursor best-effort exception is prominent at the start of
+`bin/explorer/README.md` §API, with strict usage and 400/409 behavior.
+
+Frontend verification: `npm test` (126 tests / 17 files), `npm run check`
+(zero errors/warnings), `npm run lint`, `npm run build` passed.
+Bundle: **59.27 KB gzipped / 120 KB** in the final gate (earlier build: 59.28 KB).
+Cargo and fixture scratch use repository target/artifact directories, never /tmp.
+
+Final gate: `CARGO_TARGET_DIR="$PWD/target" ./scripts/check.sh all`, exit 1.
+[Results](artifacts/check/all-leqV8asm/results.log) and
+[revision/dirty-diff manifest](artifacts/check/all-leqV8asm/manifest.log).
+Supersedes the intermediate `all-NEHTJExV` run. This results-only ledger update
+follows the tested candidate.
+
+| Gate | Result |
+|---|---|
+| Rent classifier / capacity collector / fmt / Clippy | PASS |
+| Rust workspace tests | Non-socket suites PASS, including both new compatibility tests; fallback (6) and rust_node (13) socket tests **not run: sandbox**, bind PermissionDenied |
+| npm test / check / lint / build | PASS; 126 tests, zero type errors/warnings, 59.27 KB gzipped |
+| Playwright | **not run: sandbox**; mock-server bind to 127.0.0.1:18099 rejected with EPERM |
+| Overall | Exit 1; full G NOT VERIFIED in sandbox |

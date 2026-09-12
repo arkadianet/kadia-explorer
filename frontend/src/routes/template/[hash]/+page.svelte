@@ -45,7 +45,9 @@
 	});
 
 	function startBoxes() {
-		const p = createPager<BoxDto>((c) => api.templateBoxes(hash, unspentOnly, c, PAGE_SIZE));
+		const p = createPager<BoxDto>((c, snapshot) =>
+			api.templateBoxes(hash, unspentOnly, c, PAGE_SIZE, undefined, undefined, snapshot)
+		);
 		pager = p;
 		void p.loadMore();
 	}
