@@ -5,8 +5,8 @@ Updated 2026-09-12. This is the delivery-status authority referenced by the
 Historical design text is unchanged. Current scope is the accepted
 [completion design](docs/superpowers/specs/2026-09-12-explorer-done-design.md) and
 [M1–M6 plan](docs/superpowers/plans/2026-09-12-explorer-done-plan.md), subject to the
-owner's scoped implementation requests below. This session implements M2 steps 3–4
-only; M2 steps 5–7 remain a separate later task.
+owner's scoped implementation requests below. This session implements M2 steps 5–7;
+M2 steps 1–2 (`b2a83c0`) and 3–4 (`cfb489e`) are committed prerequisites.
 
 States: `planned` = agreed work without implementation; `implemented` = code or
 procedure exists; `verified` = specified acceptance evidence exists for the named
@@ -14,9 +14,8 @@ revision; `released` = deployment plus post-deployment smoke is evidenced.
 An implemented item is not necessarily verified. Missing evidence never means pass.
 CUT is a scope decision, not a delivery state. No release is certified here.
 
-Working revision: `b2a83c0914cf980c04eb0775ea7589ed7069f4ce` plus the uncommitted
-M2 steps 3–4 diff, branch `fix/explorer-exit-code-and-rent-truth`. M2 steps 1–2
-are committed at that baseline. No commit, push or production operation was
+Working revision: `cfb489e49faa10b85d017300b1c11a60af3f9f8f` plus the uncommitted
+M2 steps 5–7 diff, branch `fix/explorer-exit-code-and-rent-truth`. No commit, push or production operation was
 performed in this implementation session. Earlier baseline evidence below retains
 its original provenance.
 
@@ -41,9 +40,101 @@ separate and unverified.
 | M1 — make gates unavoidable (steps 1-3) | implemented | `scripts/check.sh all` exit 0, reviewer-run outside any sandbox on Rust 1.96.0 / Node v22.22.2 |
 | M1 — steps 4-5 (enforcement, provisioning) | planned | Blocked on owner: needs a push and repo-admin rights. A committed workflow is not a gate until it runs and is required. |
 | M2 steps 1-2 — fail closed on canonical selection | implemented | `scripts/check.sh all` exit 0; 12 new/adjusted source and ingest tests pass, reviewer-run |
-| M2 steps 3-4 — required-reference matrix and fail-closed reads | implemented | Uncommitted on `b2a83c0`; [matrix and fixture evidence](docs/superpowers/2026-09-12-m2-required-reference-matrix.md). Final G: `artifacts/check/all-q4clyPVj`, exit 1 only for sandbox socket refusals (`fallback`, `rust_node`, Playwright); other gates pass. |
-| M2 steps 5-7 — generated transition model, UNDO | planned | Separate later task; not started |
+| M2 steps 3-4 — required-reference matrix and fail-closed reads | implemented | Committed at `cfb489e`; [matrix and fixture evidence](docs/superpowers/2026-09-12-m2-required-reference-matrix.md). Final G: `artifacts/check/all-q4clyPVj`, exit 1 only for sandbox socket refusals (`fallback`, `rust_node`, Playwright); other gates pass. |
+| M2 steps 5-7 — generated transition model, UNDO | implemented; deterministic tests verified | 256 × 32 histories, independent all-table oracle, retention boundaries and deliberate mutation pass. Current G evidence and sandbox limitations below. |
 | M3-M6 | planned | Not started |
+
+### M2 steps 5–7 — independent transition and UNDO evidence
+
+The model in `crates/xp-store/tests/support/model.rs` uses maps of fixture boxes,
+transactions, token quantities and activity membership. It reconstructs secondary
+indexes and counters from these maps. Rollback reconstructs the surviving fixture
+chain from its starting state, intersecting UNDO keys with independently tracked
+retention; it never consumes the store's undo values. Only the test driver calls
+`Store::apply_batch` / `rollback_to`. Expectations use a separate schema-v2 byte
+serializer, not production row encoders or index-key helpers. Production row structs
+are data containers only. Schema version, core encoding, wire contracts and
+production paths are unchanged; no dependencies or test hooks were added.
+
+All 26 tables are compared after each command, including UNDO. The sole normalized
+field is UNDO's `prev_balances` entry order, which production emits from a randomized
+HashMap. Every entry and value remains significant; malformed/trailing bytes are
+rejected before normalization. Existing rollback fingerprint assertions remain and
+now also compare all logical tables. No physical redb file equality is asserted.
+
+Coverage: seeds 0–255, 32 commands each (8,192 total), split evenly between synthetic
+genesis and partial height-2000 starts. Each history includes 12 single applies,
+8 two-block batches, 11 rollbacks and one close/reopen. Two transactions per block
+exercise same-block spending; amounts, addresses, mint/full-or-partial burn choices,
+rollback depths and branch IDs vary by seed. Each history asserts mint, burn,
+same-block spend and reused-gidx coverage. Reapplied branches have new IDs.
+Fixtures keep one live box and at most one live token species, with three addresses,
+a fallback script template and an R9 register. Existing real-block fixtures retain
+coverage of richer scripts, EIP-4 and multi-box transactions.
+
+Runtime was reduced before reducing any requested coverage: four reopens became
+one per history, batches became two blocks, and blocks became two transactions.
+Four bounded worker threads run isolated histories. The earlier sequential candidate
+was stopped after exceeding 60 seconds; the optimized candidate's standalone run
+was 39.75 seconds, and the final focused run was **34.64 seconds** for all three new
+tests (256 histories plus mutation/minimizer and retention). The full-gate run of
+the same suite took **32.34 seconds**. Retention alone took 3.285 seconds in the
+focused run. Temporary stores and Cargo target stay under the
+repository; no target directory was placed under `/tmp`.
+
+Retention cases apply 999, 1,000 and 1,001 blocks, plus 1,002 to force actual eviction.
+The model expects up to W+1 retained rows, while the public rollback depth limit is W.
+Tests check interval and independently serialized values, rollback at the depth
+limit, just outside that limit, consumption of the extra retained row, and rejection
+at a genuinely missing/pruned row. Rejected operations preserve fingerprints and
+all raw logical bytes. Reapplication after pruning restores the indexed fingerprint
+and the independently expected retained undo history.
+
+Mutation proof: close Store, open the isolated database with redb, flip one byte in
+a stored undo register-gidx, close it and reopen Store. The existing fingerprint
+stays equal; the new oracle reports `table=undo`. Delta debugging reduces the
+32-command injected failure to **one apply**, saves it, reloads it, and proves clean
+replay passes while damaged replay fails. The saved proof is
+[`seed-7.mutation-proof.txt`](artifacts/state-machine/seed-7.mutation-proof.txt).
+Actual property failures save the seed, full command stream and table difference
+before minimization, then a same-failure-signature, deletion-1-minimal replay.
+Unexpected panics are captured too. Replay ordinary failure artifacts with:
+
+```sh
+CARGO_TARGET_DIR="$PWD/target" XP_STATE_REPLAY=artifacts/state-machine/seed-N.min.txt \
+  cargo test -p xp-store --test state_machine seeded_histories -- --nocapture
+```
+
+The mutation-proof file deliberately passes without fault injection; use
+`cargo test -p xp-store --test state_machine undo_mutation_and_minimized_replay -- --nocapture`
+to replay its damage. This tests the minimizer and artifact round trip, not just its
+existence. No real property failure remained in the final focused run.
+
+Focused command (exit 101 only from denied socket fixtures):
+
+```sh
+CARGO_TARGET_DIR="$PWD/target" TMPDIR="$PWD/artifacts/m2-focused/tmp" \
+  cargo test -p xp-source -p xp-store -p xp-api --no-fail-fast -- --nocapture
+```
+
+[Focused log](artifacts/m2-focused/tests.log): all store tests pass; API routes
+66 pass / 1 pre-existing ignored, API unit tests 6 pass / 1 ignored. Source unit tests
+and one non-socket canonical-selection test pass; 6 fallback and 13 rust-node HTTP
+fixtures cannot bind sockets (`EPERM`): **not run: sandbox**. Live parity remains
+ignored, not verified. No production-store integrity claim follows from these tests.
+
+Full gate: `CARGO_TARGET_DIR="$PWD/target" ./scripts/check.sh all`.
+[Gate artifacts](artifacts/check/all-JWBUXkHG/results.log), including manifest, tool
+versions and per-command logs. **Exit 1, NOT VERIFIED:** only the `xp-source`
+`fallback` and `rust_node` test targets and Playwright were blocked by socket
+`EPERM` (**not run: sandbox**). Formatting, workspace Clippy, all other Rust tests,
+and frontend tests/check/lint/build (including bundle budget) passed. Playwright's
+mock server failed to bind `127.0.0.1:18099`; no browser tests ran. The current
+candidate still needs G outside the sandbox; the owner's green prior baseline is
+not substituted for that evidence.
+A supplementary [source manifest](artifacts/m2-focused/source.sha256) includes the
+new untracked test files, which `git diff --binary` alone cannot capture. The working
+tree remains uncommitted and unpushed. No `npm ci` or production operation was run.
 
 ### M2 steps 3-4 — rollout preconditions and known limits (reviewer)
 
@@ -336,7 +427,7 @@ M4 produces and reviews concrete recovery commands before the drill.
 
 | Scope | State | Required artifact / current blocker |
 |---|---|---|
-| M2 integrity and transition model | planned | Source matrix, corruption/partial cases, seeded histories, UNDO mutation and G: absent |
+| M2 integrity and transition model | implemented; current G not verified in sandbox | Matrix and deterministic store/API cases pass; 256 histories, UNDO retention and mutation evidence below. Source socket suites and Playwright require outside-sandbox G. |
 | M3 bounded reads and telemetry | planned | Summary lookup counts, boundary tests, latency/RSS/drain and durable restart evidence: absent |
 | M4 capacity and recovery | planned | Table attribution, growth/headroom, atomic cap tests, full-size checksummed restore/catch-up: absent |
 | M5 continuation | planned | Route policy matrix, multi-page/409 compatibility, frontend reset tests and G: absent |
@@ -362,7 +453,7 @@ Accepted design §1.1 removes these from this release's obligations:
 - Mempool/WebSocket remain deferred; confirmed mainnet and polling stay in scope.
 - Homepage transaction-kind badges requiring full expansion (removal belongs to M3,
   not yet implemented); detail facts stay.
-- Legacy first-ID canonical guessing (removal belongs to M2, not yet implemented);
+- Legacy first-ID canonical guessing (removed in M2 steps 1–2);
   body-only fallback stays.
 - Guaranteed 30–40 GB physical size, byte-identical redb restoration, restoring
   pruned historical UNDO, and isolated resync benchmarking. Measured attribution,

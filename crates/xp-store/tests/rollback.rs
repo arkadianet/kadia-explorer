@@ -1,3 +1,6 @@
+#[path = "support/logical.rs"]
+mod logical;
+
 use xp_store::Store;
 use xp_wire::decode_block;
 
@@ -20,11 +23,13 @@ fn apply_then_rollback_is_identity() {
         .unwrap();
     s.apply_batch(&[fixture(1866000)], true).unwrap();
     let before = s.fingerprint().unwrap();
+    let logical_before = logical::snapshot(&s);
     s.apply_batch(&[fixture(1866001), fixture(1866002)], true)
         .unwrap();
     assert_ne!(s.fingerprint().unwrap(), before);
     s.rollback_to(1866000).unwrap();
     assert_eq!(s.fingerprint().unwrap(), before);
+    logical::difference(&logical::snapshot(&s), &logical_before).unwrap();
     assert_eq!(s.indexed_height().unwrap(), Some(1866000));
     // and re-applying works (gidx counters restored)
     s.apply_batch(&[fixture(1866001)], true).unwrap();
@@ -43,6 +48,7 @@ fn apply_then_rollback_is_identity_for_standalone_fixtures() {
         let b = fixture(h);
         s.seed_for_tests(h - 1, b.header.parent_id.0).unwrap();
         let before = s.fingerprint().unwrap();
+        let logical_before = logical::snapshot(&s);
         s.apply_batch(&[b], true).unwrap();
         assert_ne!(
             s.fingerprint().unwrap(),
@@ -51,6 +57,7 @@ fn apply_then_rollback_is_identity_for_standalone_fixtures() {
         );
         s.rollback_to(h - 1).unwrap();
         assert_eq!(s.fingerprint().unwrap(), before, "block {h} not identity");
+        logical::difference(&logical::snapshot(&s), &logical_before).unwrap();
         assert_eq!(s.indexed_height().unwrap(), Some(h - 1));
         // Re-applying must work: the gidx counters and every v2 index are back where the
         // block found them.
@@ -89,6 +96,7 @@ fn apply_then_rollback_with_same_block_create_and_spend() {
     )
     .unwrap();
     let before = s.fingerprint().unwrap();
+    let logical_before = logical::snapshot(&s);
 
     // Synthetic height 1866003: fixture 1866000's header rewritten to follow 1866002, with
     // two txs — A creates box X, B spends X and creates Y. Box/tx ids need not be
@@ -133,4 +141,5 @@ fn apply_then_rollback_with_same_block_create_and_spend() {
     s.rollback_to(1866002).unwrap();
     assert_eq!(s.indexed_height().unwrap(), Some(1866002));
     assert_eq!(s.fingerprint().unwrap(), before);
+    logical::difference(&logical::snapshot(&s), &logical_before).unwrap();
 }
