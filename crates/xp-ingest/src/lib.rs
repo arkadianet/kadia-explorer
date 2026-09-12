@@ -511,9 +511,17 @@ pub async fn run(
         let applied = tokio::task::spawn_blocking(move || -> Result<u32, ApplyErr> {
             let blocks: Vec<DecodedBlock> = bodies
                 .iter()
-                .map(|j| decode_block(j))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| ApplyErr::Decode(e.to_string()))?;
+                .map(|(height, id, json)| {
+                    let block = decode_block(json).map_err(|e| ApplyErr::Decode(e.to_string()))?;
+                    if block.header.id.0 != *id || block.header.height != *height {
+                        return Err(ApplyErr::Decode(format!(
+                            "body does not match canonical request at height {height}, id {}",
+                            xp_types::hex32(id)
+                        )));
+                    }
+                    Ok(block)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let tip = blocks.last().map(|b| b.header.height).unwrap_or(0);
             s.apply_batch(&blocks, durable).map_err(ApplyErr::Store)?;
             Ok(tip)
@@ -635,7 +643,7 @@ async fn fork_check(
 
 /// What one height's fetch produced.
 enum FetchOne {
-    Body(String),
+    Body(u32, Hash32, String),
     /// The source has no header at that height: it is simply behind us.
     NoHeader,
     /// The source announced a header but would not serve its body — a hole in the source.
@@ -644,7 +652,7 @@ enum FetchOne {
 
 /// The contiguous run of bodies from `lo`, and why it stopped.
 struct FetchedRange {
-    bodies: Vec<String>,
+    bodies: Vec<(u32, Hash32, String)>,
     /// `Some(h)` when the run stopped at a height the source announced a header for but has
     /// no body for. Distinguished from "the source is behind us" because only this one can
     /// last forever, and so is what a stall is reported on.
@@ -666,7 +674,7 @@ async fn fetch_range(
             match src.header_id_at(h).await? {
                 None => Ok(FetchOne::NoHeader),
                 Some(id) => Ok(match src.full_block_json(&id).await? {
-                    Some(json) => FetchOne::Body(json),
+                    Some(json) => FetchOne::Body(h, id, json),
                     None => FetchOne::NoBody,
                 }),
             }
@@ -682,7 +690,7 @@ async fn fetch_range(
     };
     for (i, r) in fetched.into_iter().enumerate() {
         match r? {
-            FetchOne::Body(json) => out.bodies.push(json),
+            FetchOne::Body(height, id, json) => out.bodies.push((height, id, json)),
             FetchOne::NoHeader => break,
             FetchOne::NoBody => {
                 out.missing_body_at = Some(lo + i as u32);

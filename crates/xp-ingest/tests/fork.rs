@@ -451,3 +451,111 @@ async fn source_failure_preserves_observation_and_recovery_refreshes_it() {
     shutdown.cancel();
     task.await.unwrap().unwrap();
 }
+
+/// Canonical capability failures use the same retry/streak path even when /info succeeds.
+#[tokio::test]
+async fn canonical_capability_failure_is_retryable_and_published() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Unsupported(AtomicUsize);
+    #[async_trait::async_trait]
+    impl BlockSource for Unsupported {
+        fn name(&self) -> &str {
+            "unsupported"
+        }
+        async fn best_height(&self) -> Result<u32, SourceError> {
+            Ok(10)
+        }
+        async fn header_id_at(&self, _: u32) -> Result<Option<Hash32>, SourceError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err(SourceError::Capability(
+                "upgrade node: /blocks/chainSlice required".into(),
+            ))
+        }
+        async fn full_block_json(&self, _: &Hash32) -> Result<Option<String>, SourceError> {
+            panic!("unsupported canonical selection must not fetch a body")
+        }
+        async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
+            Ok("[]".into())
+        }
+    }
+    // Empty store exercises block fetch; seeded store exercises fork comparison.
+    for seeded in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+        if seeded {
+            store.seed_for_tests(1, [3; 32]).unwrap();
+        }
+        let source = Arc::new(Unsupported(AtomicUsize::new(0)));
+        let (tx, mut rx) = watch::channel(initial_status());
+        let shutdown = CancellationToken::new();
+        let task = tokio::spawn(run(
+            store.clone(),
+            source.clone(),
+            test_cfg(),
+            tx,
+            shutdown.clone(),
+        ));
+        timeout(Duration::from_secs(5), async {
+            while rx.borrow().source_error.is_none() {
+                rx.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        let status = rx.borrow().clone();
+        assert!(source.0.load(Ordering::SeqCst) >= 3);
+        let error = status.source_error.unwrap();
+        assert!(error.contains("source capability:"));
+        assert!(error.contains(if seeded { "fork check" } else { "block fetch" }));
+        assert!(status.source_observed_at_ms.is_some());
+        assert!(status.halted.is_none());
+        assert!(!task.is_finished());
+        assert_eq!(
+            store.indexed_height().unwrap(),
+            if seeded { Some(1) } else { None }
+        );
+        shutdown.cancel();
+        task.await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn body_must_match_selected_canonical_id_and_height() {
+    for wrong_height in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+        let mut chain = chain_a();
+        let seed_id = decode_block(&chain[0].2).unwrap().header.parent_id.0;
+        store.seed_for_tests(1865999, seed_id).unwrap();
+        if wrong_height {
+            // Serve the next height's body under the requested height (and its matching id).
+            chain[0].1 = chain[1].1;
+            chain[0].2 = chain[1].2.clone();
+        } else {
+            // Body is otherwise valid and extends the stored parent, but has a different id.
+            chain[0].1[0] ^= 0xff;
+        }
+        chain.insert(0, (1865999, seed_id, String::new()));
+        let (tx, rx) = watch::channel(initial_status());
+        let err = timeout(
+            Duration::from_secs(5),
+            run(
+                store.clone(),
+                Arc::new(FakeSource::new(chain)),
+                test_cfg(),
+                tx,
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("body does not match canonical request"),
+            "{err}"
+        );
+        assert!(rx.borrow().halted.is_some());
+        assert_eq!(store.indexed_height().unwrap(), Some(1865999));
+    }
+}

@@ -11,15 +11,11 @@ use xp_types::Hash32;
 /// height holds which header, and how far it goes — is still decided entirely by the primary.
 /// The fallback can never move the index onto its own chain.
 ///
-/// That is also why the fetched body needs no extra validation: it is requested *by header
-/// id*, an id the primary announced, and any node that answers `/blocks/{id}` at all answers
-/// with the block having that id. A fallback serving a different block would have to serve it
-/// under the primary's id, at which point the body fails to decode into that header downstream
-/// (`xp-ingest` decodes it and `xp-store` checks its parent linkage) rather than being applied.
+/// Ingest checks the decoded body's id and height against the primary's canonical request;
+/// store apply checks height continuity and parent linkage before indexing it.
 ///
 /// The motivating case: the primary Rust node returns 404 for `/blocks/{id}` on blocks whose
-/// header it happily serves from `/blocks/at/{height}` (a node-side parse bug), which stalls
-/// ingest at that height forever.
+/// header it serves canonically, which stalls ingest at that height forever.
 pub struct Fallback {
     primary: Arc<dyn BlockSource>,
     fallback: Arc<dyn BlockSource>,

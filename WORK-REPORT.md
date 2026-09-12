@@ -33,6 +33,19 @@ the old design's “awaiting Rust execution gates” is historical, not current 
 The reviewer baseline includes those tests. Independent live verification remains
 separate and unverified.
 
+## Milestone progress
+
+| Milestone | State | Evidence |
+|---|---|---|
+| M1 — make gates unavoidable (steps 1-3) | implemented | `scripts/check.sh all` exit 0, reviewer-run outside any sandbox on Rust 1.96.0 / Node v22.22.2 |
+| M1 — steps 4-5 (enforcement, provisioning) | planned | Blocked on owner: needs a push and repo-admin rights. A committed workflow is not a gate until it runs and is required. |
+| M2 steps 1-2 — fail closed on canonical selection | implemented | `scripts/check.sh all` exit 0; 12 new/adjusted source and ingest tests pass, reviewer-run |
+| M2 steps 3-7 — integrity matrix, generated transition model, UNDO | planned | Not started |
+| M3-M6 | planned | Not started |
+
+Nothing above is `verified` in the release sense: CI has never executed, and live parity,
+the restore drill and the capacity soak remain unrun.
+
 ## G baseline and reproducible invocation
 
 The owner supplied the reviewer's run **outside the sandbox on this exact baseline

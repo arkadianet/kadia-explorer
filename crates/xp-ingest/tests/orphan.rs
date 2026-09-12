@@ -409,7 +409,12 @@ impl BlockSource for ShortChainSource {
     }
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError> {
         self.header_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Some(if height == 1 { [1; 32] } else { [2; 32] }))
+        Ok(Some(if height == 1 {
+            [1; 32]
+        } else {
+            // Keep the intended parent mismatch, with an otherwise consistent source body.
+            decode_block(&self.body).unwrap().header.id.0
+        }))
     }
     async fn full_block_json(&self, _id: &Hash32) -> Result<Option<String>, SourceError> {
         self.body_calls.fetch_add(1, Ordering::SeqCst);

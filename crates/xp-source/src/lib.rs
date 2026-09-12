@@ -21,7 +21,8 @@ pub trait BlockSource: Send + Sync {
     /// and implementations must resolve that to the *best-chain* one — `/blocks/at/{h}` lists
     /// orphans too, in no dependable order. Callers get one id per height, so a fork is
     /// detected the usual way — by the id at a height changing between polls — not by
-    /// inspecting a list here.
+    /// inspecting a list here. Unsupported canonical lookup must return a source capability
+    /// error, even if an unverified height listing contains only one id.
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError>;
     /// The raw block JSON body for header `id`, or `None` if the source doesn't have it.
     async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError>;
@@ -33,6 +34,8 @@ pub trait BlockSource: Send + Sync {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
+    #[error("source capability: {0}")]
+    Capability(String),
     #[error("http: {0}")]
     Http(String),
     #[error("decode: {0}")]
