@@ -3377,3 +3377,40 @@ async fn summary_block_empty_missing_range_and_exact_count_boundary() {
         }
     }
 }
+
+#[tokio::test]
+async fn register_capacity_exposes_exact_committed_count_with_read_admission() {
+    let (_dir, app, state) = app_with_state(unlimited(), None);
+    let (status, body) = get(&app, "/v1/register-capacity").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["entries"],
+        state.store.register_index_entries().unwrap().to_string()
+    );
+    assert_eq!(body["ceiling"], serde_json::Value::Null);
+    let _permits = state
+        .read_permits
+        .clone()
+        .acquire_many_owned(32)
+        .await
+        .unwrap();
+    assert_eq!(
+        get(&app, "/v1/register-capacity").await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn register_capacity_exposes_configured_ceiling_as_exact_decimal() {
+    let (_dir, _app, mut state) = app_with_state(unlimited(), None);
+    let dir = tempfile::tempdir().unwrap();
+    state.store = Arc::new(
+        Store::open_with_register_index_ceiling(&dir.path().join("x.redb"), Some(u64::MAX))
+            .unwrap(),
+    );
+    let app = xp_api::router(state, &unlimited());
+    let (status, body) = get(&app, "/v1/register-capacity").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["entries"], "0");
+    assert_eq!(body["ceiling"], u64::MAX.to_string());
+}

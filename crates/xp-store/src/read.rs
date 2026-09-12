@@ -160,6 +160,12 @@ impl Reader {
         })
     }
 
+    /// Root metadata only; includes spent boxes and genesis.
+    pub fn register_index_entries(&self) -> Result<u64, StoreError> {
+        use redb::ReadableTableMetadata;
+        Ok(self.txn.open_table(REGISTER_IDX)?.len()?)
+    }
+
     pub fn indexed_height(&self) -> Result<Option<u32>, StoreError> {
         let meta = self.txn.open_table(META)?;
         meta.get(META_INDEXED_HEIGHT)?

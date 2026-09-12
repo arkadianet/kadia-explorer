@@ -40,3 +40,29 @@ pub async fn boxes(
     .await?;
     Ok(Json(page))
 }
+
+/// Bounded metadata exposition for the external capacity collector.
+pub async fn capacity(
+    State(state): State<AppState>,
+) -> Result<Json<RegisterCapacityDto>, ApiError> {
+    let ceiling = state.store.register_index_ceiling();
+    crate::blocking(&state, move |rd| {
+        let entries = rd.register_index_entries()?;
+        Ok(Json(RegisterCapacityDto {
+            entries,
+            ceiling: ceiling.map(|n| n.to_string()),
+        }))
+    })
+    .await
+}
+
+#[derive(serde::Serialize)]
+pub struct RegisterCapacityDto {
+    // Decimal strings preserve all u64 values through JSON consumers.
+    #[serde(serialize_with = "serialize_count")]
+    entries: u64,
+    ceiling: Option<String>,
+}
+fn serialize_count<S: serde::Serializer>(n: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&n.to_string())
+}

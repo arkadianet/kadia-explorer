@@ -105,7 +105,20 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
 
     // Store is held here for the whole run and dropped last, after the server and the ingest
     // task have both stopped touching it.
-    let store = Arc::new(Store::open(&db_path).context("opening store")?);
+    let store = Arc::new(
+        Store::open_with_register_index_ceiling(&db_path, cfg.register_index_ceiling)
+            .context("opening store")?,
+    );
+    let entries = store
+        .register_index_entries()
+        .context("reading register occupancy")?;
+    match cfg.register_index_ceiling {
+        None => warn!(
+            entries,
+            "no register ceiling configured; register index growth is unbounded"
+        ),
+        Some(ceiling) => info!(entries, ceiling, "register index ceiling enforced"),
+    }
     let primary: Arc<dyn BlockSource> = Arc::new(RustNode::new(&cfg.source.url));
     // A fallback only ever supplies block *bodies* the primary announces but won't serve; the
     // chain being followed still comes from the primary alone (see `xp_source::Fallback`).

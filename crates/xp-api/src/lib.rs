@@ -176,6 +176,7 @@ async fn completeness(
 pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
     let rate_limit = limit::RateLimit::new(cfg, state.counters.clone());
     Router::new()
+        .route("/v1/register-capacity", get(handlers::registers::capacity))
         .route("/v1/status", get(handlers::status::status))
         .route("/v1/blocks", get(handlers::blocks::list))
         .route("/v1/blocks/{height_or_id}", get(handlers::blocks::get_one))

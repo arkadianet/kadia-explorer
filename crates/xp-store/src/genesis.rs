@@ -51,6 +51,7 @@ impl Store {
         }
         let mut txn = self.db.begin_write()?;
         txn.set_durability(Durability::Immediate);
+        self.check_register_capacity(&txn, boxes.iter())?;
         {
             let mut meta = txn.open_table(META)?;
             let mut next_box = meta

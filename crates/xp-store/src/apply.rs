@@ -66,6 +66,11 @@ impl Store {
             Durability::None
         });
 
+        self.check_register_capacity(
+            &txn,
+            blocks.iter().flat_map(|b| &b.txs).flat_map(|t| &t.outputs),
+        )?;
+
         let (mut height, mut prev_id) = {
             let meta = txn.open_table(META)?;
             let h = meta

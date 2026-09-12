@@ -559,3 +559,44 @@ async fn body_must_match_selected_canonical_id_and_height() {
         assert_eq!(store.indexed_height().unwrap(), Some(1865999));
     }
 }
+
+#[tokio::test]
+async fn register_capacity_is_local_halt_not_acceptance_or_source_health() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        Store::open_with_register_index_ceiling(&dir.path().join("x.redb"), Some(1)).unwrap(),
+    );
+    let mut chain = chain_a();
+    let b = decode_block(&chain[0].2).unwrap();
+    store.seed_for_tests(1865999, b.header.parent_id.0).unwrap();
+    chain.insert(0, (1865999, b.header.parent_id.0, String::new()));
+    let source = Arc::new(FakeSource::new(chain));
+    let (tx, rx) = watch::channel(initial_status());
+    let err = timeout(
+        Duration::from_secs(5),
+        run(
+            store.clone(),
+            source,
+            test_cfg(),
+            tx,
+            CancellationToken::new(),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(
+        err.downcast_ref::<StoreError>(),
+        Some(StoreError::RegisterCapacity { .. })
+    ));
+    let status = rx.borrow();
+    assert_eq!(status.indexed, Some(1865999));
+    assert_eq!(store.indexed_height().unwrap(), Some(1865999));
+    assert!(status.source_error.is_none());
+    assert!(status.stalled.is_none());
+    assert!(status
+        .halted
+        .as_ref()
+        .unwrap()
+        .starts_with("local register index capacity:"));
+}

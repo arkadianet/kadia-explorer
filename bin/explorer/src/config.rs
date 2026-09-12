@@ -3,6 +3,10 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+fn default_register_index_ceiling() -> Option<u64> {
+    xp_store::DEFAULT_REGISTER_INDEX_CEILING
+}
+
 fn default_poll_ms() -> u64 {
     xp_ingest::IngestConfig::default().poll_ms
 }
@@ -22,6 +26,8 @@ fn default_tip_lag_for_bulk() -> u32 {
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub data_dir: PathBuf,
+    #[serde(default = "default_register_index_ceiling")]
+    pub register_index_ceiling: Option<u64>,
     pub bind: String,
     pub source: SourceConfig,
     #[serde(default)]
@@ -148,6 +154,17 @@ mod tests {
     use super::*;
 
     const EXAMPLE: &str = include_str!("../../../explorer.example.toml");
+
+    #[test]
+    fn register_ceiling_defaults_and_parses_override() {
+        let cfg = Config::parse(EXAMPLE).unwrap();
+        assert_eq!(cfg.register_index_ceiling, None);
+        let cfg = Config::parse(&format!("register_index_ceiling = 42\n{EXAMPLE}")).unwrap();
+        assert_eq!(cfg.register_index_ceiling, Some(42));
+        let cfg = Config::parse(&format!("register_index_ceiling = 0\n{EXAMPLE}")).unwrap();
+        assert_eq!(cfg.register_index_ceiling, Some(0));
+        assert!(Config::parse(&format!("register_index_ceiling = -1\n{EXAMPLE}")).is_err());
+    }
 
     #[test]
     fn parses_example_toml() {

@@ -1,4 +1,6 @@
 pub mod apply;
+mod capacity;
+pub use capacity::DEFAULT_REGISTER_INDEX_CEILING;
 pub(crate) mod extras;
 pub mod genesis;
 pub mod keys;
@@ -48,6 +50,7 @@ pub struct Store {
     #[cfg(feature = "test-lookup-counts")]
     pub(crate) lookups: std::sync::Arc<[std::sync::atomic::AtomicU64; 3]>,
     db: Database,
+    register_index_ceiling: Option<u64>,
 }
 
 impl Store {
@@ -68,6 +71,17 @@ impl Store {
     /// indexed at least one block while being neither genesis-seeded nor explicitly partial —
     /// a combination the current code cannot produce.
     pub fn open(path: &Path) -> Result<Store, StoreError> {
+        Self::open_with_register_index_ceiling(path, DEFAULT_REGISTER_INDEX_CEILING)
+    }
+
+    /// Opens with an optional exclusive register-entry ceiling. None is unbounded.
+    /// Refuses an explicitly configured ceiling below
+    /// committed occupancy; equality blocks subsequent apply until raised.
+    pub fn open_with_register_index_ceiling(
+        path: &Path,
+        ceiling: Option<u64>,
+    ) -> Result<Store, StoreError> {
+        use redb::ReadableTableMetadata;
         let db = Database::create(path)?;
         let txn = db.begin_write()?;
         for t in ALL {
@@ -95,8 +109,15 @@ impl Store {
                 ));
             }
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
+        if let Some(ceiling) = ceiling {
+            if ceiling < entries {
+                return Err(StoreError::RegisterCapacityConfig { entries, ceiling });
+            }
+        }
         txn.commit()?;
         Ok(Store {
+            register_index_ceiling: ceiling,
             db,
             #[cfg(feature = "test-lookup-counts")]
             lookups: Default::default(),
@@ -220,6 +241,16 @@ impl Store {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("local register index capacity: {existing} existing + {additional} prospective entries reaches ceiling {ceiling}; raise register_index_ceiling above this total and restart ingest")]
+    RegisterCapacity {
+        existing: u64,
+        additional: u64,
+        ceiling: u64,
+    },
+    #[error("local register index capacity: entry count overflow")]
+    RegisterCountOverflow,
+    #[error("register_index_ceiling {ceiling} is below current occupancy {entries}; set it to at least {entries} (above occupancy plus the next batch to resume)")]
+    RegisterCapacityConfig { entries: u64, ceiling: u64 },
     #[error("read admission: {0}")]
     ReadLimit(&'static str),
     #[error("redb: {0}")]
