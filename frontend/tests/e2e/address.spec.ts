@@ -45,9 +45,15 @@ for (const truncated of [true, false]) {
 		page
 	}) => {
 		await page.route(`**/v1/addresses/${MOCK_ADDRESS}/rent`, async (route) => {
+			// Read the body to completion BEFORE fulfilling, and fulfil from the captured
+			// text rather than handing the live APIResponse back: passing `response`
+			// alongside `json` lets Playwright dispose it mid-read under parallel load,
+			// which failed this test intermittently ("Response has been disposed") while
+			// passing every time in isolation.
 			const response = await route.fetch();
-			const data = await response.json();
-			await route.fulfill({ response, json: { ...data, truncated } });
+			const status = response.status();
+			const data = JSON.parse(await response.text());
+			await route.fulfill({ status, json: { ...data, truncated } });
 		});
 		await page.goto(`/address/${MOCK_ADDRESS}#rent`);
 		await expect(page.locator('table.table tbody tr').first()).toBeVisible();
