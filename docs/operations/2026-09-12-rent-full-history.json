@@ -1,0 +1,36 @@
+{
+ "run": "phase-2a classifier, full rent era",
+ "height_range": [
+  1051232,
+  1871490
+ ],
+ "blocks_classified": 86637,
+ "rules_manifest": "UNAUDITED: storage_fee_factor 1250000 pinned across the whole range from the live node at height 1870848; NOT verified historically. Parameters are votable.",
+ "classification_complete": false,
+ "unresolved_transactions": 343,
+ "families_total": 132012,
+ "attributable": {
+  "families": 107698,
+  "gross_rent_erg": 76389.095,
+  "fees_paid_erg": 17710.787,
+  "fee_share_pct": 23.2,
+  "net_kept_erg": 58678.308,
+  "identity_net_eq_gross_minus_fee": "exact, 0 exceptions",
+  "bot_claims": 105251,
+  "miner_self_claims": 2447,
+  "miner_self_claim_pct": 2.3
+ },
+ "not_attributed": {
+  "families": 24314,
+  "share_pct": 18.4,
+  "fees_observed_erg": 9088.226,
+  "reasons": {
+   "mixed_funding_or_owner_flows": 24280,
+   "missing_input_evidence": 31,
+   "multiple_claims": 3
+  },
+  "note": "fee is known; the rent share is not uniquely determinable and is deliberately null"
+ },
+ "reviewer_correction": "A first aggregation reported 76399 ERG at 35.1% fees. That summed fees across all families while summing gross only where determined, mixing two populations. The attributable fee share is 23.2%. Detected because net exceeded gross minus fee, which is impossible.",
+ "validation": "census window 1846000-1864008 agreed with the owner's independent 2026-09-02 census to 0.098% on transaction count and 1.4% on rent value"
+}
