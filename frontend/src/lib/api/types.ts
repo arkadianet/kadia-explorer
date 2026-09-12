@@ -94,7 +94,7 @@ export interface TxDto {
 	outputs: BoxDto[];
 }
 
-/** `/v1/addresses/{addr}/txs` — a cheap summary of a transaction, without inputs/outputs. */
+/** Transaction summary routes and address history: counts without expanded inputs/outputs. */
 export interface TxSummaryDto {
 	id: string;
 	height: number;

@@ -178,7 +178,11 @@ function txsOfTree(d: Dataset, tree: string): TxDto[] {
 
 /** `/v1/addresses/{addr}/txs` — mirrors `xp-api`'s switch to cheap summaries (Task 1). */
 function txSummariesOfTree(d: Dataset, tree: string): TxSummaryDto[] {
-	return txsOfTree(d, tree).map((t) => ({
+	return txsOfTree(d, tree).map(txSummary);
+}
+
+function txSummary(t: TxDto): TxSummaryDto {
+	return {
 		id: t.id,
 		height: t.height,
 		index: t.index,
@@ -188,7 +192,7 @@ function txSummariesOfTree(d: Dataset, tree: string): TxSummaryDto[] {
 		input_count: t.inputs.length,
 		data_input_count: t.data_inputs.length,
 		output_count: t.outputs.length
-	}));
+	};
 }
 
 /** Resolves `/v1/blocks/{height_or_id}` the way the real handler does. */
@@ -279,6 +283,11 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 	// --- transactions --------------------------------------------------------------
 	if (path === '/v1/txs') {
 		sendJson(res, 200, page(d.txs, cursor, limit));
+		return;
+	}
+
+	if (path === '/v1/tx-summaries') {
+		sendJson(res, 200, page(d.txs.map(txSummary), cursor, limit));
 		return;
 	}
 

@@ -65,6 +65,7 @@ export const load: PageLoad = async ({ fetch }) => {
 	// take down the page — every section gets its own success/error result to render from.
 	const [blocks, txs, rent, tokens, richlist, status] = await Promise.all([
 		safe<BlockDto[]>(blockWindow(fetch)),
+		// Expanded by design: bounded at 12, and the card needs output values absent from summaries.
 		safe<PageDto<TxDto>>(api.txs(undefined, 12, undefined, fetch)),
 		safe(api.rentUpcoming(720, 500, fetch)),
 		safe<TokenInfoDto[]>(topTokens(fetch)),

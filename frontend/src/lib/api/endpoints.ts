@@ -37,6 +37,16 @@ export const api = {
 	txs: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
 		apiGet<PageDto<TxDto>>('/txs', { cursor, limit, dir }, f),
 
+	txSummaries: (cursor?: string, limit = 50, dir?: 'asc' | 'desc', f?: Fetch) =>
+		apiGet<PageDto<TxSummaryDto>>('/tx-summaries', { cursor, limit, dir }, f),
+
+	blockTxSummaries: (id: string, cursor?: string, limit = 50, f?: Fetch) =>
+		apiGet<PageDto<TxSummaryDto>>(
+			`/blocks/${encodeURIComponent(id)}/tx-summaries`,
+			{ cursor, limit },
+			f
+		),
+
 	tx: (id: string, f?: Fetch) => apiGet<TxDto>(`/txs/${encodeURIComponent(id)}`, undefined, f),
 
 	box: (id: string, f?: Fetch) => apiGet<BoxDto>(`/boxes/${encodeURIComponent(id)}`, undefined, f),
