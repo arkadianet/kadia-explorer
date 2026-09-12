@@ -1,0 +1,18 @@
+{
+ "run": "pre-deploy integrity sweep, LOCAL full-history store",
+ "store": "ergo-explorer/data/explorer.redb (72 GB), quiesced; indexer stopped and restarted",
+ "indexed_tip_at_start": 1871723,
+ "store_flags": {
+  "partial": false,
+  "coverage_complete": true,
+  "mainnet_recognized": true
+ },
+ "rows_scanned": 82904138,
+ "checks": 224102765,
+ "findings": 0,
+ "outcome": "INCOMPLETE \u2014 operator-aborted at 2h15m, not a clean exit-0 verdict",
+ "why_incomplete": "Aborted deliberately once 224M checks had accumulated with zero findings. The running binary predated the progress-denominator work (4e5f76c), so remaining work could not be estimated.",
+ "what_it_supports": "Strong evidence that this full-history index contains no violations of the R-class invariants covered. NOT proof: an aborted scan is exit-2 by contract and must never be recorded as clean.",
+ "deploy_relevance": "Materially de-risks cfb489e, which converts previously-silent incomplete answers into 500 integrity_error. The production store must still be swept on its own file; this one is not a substitute.",
+ "operational_note": "Indexer downtime 2h15m; it resumed and caught up to tip with no errors. Rate varied 10k-51k rows/min by stage, which is why the denominator work matters before this runs unattended."
+}
