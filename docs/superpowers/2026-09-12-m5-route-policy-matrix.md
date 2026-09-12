@@ -2,7 +2,7 @@
 
 Step 1 evidence, before codec implementation. Counts: **4 immutable membership, 10 current-state** (14 route/order entries, 13 distinct paged paths). Both supported directions share a policy; both unspent filter values share a policy. Policy tests live in `crates/xp-api/src/paging.rs`.
 
-Immutable membership means canonical membership below the original height/transaction bound survives appends; continuation requires the anchor to survive. Current-state means ANY observed tip change invalidates continuation, even a normal append. These are contracts for subsequent handler integration, not a claim that strict HTTP paging is implemented by steps 1–2.
+Immutable membership means canonical membership below the original height/transaction bound survives appends; continuation requires the anchor to survive. Current-state means ANY observed tip change invalidates continuation, even a normal append. Steps 1–2 established this contract; steps 3–4 now integrate and exercise it in the backend handlers.
 
 | Policy key | Route / order | Policy | Field or membership evidence; binding / bound |
 | --- | --- | --- | --- |
@@ -24,3 +24,19 @@ Immutable membership means canonical membership below the original height/transa
 Nonpaged exclusions: `/v1/rent/upcoming` is a capped window prefix (`complete`, always-null `next_cursor`), not a pageable list; `/v1/addresses/{addr}/rent` is a capped scan sorted afterward (`truncated`), not an exhaustive earliest-maturity answer. They remain explicitly samples. `/v1/blocks/{height_or_id}/txs` stays an all-or-error array. Detail/search/supply/template examples are not paged walks. `/v1/addresses/{addr}/balance/at` and `/boxes/at` keep their existing historical anchors and cursor contract unchanged; existing history tests remain regression targets.
 
 The subtle classifications are newest token listings (immutable ordering with mutable projection), all-box/register lists (immutable membership with mutable spent/rent enrichment), and address transactions (summaries despite the `/txs` name, so no mutable expansion). No monetary field is used to classify a summary as mutable merely because it is an amount: the stored transaction fee is immutable.
+
+## Steps 3–4 implementation evidence
+
+All 14 entries above now use `paging::Request` with the page's own Reader. `consistency=strict` requires a bound `snapshot`/legacy `cursor` pair after page one. Responses add `consistency`, `observed_anchor`, original `anchor`, and `next_snapshot`. Bare cursors remain `best_effort`, with no claimed original anchor or continuation token. A null anchor reports unavailable canonical identity; missing required in-range headers still fail as corruption.
+
+Immutable global/address summary reads cap the store range at the original header's exclusive transaction allocation end before resolving rows. Blocks cap heights; block summaries retain their selected block's range and bind its canonical id. Current-state projection reads run only after exact height/id tip validation. Address/block selector resolution first checks token route/order/cursor and anchor availability, so a reorg removing an address or rebinding a height produces 409; complete normalized filter binding is still required before projection reads. This is the awkward case beyond the matrix's mutable-enrichment classifications.
+
+`crates/xp-api/tests/routes.rs` contains six `m5_` in-process tests over temporary Stores:
+
+- Every route/order (including both unspent filters) walks at least three pages, compares every item with a single-page result, verifies uniqueness/termination, and repeats continuation after closing/reopening the Store.
+- Applying a block actually reverses holder and rich-list leaders; every current-state continuation must return 409 `snapshot_changed` with no `items`. Immutable walks preserve exact original items, anchor and cursor traversal while reporting the advanced observed anchor.
+- Rollback below the anchor, same-height anchor replacement, and proven transaction gidx reuse on a fork all reject every affected continuation. Reorgs removing selected entities or replacing a selected block also return 409, including block id and height paths.
+- HTTP cursor/token cross-pairs, directions, unspent filters, entities, route families, token sorts and register filters reject with 400. Canonical block id/height aliases share a binding. Sparse address traversal ends empty below its original allocation bound even after an append adds another matching member.
+- Empty/genesis-only/permitted headerless partial snapshots invent no anchor; in-range missing headers retain the M2 integrity error.
+
+The pre-M5 `summary_block_empty_missing_range_and_exact_count_boundary` expected only two JSON fields. Its whole-response assertion now includes the additive metadata; the old items/cursor, array, corruption and count-boundary assertions are retained. No existing assertion was relaxed. Frontend integration and the separate compatibility deliverable (steps 5–6) remain outside this change.

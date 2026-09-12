@@ -4,6 +4,7 @@ use crate::dto::{
     token_info_dto, AddrBoxParams, BoxDto, CursorParams, PageDto, TokenHolderDto, TokenInfoDto,
     TokenSort, TokensListParams,
 };
+use crate::paging::{Binding, Filter, Order, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -32,28 +33,44 @@ pub async fn list(
         TokenSort::Newest => (parse_u64_cursor(p.cursor.as_deref())?, None),
         TokenSort::Holders => (None, parse_u64_id_cursor(p.cursor.as_deref())?),
     };
-    let page = blocking(&state, move |rd| match sort {
-        TokenSort::Newest => {
-            let page = rd.tokens_newest(gidx_cursor, limit)?;
-            Ok(PageDto {
-                items: page
-                    .items
-                    .iter()
-                    .map(|(id, row)| token_info_dto(id, row))
-                    .collect(),
-                next_cursor: page.next_cursor.map(|c| c.to_string()),
-            })
-        }
-        TokenSort::Holders => {
-            let (rows, next) = rd.tokens_by_holders(count_cursor, limit)?;
-            Ok(PageDto {
-                items: rows
-                    .iter()
-                    .map(|(id, row)| token_info_dto(id, row))
-                    .collect(),
-                next_cursor: next.map(|(count, id)| format_u64_id_cursor(count, &id)),
-            })
-        }
+    let page = blocking(&state, move |rd| {
+        let route = match sort {
+            TokenSort::Newest => Route::TokensNewest,
+            TokenSort::Holders => Route::TokensHolders,
+        };
+        p.paging.read(
+            rd,
+            Binding::new(route, Order::Desc, Filter::None)?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                match sort {
+                    TokenSort::Newest => {
+                        let page = rd.tokens_newest(gidx_cursor, limit)?;
+                        Ok(PageDto {
+                            paging: Default::default(),
+                            items: page
+                                .items
+                                .iter()
+                                .map(|(id, row)| token_info_dto(id, row))
+                                .collect(),
+                            next_cursor: page.next_cursor.map(|c| c.to_string()),
+                        })
+                    }
+                    TokenSort::Holders => {
+                        let (rows, next) = rd.tokens_by_holders(count_cursor, limit)?;
+                        Ok(PageDto {
+                            paging: Default::default(),
+                            items: rows
+                                .iter()
+                                .map(|(id, row)| token_info_dto(id, row))
+                                .collect(),
+                            next_cursor: next.map(|(count, id)| format_u64_id_cursor(count, &id)),
+                        })
+                    }
+                }
+            },
+        )
     })
     .await?;
     Ok(Json(page))
@@ -84,23 +101,32 @@ pub async fn holders(
     let cursor = parse_u64_id_cursor(p.cursor.as_deref())?;
     let page = blocking(&state, move |rd| {
         let id = parse_id(&raw)?;
-        let token = token_of(rd, &id)?;
-        // Shares are of the circulating supply, so burned units do not dilute a holder.
-        let supply = token.emission.saturating_sub(token.burned);
-        let (rows, next) = rd.token_holders(&id, cursor, limit)?;
-        let mut items = Vec::with_capacity(rows.len());
-        for (tree, amount) in rows {
-            items.push(TokenHolderDto {
-                address: Some(rd.required_tree(&tree)?.address),
-                tree_hash: hex32(&tree),
-                amount: amount.to_string(),
-                share_pct: share_pct(amount, supply),
-            });
-        }
-        Ok(PageDto {
-            items,
-            next_cursor: next.map(|(amount, tree)| format_u64_id_cursor(amount, &tree)),
-        })
+        p.paging.read(
+            rd,
+            Binding::new(Route::Holders, Order::Desc, Filter::Entity(id))?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let token = token_of(rd, &id)?;
+                // Shares are of the circulating supply, so burned units do not dilute a holder.
+                let supply = token.emission.saturating_sub(token.burned);
+                let (rows, next) = rd.token_holders(&id, cursor, limit)?;
+                let mut items = Vec::with_capacity(rows.len());
+                for (tree, amount) in rows {
+                    items.push(TokenHolderDto {
+                        address: Some(rd.required_tree(&tree)?.address),
+                        tree_hash: hex32(&tree),
+                        amount: amount.to_string(),
+                        share_pct: share_pct(amount, supply),
+                    });
+                }
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor: next.map(|(amount, tree)| format_u64_id_cursor(amount, &tree)),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))
@@ -119,19 +145,36 @@ pub async fn boxes(
     let page = blocking(&state, move |rd| {
         let emission = rd.emission_tree_hash()?;
         let id = parse_id(&raw)?;
-        token_of(rd, &id)?;
-        let tip = rd.indexed_height()?;
-        let page = rd.token_boxes(&id, unspent, cursor, limit, dir)?;
-        let mut items = page
-            .items
-            .iter()
-            .map(|(bid, row)| box_dto_from_reader(rd, bid, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        enrich_boxes(rd, items.iter_mut())?;
-        Ok(PageDto {
-            items,
-            next_cursor: page.next_cursor.map(|c| c.to_string()),
-        })
+
+        p.paging.read(
+            rd,
+            Binding::new(
+                Route::TokenBoxes,
+                dir.into(),
+                Filter::Boxes {
+                    entity: id,
+                    unspent,
+                },
+            )?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                token_of(rd, &id)?;
+                let tip = rd.indexed_height()?;
+                let page = rd.token_boxes(&id, unspent, cursor, limit, dir)?;
+                let mut items = page
+                    .items
+                    .iter()
+                    .map(|(bid, row)| box_dto_from_reader(rd, bid, row, tip, emission.as_ref()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                enrich_boxes(rd, items.iter_mut())?;
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor: page.next_cursor.map(|c| c.to_string()),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))

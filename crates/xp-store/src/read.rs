@@ -338,6 +338,28 @@ impl Reader {
         cursor: Option<Gidx>,
         limit: usize,
         dir: Dir,
+        admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.txs_by_gidx_bounded_admitted(cursor, limit, dir, None, admit)
+    }
+
+    /// Immutable summary traversal capped at an exclusive canonical allocation bound.
+    pub fn txs_by_gidx_bounded(
+        &self,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.txs_by_gidx_bounded_admitted(cursor, limit, dir, end, |_| Ok(()))
+    }
+
+    fn txs_by_gidx_bounded_admitted(
+        &self,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        bound: Option<Gidx>,
         mut admit: impl FnMut(usize) -> Result<(), StoreError>,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
         let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
@@ -347,6 +369,7 @@ impl Reader {
             None if self.indexed_height()?.is_none() => 0,
             None => return Err(StoreError::Corrupt("missing tx allocation counter")),
         };
+        let end = bound.map_or(end, |bound| bound.min(end));
         let mut items = Vec::new();
         let mut last_gidx = None;
         let mut resolve = |gidx| -> Result<(), StoreError> {
@@ -514,8 +537,21 @@ impl Reader {
         cursor: Option<Gidx>,
         limit: usize,
         dir: Dir,
+        resolve: impl FnMut(Gidx) -> Result<T, StoreError>,
+    ) -> Result<Page<T>, StoreError> {
+        self.page_composite_bounded(table, prefix, (cursor, None), limit, dir, resolve)
+    }
+
+    fn page_composite_bounded<T>(
+        &self,
+        table: Tbl,
+        prefix: &[u8],
+        bounds: (Option<Gidx>, Option<Gidx>),
+        limit: usize,
+        dir: Dir,
         mut resolve: impl FnMut(Gidx) -> Result<T, StoreError>,
     ) -> Result<Page<T>, StoreError> {
+        let (cursor, end) = bounds;
         if limit == 0 {
             return Ok(Page {
                 items: vec![],
@@ -524,6 +560,15 @@ impl Reader {
         }
         let index = self.txn.open_table(table)?;
         let (lo, hi) = prefix_range(prefix);
+        let hi = end.map_or(hi, |end| k_prefix_gidx(prefix, end));
+        if end.is_some_and(|end| {
+            end == 0 || matches!(dir, Dir::Asc) && cursor.is_some_and(|c| c >= end - 1)
+        }) {
+            return Ok(Page {
+                items: vec![],
+                next_cursor: None,
+            });
+        }
         let mut items = Vec::new();
         let mut last_gidx = None;
         match dir {
@@ -547,7 +592,7 @@ impl Reader {
             }
             Dir::Desc => {
                 let hi_key = match cursor {
-                    Some(c) => k_prefix_gidx(prefix, c),
+                    Some(c) => k_prefix_gidx(prefix, end.map_or(c, |end| c.min(end))),
                     None => hi,
                 };
                 for item in index
@@ -643,12 +688,31 @@ impl Reader {
         limit: usize,
         dir: Dir,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.tree_txs_bounded(tree, cursor, limit, dir, None)
+    }
+
+    /// Historical address membership capped before resolving rows above the anchor.
+    pub fn tree_txs_bounded(
+        &self,
+        tree: &Hash32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
         let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
         let txs = self.txn.open_table(TXS)?;
-        self.page_composite(TREE_TXS, tree.as_slice(), cursor, limit, dir, |gidx| {
-            let tx_id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
-            self.resolve_tx(&txs, tx_id)
-        })
+        self.page_composite_bounded(
+            TREE_TXS,
+            tree.as_slice(),
+            (cursor, end),
+            limit,
+            dir,
+            |gidx| {
+                let tx_id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
+                self.resolve_tx(&txs, tx_id)
+            },
+        )
     }
 
     /// Richest trees by nano-erg balance, descending, capped at `limit`. With a cursor,

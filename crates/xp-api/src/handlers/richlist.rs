@@ -1,6 +1,7 @@
 use crate::dto::{
     format_u64_id_cursor, parse_limit, parse_u64_id_cursor, ListParams, PageDto, RichlistItemDto,
 };
+use crate::paging::{Binding, Filter, Order, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
 use axum::Json;
@@ -14,19 +15,28 @@ pub async fn list(
     let limit = parse_limit(p.limit.as_deref())?;
     let cursor = parse_u64_id_cursor(p.cursor.as_deref())?;
     let page = blocking(&state, move |rd| {
-        let (rows, next) = rd.richlist(cursor, limit)?;
-        let mut items = Vec::with_capacity(rows.len());
-        for (tree, nano) in rows {
-            items.push(RichlistItemDto {
-                address: Some(rd.required_tree(&tree)?.address),
-                tree_hash: hex32(&tree),
-                nano: nano.to_string(),
-            });
-        }
-        Ok(PageDto {
-            items,
-            next_cursor: next.map(|(nano, tree)| format_u64_id_cursor(nano, &tree)),
-        })
+        p.paging.read(
+            rd,
+            Binding::new(Route::Richlist, Order::Desc, Filter::None)?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let (rows, next) = rd.richlist(cursor, limit)?;
+                let mut items = Vec::with_capacity(rows.len());
+                for (tree, nano) in rows {
+                    items.push(RichlistItemDto {
+                        address: Some(rd.required_tree(&tree)?.address),
+                        tree_hash: hex32(&tree),
+                        nano: nano.to_string(),
+                    });
+                }
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor: next.map(|(nano, tree)| format_u64_id_cursor(nano, &tree)),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))

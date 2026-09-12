@@ -3,6 +3,7 @@ use crate::dto::{
     checked_tx_summary_dto, parse_dir, parse_id, parse_limit, parse_u64_cursor, ListParams,
     PageDto, TxSummaryDto,
 };
+use crate::paging::{Binding, Filter, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
@@ -17,15 +18,24 @@ pub async fn summaries(
     let dir = parse_dir(p.dir.as_deref())?;
     Ok(Json(
         blocking(&state, move |rd| {
-            let page = rd.txs_by_gidx(cursor, limit, dir)?;
-            Ok(PageDto {
-                items: page
-                    .items
-                    .iter()
-                    .map(|(id, row)| checked_tx_summary_dto(id, row))
-                    .collect::<Result<_, _>>()?,
-                next_cursor: page.next_cursor.map(|c| c.to_string()),
-            })
+            p.paging.read(
+                rd,
+                Binding::new(Route::GlobalSummaries, dir.into(), Filter::None)?,
+                p.cursor.as_deref(),
+                |ctx| {
+                    let rd = ctx.reader();
+                    let page = rd.txs_by_gidx_bounded(cursor, limit, dir, ctx.tx_end()?)?;
+                    Ok(PageDto {
+                        paging: Default::default(),
+                        items: page
+                            .items
+                            .iter()
+                            .map(|(id, row)| checked_tx_summary_dto(id, row))
+                            .collect::<Result<_, _>>()?,
+                        next_cursor: page.next_cursor.map(|c| c.to_string()),
+                    })
+                },
+            )
         })
         .await?,
     ))
@@ -41,26 +51,39 @@ pub async fn list(
     let dir = parse_dir(p.dir.as_deref())?;
     blocking(&state, move |rd| {
         let mut budget = Budget::new();
-        let emission = rd.emission_tree_hash()?;
-        let tip = rd.indexed_height()?;
-        let mut items = Vec::new();
-        let mut next_cursor = None;
-        for _ in 0..limit {
-            budget.check()?;
-            let page =
-                rd.txs_by_gidx_admitted(cursor, 1, dir, |bytes| budget.admit_tx_row(bytes))?;
-            let Some((id, row)) = page.items.first() else {
-                next_cursor = None;
-                break;
-            };
-            items.push(budget.tx(rd, id, row, tip, emission.as_ref())?);
-            cursor = page.next_cursor;
-            next_cursor = cursor.map(|c| c.to_string());
-            if cursor.is_none() {
-                break;
-            }
-        }
-        budget.json(&PageDto { items, next_cursor })
+        let page = p.paging.read(
+            rd,
+            Binding::new(Route::Transactions, dir.into(), Filter::None)?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let emission = rd.emission_tree_hash()?;
+                let tip = rd.indexed_height()?;
+                let mut items = Vec::new();
+                let mut next_cursor = None;
+                for _ in 0..limit {
+                    budget.check()?;
+                    let page = rd
+                        .txs_by_gidx_admitted(cursor, 1, dir, |bytes| budget.admit_tx_row(bytes))?;
+                    let Some((id, row)) = page.items.first() else {
+                        next_cursor = None;
+                        break;
+                    };
+                    items.push(budget.tx(rd, id, row, tip, emission.as_ref())?);
+                    cursor = page.next_cursor;
+                    next_cursor = cursor.map(|c| c.to_string());
+                    if cursor.is_none() {
+                        break;
+                    }
+                }
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor,
+                })
+            },
+        )?;
+        budget.json(&page)
     })
     .await
 }

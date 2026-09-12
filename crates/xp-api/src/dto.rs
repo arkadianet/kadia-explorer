@@ -28,6 +28,8 @@ pub const MAX_LIMIT: usize = 500;
 /// Cursor/limit/direction, shared by every paged route.
 #[derive(Debug, Default, Deserialize)]
 pub struct ListParams {
+    #[serde(flatten)]
+    pub paging: crate::paging::Request,
     pub cursor: Option<String>,
     pub limit: Option<String>,
     pub dir: Option<String>,
@@ -36,6 +38,8 @@ pub struct ListParams {
 /// `ListParams` plus the unspent-only filter of `/v1/addresses/{addr}/boxes`.
 #[derive(Debug, Default, Deserialize)]
 pub struct AddrBoxParams {
+    #[serde(flatten)]
+    pub paging: crate::paging::Request,
     pub cursor: Option<String>,
     pub limit: Option<String>,
     pub dir: Option<String>,
@@ -52,6 +56,8 @@ pub struct RentUpcomingParams {
 /// `/v1/tokens/{id}/holders` is always largest-balance-first.
 #[derive(Debug, Default, Deserialize)]
 pub struct CursorParams {
+    #[serde(flatten)]
+    pub paging: crate::paging::Request,
     pub cursor: Option<String>,
     pub limit: Option<String>,
 }
@@ -60,6 +66,8 @@ pub struct CursorParams {
 /// are descending by construction).
 #[derive(Debug, Default, Deserialize)]
 pub struct TokensListParams {
+    #[serde(flatten)]
+    pub paging: crate::paging::Request,
     pub cursor: Option<String>,
     pub limit: Option<String>,
     pub sort: Option<String>,
@@ -216,6 +224,8 @@ pub fn parse_rent_cursor(raw: Option<&str>) -> Result<Option<(u32, Gidx)>, ApiEr
 
 #[derive(Debug, Serialize)]
 pub struct PageDto<T> {
+    #[serde(flatten)]
+    pub paging: crate::paging::Metadata,
     pub items: Vec<T>,
     pub next_cursor: Option<String>,
 }

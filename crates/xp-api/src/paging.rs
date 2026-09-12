@@ -1,4 +1,4 @@
-//! Ordinary paging policy and continuation foundations. Handler integration is M5 step 3.
+//! Ordinary paging policies, bound continuation tokens and same-Reader HTTP integration.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Policy {
@@ -288,7 +288,7 @@ impl PageReader<'_> {
     }
 }
 
-/// Strict foundation only; legacy and HTTP parameter/metadata integration is step 3.
+/// Strict token validation; HTTP legacy-mode handling lives in `Request::read`.
 /// Invoke inside `blocking`, after normalizing paths/filters and parsing the legacy cursor
 /// in that closure. The callback reads through PageReader, never a fresh Store Reader.
 /// Validates malformed/binding errors before any anchor lookups. Anchor checks perform
@@ -336,6 +336,121 @@ pub fn with_page<T>(
         anchor,
         observed,
     })
+}
+
+/// Additive HTTP parameters. Bare legacy cursors remain explicitly best effort.
+#[derive(Debug, Default, Deserialize)]
+pub struct Request {
+    pub consistency: Option<String>,
+    pub snapshot: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct Metadata {
+    pub consistency: &'static str,
+    pub observed_anchor: Option<Anchor>,
+    pub anchor: Option<Anchor>,
+    pub next_snapshot: Option<String>,
+}
+
+impl From<xp_store::read::Dir> for Order {
+    fn from(dir: xp_store::read::Dir) -> Self {
+        match dir {
+            xp_store::read::Dir::Asc => Self::Asc,
+            xp_store::read::Dir::Desc => Self::Desc,
+        }
+    }
+}
+
+impl Request {
+    /// Resolve a selector backed by canonical indexes (address or block height/id).
+    /// On a reorg that removes/rebinds that selector, report the expired anchor before
+    /// lookup can turn it into a misleading 404 or filter mismatch. The complete filter
+    /// binding is still checked by `read` before any page projection is accessed.
+    pub fn resolve<T>(
+        &self,
+        rd: &Reader,
+        route: Route,
+        order: Order,
+        cursor: Option<&str>,
+        resolve: impl FnOnce() -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
+        if self.consistency.as_deref() == Some("strict") {
+            if let Some(raw) = self.snapshot.as_deref() {
+                let token = decode(raw)?;
+                let binding = Binding {
+                    route,
+                    order,
+                    filter: token.filter,
+                };
+                return with_page(rd, &binding, Some(raw), cursor, |_| {
+                    // A still-valid continuation cannot select a nonexistent entity:
+                    // its original selector existed when the pair was issued.
+                    resolve().map_err(|error| match error {
+                        ApiError::NotFound => invalid(),
+                        error => error,
+                    })
+                });
+            }
+            if cursor.is_some() {
+                return Err(invalid());
+            }
+        }
+        resolve()
+    }
+
+    pub fn read<T>(
+        &self,
+        rd: &Reader,
+        binding: Binding,
+        cursor: Option<&str>,
+        read: impl FnOnce(&PageReader<'_>) -> Result<crate::dto::PageDto<T>, ApiError>,
+    ) -> Result<crate::dto::PageDto<T>, ApiError> {
+        let strict = match self.consistency.as_deref() {
+            Some("strict") => true,
+            None | Some("best_effort") if self.snapshot.is_none() => false,
+            _ => return Err(invalid()),
+        };
+        let finish = |ctx: &PageReader<'_>| {
+            let mut page = read(ctx)?;
+            page.paging = Metadata {
+                consistency: if strict { "strict" } else { "best_effort" },
+                observed_anchor: ctx.observed(),
+                anchor: ctx.anchor(),
+                next_snapshot: if strict {
+                    ctx.next_snapshot(page.next_cursor.as_deref())?
+                } else {
+                    None
+                },
+            };
+            Ok(page)
+        };
+        if strict {
+            with_page(rd, &binding, self.snapshot.as_deref(), cursor, finish)
+        } else {
+            finish(&PageReader {
+                rd,
+                binding: &binding,
+                anchor: None,
+                observed: observed(rd)?,
+            })
+        }
+    }
+}
+
+impl PageReader<'_> {
+    /// Exclusive allocation bound derived from the surviving canonical header, never
+    /// from client-supplied gidx. No anchor means no claimed immutable snapshot.
+    pub fn tx_end(&self) -> Result<Option<u64>, ApiError> {
+        self.anchor
+            .map(|anchor| {
+                let h = self.rd.header_at(anchor.height)?.ok_or_else(changed)?;
+                h.first_tx_gidx
+                    .checked_add(u64::from(h.tx_count))
+                    .ok_or_else(|| ApiError::Integrity("block tx range overflow".into()))
+            })
+            .transpose()
+    }
 }
 
 #[cfg(test)]

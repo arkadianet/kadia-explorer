@@ -3,6 +3,7 @@ use crate::dto::{
     parse_limit, parse_u64_cursor, tx_summary_dto, AddrBoxParams, AddressDto, AddressRentDto,
     BoxDto, ListParams, PageDto, TxSummaryDto,
 };
+use crate::paging::{Binding, Filter, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -53,19 +54,41 @@ pub async fn boxes(
     let unspent = parse_bool_param(p.unspent.as_deref(), "unspent")?;
     let page = blocking(&state, move |rd| {
         let emission = rd.emission_tree_hash()?;
-        let tree = tree_of(rd, &addr)?;
-        let tip = rd.indexed_height()?;
-        let page = rd.tree_boxes(&tree, unspent, cursor, limit, dir)?;
-        let mut items = page
-            .items
-            .iter()
-            .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        enrich_boxes(rd, items.iter_mut())?;
-        Ok(PageDto {
-            items,
-            next_cursor: page.next_cursor.map(|c| c.to_string()),
-        })
+        let tree = p.paging.resolve(
+            rd,
+            Route::AddressBoxes,
+            dir.into(),
+            p.cursor.as_deref(),
+            || tree_of(rd, &addr),
+        )?;
+        p.paging.read(
+            rd,
+            Binding::new(
+                Route::AddressBoxes,
+                dir.into(),
+                Filter::Boxes {
+                    entity: tree,
+                    unspent,
+                },
+            )?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let tip = rd.indexed_height()?;
+                let page = rd.tree_boxes(&tree, unspent, cursor, limit, dir)?;
+                let mut items = page
+                    .items
+                    .iter()
+                    .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                enrich_boxes(rd, items.iter_mut())?;
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor: page.next_cursor.map(|c| c.to_string()),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))
@@ -80,16 +103,31 @@ pub async fn txs(
     let cursor = parse_u64_cursor(p.cursor.as_deref())?;
     let dir = parse_dir(p.dir.as_deref())?;
     let page = blocking(&state, move |rd| {
-        let tree = tree_of(rd, &addr)?;
-        let page = rd.tree_txs(&tree, cursor, limit, dir)?;
-        Ok(PageDto {
-            items: page
-                .items
-                .iter()
-                .map(|(id, row)| tx_summary_dto(id, row))
-                .collect(),
-            next_cursor: page.next_cursor.map(|c| c.to_string()),
-        })
+        let tree = p.paging.resolve(
+            rd,
+            Route::AddressSummaries,
+            dir.into(),
+            p.cursor.as_deref(),
+            || tree_of(rd, &addr),
+        )?;
+        p.paging.read(
+            rd,
+            Binding::new(Route::AddressSummaries, dir.into(), Filter::Entity(tree))?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let page = rd.tree_txs_bounded(&tree, cursor, limit, dir, ctx.tx_end()?)?;
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items: page
+                        .items
+                        .iter()
+                        .map(|(id, row)| tx_summary_dto(id, row))
+                        .collect(),
+                    next_cursor: page.next_cursor.map(|c| c.to_string()),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))

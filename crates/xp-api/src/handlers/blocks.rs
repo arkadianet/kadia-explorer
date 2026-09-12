@@ -2,6 +2,7 @@ use crate::dto::{
     block_dto, checked_tx_summary_dto, parse_dir, parse_limit, parse_u64_cursor, BlockDto,
     ListParams, PageDto, TxSummaryDto,
 };
+use crate::paging::{Binding, Filter, Order, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -45,15 +46,32 @@ pub async fn list(
     let before = cursor
         .map(|c| u32::try_from(c).map_err(|_| ApiError::BadRequest("cursor out of range".into())))
         .transpose()?;
-    let page = blocking(&state, move |rd| Ok(rd.headers_desc(before, limit)?)).await?;
-    let last = page.last().map(|(h, _)| *h);
-    let items: Vec<BlockDto> = page.iter().map(|(h, row)| block_dto(*h, row)).collect();
-    // Height 0 has no page below it, so it also terminates the walk.
-    let next_cursor = match last {
-        Some(h) if items.len() == limit && h > 0 => Some(h.to_string()),
-        _ => None,
-    };
-    Ok(Json(PageDto { items, next_cursor }))
+    let page = blocking(&state, move |rd| {
+        p.paging.read(
+            rd,
+            Binding::new(Route::Blocks, Order::Desc, Filter::None)?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let before = match ctx.anchor().and_then(|a| a.height.checked_add(1)) {
+                    Some(end) => Some(before.map_or(end, |c| c.min(end))),
+                    None => before,
+                };
+                let rows = ctx.reader().headers_desc(before, limit)?;
+                let items: Vec<BlockDto> = rows.iter().map(|(h, row)| block_dto(*h, row)).collect();
+                let next_cursor = match rows.last() {
+                    Some((h, _)) if items.len() == limit && *h > 0 => Some(h.to_string()),
+                    _ => None,
+                };
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor,
+                })
+            },
+        )
+    })
+    .await?;
+    Ok(Json(page))
 }
 
 pub async fn get_one(
@@ -79,17 +97,35 @@ pub async fn summaries(
     let dir = parse_dir(p.dir.as_deref())?;
     Ok(Json(
         blocking(&state, move |rd| {
-            let height = resolve_height(rd, &raw)?;
-            rd.header_at(height)?.ok_or(ApiError::NotFound)?;
-            let page = rd.txs_in_block_page(height, cursor, limit, dir)?;
-            Ok(PageDto {
-                items: page
-                    .items
-                    .iter()
-                    .map(|(id, row)| checked_tx_summary_dto(id, row))
-                    .collect::<Result<_, _>>()?,
-                next_cursor: page.next_cursor.map(|c| c.to_string()),
-            })
+            let (height, id) = p.paging.resolve(
+                rd,
+                Route::BlockSummaries,
+                dir.into(),
+                p.cursor.as_deref(),
+                || {
+                    let height = resolve_height(rd, &raw)?;
+                    let id = rd.header_at(height)?.ok_or(ApiError::NotFound)?.id;
+                    Ok((height, id))
+                },
+            )?;
+            p.paging.read(
+                rd,
+                Binding::new(Route::BlockSummaries, dir.into(), Filter::Entity(id))?,
+                p.cursor.as_deref(),
+                |ctx| {
+                    let rd = ctx.reader();
+                    let page = rd.txs_in_block_page(height, cursor, limit, dir)?;
+                    Ok(PageDto {
+                        paging: Default::default(),
+                        items: page
+                            .items
+                            .iter()
+                            .map(|(id, row)| checked_tx_summary_dto(id, row))
+                            .collect::<Result<_, _>>()?,
+                        next_cursor: page.next_cursor.map(|c| c.to_string()),
+                    })
+                },
+            )
         })
         .await?,
     ))

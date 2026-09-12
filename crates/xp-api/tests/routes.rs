@@ -3361,7 +3361,17 @@ async fn summary_block_empty_missing_range_and_exact_count_boundary() {
         match case {
             "empty" => {
                 assert_eq!(status, StatusCode::OK);
-                assert_eq!(value, serde_json::json!({"items": [], "next_cursor": null}));
+                // M5 adds explicit best-effort metadata; retain exact whole-response
+                // equality, the empty items/cursor and the unchanged legacy array check.
+                assert_eq!(
+                    value,
+                    serde_json::json!({
+                        "items": [], "next_cursor": null,
+                        "consistency": "best_effort",
+                        "observed_anchor": { "height": 2, "block_id": hex::encode(history_id(202)) },
+                        "anchor": null, "next_snapshot": null
+                    })
+                );
                 assert_eq!(get(&app, "/v1/blocks/2/txs").await.1, serde_json::json!([]));
             }
             "missing" => {
@@ -3413,4 +3423,629 @@ async fn register_capacity_exposes_configured_ceiling_as_exact_decimal() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["entries"], "0");
     assert_eq!(body["ceiling"], u64::MAX.to_string());
+}
+
+// M5: every ordinary route/order uses the real router and disposable stores.
+const M5_BASE: u32 = 1_100_000;
+
+struct M5Fixture {
+    dir: tempfile::TempDir,
+    store: Arc<Store>,
+    app: Router,
+    blocks: Vec<xp_wire::DecodedBlock>,
+    trees: Vec<Vec<u8>>,
+    paths: Vec<(String, bool)>, // immutable membership
+}
+
+fn m5_router(store: Arc<Store>) -> Router {
+    let (_, status) = watch::channel(IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
+        indexed: store.indexed_height().unwrap(),
+        best: M5_BASE + 6,
+        mode: Mode::Tip,
+        source: "test".into(),
+        halted: None,
+        stalled: None,
+    });
+    let cfg = unlimited();
+    xp_api::router(
+        xp_api::AppState {
+            store,
+            status,
+            counters: Arc::new(Counters::default()),
+            read_permits: Arc::new(Semaphore::new(32)),
+        },
+        &cfg,
+    )
+}
+
+fn m5_fixture() -> M5Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(&dir.path().join("m5.redb")).unwrap());
+    store.seed_for_tests(M5_BASE, history_id(9000)).unwrap();
+    let mut trees = vec![vec![0, 8, 0xd3]];
+    for tx in fixture(1866000).txs {
+        for out in tx.outputs {
+            if !trees.contains(&out.tree_bytes) && xp_wire::tree_info(&out.tree_bytes).is_ok() {
+                trees.push(out.tree_bytes);
+            }
+            if trees.len() == 6 {
+                break;
+            }
+        }
+        if trees.len() == 6 {
+            break;
+        }
+    }
+    assert_eq!(trees.len(), 6);
+    let mut txs = Vec::new();
+    for token in 0..6 {
+        let outputs = trees
+            .iter()
+            .enumerate()
+            .map(|(i, tree)| {
+                let mut out = history_output(
+                    10000 + token * 10 + i as u32,
+                    if token == 0 {
+                        (6 - i) as u64 * 1_000_000
+                    } else {
+                        100
+                    },
+                    vec![(history_id(20000 + token), (6 - i) as u64 * 100)],
+                );
+                out.tree_bytes = tree.clone();
+                out.tree_hash = xp_wire::tree_hash(tree);
+                out.registers_json = r#"{"R4":"0402"}"#.into();
+                out
+            })
+            .collect();
+        txs.push(history_tx(
+            30000 + token,
+            vec![xp_types::BoxId(history_id(20000 + token))],
+            outputs,
+        ));
+    }
+    // Insert nonmatching transactions between address-summary members. The final
+    // sparse suffix is nonempty globally but contains no further tree[0] members.
+    let mut sparse_txs = Vec::new();
+    for (i, tx) in txs.into_iter().enumerate() {
+        sparse_txs.push(tx);
+        let mut out = history_output(50000 + i as u32, 10, vec![]);
+        out.tree_bytes = trees[1].clone();
+        out.tree_hash = xp_wire::tree_hash(&out.tree_bytes);
+        out.registers_json = "{}".into();
+        sparse_txs.push(history_tx(51000 + i as u32, vec![], vec![out]));
+    }
+    let txs = sparse_txs;
+    let mut blocks = vec![history_block(M5_BASE + 1, 9001, history_id(9000), txs)];
+    for h in 2..=6 {
+        blocks.push(history_block(
+            M5_BASE + h,
+            9000 + h,
+            history_id(8999 + h),
+            vec![],
+        ));
+    }
+    store.apply_batch(&blocks, true).unwrap();
+    let info = xp_wire::tree_info(&trees[0]).unwrap();
+    let token = hex::encode(history_id(20000));
+    let mut paths = vec![
+        ("/v1/blocks?".into(), true),
+        ("/v1/tokens?sort=newest&".into(), false),
+        ("/v1/tokens?sort=holders&".into(), false),
+        (format!("/v1/tokens/{token}/holders?"), false),
+        ("/v1/richlist?".into(), false),
+        ("/v1/rent/eligible?".into(), false),
+    ];
+    for dir in ["asc", "desc"] {
+        for (path, immutable) in [
+            ("/v1/tx-summaries".into(), true),
+            (format!("/v1/blocks/{}/tx-summaries", M5_BASE + 1), true),
+            (format!("/v1/addresses/{}/txs", info.address), true),
+            ("/v1/txs".into(), false),
+            ("/v1/registers/R4/0402/boxes".into(), false),
+        ] {
+            paths.push((format!("{path}?dir={dir}&"), immutable));
+        }
+        for path in [
+            format!("/v1/addresses/{}/boxes", info.address),
+            format!("/v1/tokens/{token}/boxes"),
+            format!("/v1/templates/{}/boxes", hex::encode(info.template_hash)),
+        ] {
+            for unspent in [false, true] {
+                paths.push((format!("{path}?dir={dir}&unspent={unspent}&"), false));
+            }
+        }
+    }
+    let app = m5_router(store.clone());
+    M5Fixture {
+        dir,
+        store,
+        app,
+        blocks,
+        trees,
+        paths,
+    }
+}
+
+fn m5_next(path: &str, page: &Value, limit: usize) -> Option<String> {
+    page["next_cursor"].as_str().map(|cursor| {
+        let token = page["next_snapshot"]
+            .as_str()
+            .expect("strict page must pair its cursor with a snapshot");
+        format!("{path}consistency=strict&limit={limit}&cursor={cursor}&snapshot={token}")
+    })
+}
+
+async fn m5_walk(
+    app: &Router,
+    path: &str,
+    limit: usize,
+    first: Option<Value>,
+) -> (Vec<Value>, usize) {
+    let mut uri = format!("{path}consistency=strict&limit={limit}");
+    let mut first = first;
+    let mut items = vec![];
+    let mut pages = 0;
+    loop {
+        let page = match first.take() {
+            Some(page) => page,
+            None => {
+                let (status, page) = get(app, &uri).await;
+                assert_eq!(status, StatusCode::OK, "{uri}: {page}");
+                page
+            }
+        };
+        pages += 1;
+        assert!(pages < 100, "nonterminating walk: {path}");
+        assert_eq!(page["consistency"], "strict", "{path}");
+        let rows = page["items"].as_array().unwrap();
+        assert!(rows.len() <= limit);
+        items.extend(rows.clone());
+        match m5_next(path, &page, limit) {
+            Some(next) => {
+                assert_eq!(rows.len(), limit, "exact limit: {path}");
+                uri = next;
+            }
+            None => {
+                assert!(page["next_snapshot"].is_null());
+                break;
+            }
+        }
+    }
+    let unique: HashSet<_> = items.iter().map(Value::to_string).collect();
+    assert_eq!(unique.len(), items.len(), "duplicate items: {path}");
+    (items, pages)
+}
+
+#[tokio::test]
+async fn m5_every_family_three_pages_both_directions_exact_limit_last_and_restart() {
+    let mut f = m5_fixture();
+    let mut saved = vec![];
+    for (path, _) in &f.paths {
+        let (expected, _) = m5_walk(&f.app, path, 500, None).await;
+        let (actual, pages) = m5_walk(&f.app, path, 2, None).await;
+        assert!(pages >= 3, "too few pages: {path}");
+        assert_eq!(actual, expected, "page identity: {path}");
+        let (status, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        assert_eq!(status, StatusCode::OK);
+        saved.push((path.clone(), first, expected));
+    }
+    // Close every Store/Router owner and reopen the database. No retained Reader.
+    drop(f.app);
+    drop(f.store);
+    f.store = Arc::new(Store::open(&f.dir.path().join("m5.redb")).unwrap());
+    f.app = m5_router(f.store.clone());
+    for (path, first, expected) in saved {
+        let (actual, pages) = m5_walk(&f.app, &path, 2, Some(first)).await;
+        assert!(pages >= 3);
+        assert_eq!(actual, expected, "restart: {path}");
+    }
+}
+
+fn m5_reorder(f: &M5Fixture, id: u32) -> xp_wire::DecodedBlock {
+    let inputs = f.blocks[0].txs[0].outputs.iter().map(|o| o.id).collect();
+    let outputs = f
+        .trees
+        .iter()
+        .enumerate()
+        .map(|(i, tree)| {
+            let mut out = history_output(
+                40000 + i as u32,
+                (i + 1) as u64 * 1_000_000,
+                vec![(history_id(20000), (i + 1) as u64 * 100)],
+            );
+            out.tree_bytes = tree.clone();
+            out.tree_hash = xp_wire::tree_hash(tree);
+            out.registers_json = r#"{"R4":"0402"}"#.into();
+            out
+        })
+        .collect();
+    history_block(
+        M5_BASE + 7,
+        id,
+        history_id(9006),
+        vec![history_tx(id + 100, inputs, outputs)],
+    )
+}
+
+async fn m5_conflict(app: &Router, uri: &str) {
+    let (status, body) = get(app, uri).await;
+    assert_eq!(status, StatusCode::CONFLICT, "STRICT SNAPSHOT REGRESSION: returning a page can silently mix rankings or fork membership: {uri}: {body}");
+    assert_eq!(body["code"], "snapshot_changed");
+    assert!(
+        body.get("items").is_none(),
+        "409 must not carry a plausible page"
+    );
+}
+
+#[tokio::test]
+async fn m5_apply_reorders_holders_and_richlist_current_pages_must_409_immutable_stays_identical() {
+    let f = m5_fixture();
+    let mut saved = vec![];
+    for (path, immutable) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        let (expected, _) = m5_walk(&f.app, path, 2, Some(first.clone())).await;
+        saved.push((path, immutable, first, expected));
+    }
+    f.store.apply_batch(&[m5_reorder(&f, 9007)], true).unwrap();
+    for (path, immutable, first, expected) in saved {
+        if *immutable {
+            let uri = m5_next(path, &first, 2).unwrap();
+            let (_, next) = get(&f.app, &uri).await;
+            assert_eq!(next["anchor"], first["anchor"]);
+            assert_ne!(next["observed_anchor"], first["observed_anchor"]);
+            let (actual, _) = m5_walk(&f.app, path, 2, Some(first)).await;
+            assert_eq!(
+                actual, expected,
+                "append introduced new items or duplicates: {path}"
+            );
+        } else {
+            m5_conflict(&f.app, &m5_next(path, &first, 2).unwrap()).await;
+            let (status, restarted) =
+                get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+            assert_eq!(status, StatusCode::OK, "restart: {path}: {restarted}");
+            if path.contains("/holders?") || path.contains("/richlist?") {
+                assert_ne!(
+                    restarted["items"][0]["tree_hash"], first["items"][0]["tree_hash"],
+                    "fixture must ACTUALLY reorder ranking keys: {path}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn m5_replaced_anchor_and_forked_gidx_reuse_explicitly_invalidate_every_family() {
+    let f = m5_fixture();
+    let mut saved = vec![];
+    for (path, _) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        saved.push(m5_next(path, &first, 2).unwrap());
+    }
+    // Replace the anchor at the identical height. All routes must reject its id.
+    f.store.rollback_to(M5_BASE + 5).unwrap();
+    for uri in &saved {
+        m5_conflict(&f.app, uri).await;
+    }
+    f.store
+        .apply_batch(
+            &[history_block(M5_BASE + 6, 9906, history_id(9005), vec![])],
+            true,
+        )
+        .unwrap();
+    for uri in &saved {
+        m5_conflict(&f.app, uri).await;
+    }
+    // Allocate transaction/box gidx, save pages, roll back and reuse the exact gidx.
+    let mut append = m5_reorder(&f, 9907);
+    append.header.parent_id = xp_types::HeaderId(history_id(9906));
+    f.store.apply_batch(&[append.clone()], true).unwrap();
+    let mut fork_pages = vec![];
+    for (path, _) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        fork_pages.push(m5_next(path, &first, 2).unwrap());
+    }
+    let old_gidx = xp_store::Reader::new(&f.store)
+        .unwrap()
+        .tx_by_id(&append.txs[0].id.0)
+        .unwrap()
+        .unwrap()
+        .gidx;
+    f.store.rollback_to(M5_BASE + 6).unwrap();
+    let mut fork = append.clone();
+    fork.header.id = xp_types::HeaderId(history_id(9997));
+    fork.txs[0].id = xp_types::TxId(history_id(9998));
+    for out in &mut fork.txs[0].outputs {
+        out.tx_id = xp_types::TxId(history_id(9998));
+        out.id.0[31] ^= 1;
+    }
+    f.store.apply_batch(&[fork.clone()], true).unwrap();
+    let rd = xp_store::Reader::new(&f.store).unwrap();
+    assert_eq!(
+        rd.tx_by_id(&fork.txs[0].id.0).unwrap().unwrap().gidx,
+        old_gidx
+    );
+    assert!(rd.tx_by_id(&append.txs[0].id.0).unwrap().is_none());
+    for uri in &fork_pages {
+        m5_conflict(&f.app, uri).await;
+    }
+}
+
+#[tokio::test]
+async fn m5_http_binding_rejection_legacy_metadata_and_sparse_terminal_page() {
+    let f = m5_fixture();
+    for (path, _) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        let (_, second) = get(&f.app, &m5_next(path, &first, 2).unwrap()).await;
+        for (token_page, cursor_page) in [(&first, &second), (&second, &first)] {
+            let uri = format!(
+                "{path}consistency=strict&limit=2&snapshot={}&cursor={}",
+                token_page["next_snapshot"].as_str().unwrap(),
+                cursor_page["next_cursor"].as_str().unwrap()
+            );
+            assert_eq!(
+                get(&f.app, &uri).await.0,
+                StatusCode::BAD_REQUEST,
+                "cursor/token cross-pair: {path}"
+            );
+        }
+        let cursor = first["next_cursor"].as_str().unwrap();
+        for extra in [
+            "consistency=strict&".to_string(),
+            "consistency=unknown&".into(),
+            format!("snapshot={}&", first["next_snapshot"].as_str().unwrap()),
+        ] {
+            assert_eq!(
+                get(&f.app, &format!("{path}{extra}cursor={cursor}"))
+                    .await
+                    .0,
+                StatusCode::BAD_REQUEST,
+                "{path}: {extra}"
+            );
+        }
+        assert_eq!(
+            get(
+                &f.app,
+                &format!(
+                    "{path}consistency=strict&snapshot={}",
+                    first["next_snapshot"].as_str().unwrap()
+                )
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        let (status, legacy) = get(&f.app, &format!("{path}cursor={cursor}&limit=2")).await;
+        assert_eq!(status, StatusCode::OK, "legacy: {path}: {legacy}");
+        assert_eq!(legacy["items"], second["items"]);
+        assert_eq!(legacy["consistency"], "best_effort");
+        assert_eq!(legacy["observed_anchor"], first["observed_anchor"]);
+        assert!(legacy["anchor"].is_null());
+        assert!(legacy["next_snapshot"].is_null());
+        if path.contains("dir=asc") || path.contains("dir=desc") {
+            let changed = if path.contains("dir=asc") {
+                path.replace("dir=asc", "dir=desc")
+            } else {
+                path.replace("dir=desc", "dir=asc")
+            };
+            assert_eq!(
+                get(&f.app, &m5_next(&changed, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "direction: {path}"
+            );
+        }
+        if path.contains("unspent=") {
+            let changed = if path.contains("unspent=true") {
+                path.replace("unspent=true", "unspent=false")
+            } else {
+                path.replace("unspent=false", "unspent=true")
+            };
+            assert_eq!(
+                get(&f.app, &m5_next(&changed, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "unspent: {path}"
+            );
+        }
+    }
+    let token0 = hex::encode(history_id(20000));
+    let token1 = hex::encode(history_id(20001));
+    let a0 = xp_wire::tree_info(&f.trees[0]).unwrap();
+    let a1 = xp_wire::tree_info(&f.trees[1]).unwrap();
+    for (a, b) in [
+        (
+            format!("/v1/tokens/{token0}/holders?"),
+            format!("/v1/tokens/{token1}/holders?"),
+        ),
+        (
+            format!("/v1/tokens/{token0}/boxes?"),
+            format!("/v1/tokens/{token1}/boxes?"),
+        ),
+        (
+            format!("/v1/addresses/{}/boxes?", a0.address),
+            format!("/v1/addresses/{}/boxes?", a1.address),
+        ),
+        (
+            format!("/v1/addresses/{}/txs?", a0.address),
+            format!("/v1/addresses/{}/txs?", a1.address),
+        ),
+        (
+            format!("/v1/templates/{}/boxes?", hex::encode(a0.template_hash)),
+            format!("/v1/templates/{}/boxes?", hex::encode(a1.template_hash)),
+        ),
+        ("/v1/tx-summaries?".into(), "/v1/txs?".into()),
+    ] {
+        for (source, target) in [(&a, &b), (&b, &a)] {
+            let (_, first) = get(&f.app, &format!("{source}consistency=strict&limit=2")).await;
+            assert_eq!(
+                get(&f.app, &m5_next(target, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "entity/route binding: {source} -> {target}"
+            );
+        }
+    }
+    for (source, targets) in [
+        (
+            "/v1/registers/R4/0402/boxes?".to_string(),
+            vec![
+                "/v1/registers/R5/0402/boxes?".into(),
+                "/v1/registers/R4/0404/boxes?".into(),
+            ],
+        ),
+        (
+            format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 1),
+            vec![format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 2)],
+        ),
+        (
+            "/v1/tokens?sort=newest&".into(),
+            vec!["/v1/tokens?sort=holders&".into()],
+        ),
+        (
+            "/v1/tokens?sort=holders&".into(),
+            vec!["/v1/tokens?sort=newest&".into()],
+        ),
+    ] {
+        let (_, first) = get(&f.app, &format!("{source}consistency=strict&limit=2")).await;
+        for target in targets {
+            assert_eq!(
+                get(&f.app, &m5_next(&target, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "filter: {source} -> {target}"
+            );
+        }
+    }
+    for (source, missing) in [
+        (
+            format!("/v1/addresses/{}/txs?", a0.address),
+            "/v1/addresses/unknown/txs?".to_string(),
+        ),
+        (
+            format!("/v1/addresses/{}/boxes?", a0.address),
+            "/v1/addresses/unknown/boxes?".to_string(),
+        ),
+        (
+            format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 1),
+            "/v1/blocks/4294967295/tx-summaries?".to_string(),
+        ),
+    ] {
+        let (_, first) = get(&f.app, &format!("{source}consistency=strict&limit=2")).await;
+        assert_eq!(
+            get(&f.app, &m5_next(&missing, &first, 2).unwrap()).await.0,
+            StatusCode::BAD_REQUEST,
+            "changed selector: {missing}"
+        );
+        assert_eq!(
+            get(&f.app, &format!("{missing}consistency=strict")).await.0,
+            StatusCode::NOT_FOUND,
+            "unknown initial selector keeps its 404: {missing}"
+        );
+    }
+    // Block height and canonical id normalize to the same binding.
+    let path = format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 1);
+    let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+    let id_path = format!("/v1/blocks/{}/tx-summaries?", hex::encode(history_id(9001)));
+    assert_eq!(
+        get(&f.app, &m5_next(&id_path, &first, 2).unwrap()).await.0,
+        StatusCode::OK
+    );
+    // Six sparse address members end at gidx 10, below allocation end 12.
+    let path = format!("/v1/addresses/{}/txs?dir=asc&", a0.address);
+    let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=6")).await;
+    assert_eq!(first["items"].as_array().unwrap().len(), 6);
+    let next = m5_next(&path, &first, 6).unwrap();
+    f.store.apply_batch(&[m5_reorder(&f, 9007)], true).unwrap();
+    let (status, empty) = get(&f.app, &next).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty["items"], serde_json::json!([]));
+    assert!(empty["next_cursor"].is_null());
+    assert!(empty["next_snapshot"].is_null());
+    assert_eq!(empty["anchor"], first["anchor"]);
+}
+
+#[tokio::test]
+async fn m5_reorg_removing_selected_entities_and_rebinding_block_height_is_409() {
+    let f = m5_fixture();
+    f.store.rollback_to(M5_BASE + 1).unwrap();
+    let mut continuations = vec![];
+    for (path, _) in &f.paths {
+        if path.starts_with("/v1/blocks?") {
+            continue;
+        } // only two headers at this tip
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        continuations.push(m5_next(path, &first, 2).unwrap());
+    }
+    let id_path = format!("/v1/blocks/{}/tx-summaries?", hex::encode(history_id(9001)));
+    let (_, first) = get(&f.app, &format!("{id_path}consistency=strict&limit=2")).await;
+    continuations.push(m5_next(&id_path, &first, 2).unwrap());
+    f.store.rollback_to(M5_BASE).unwrap();
+    for uri in &continuations {
+        m5_conflict(&f.app, uri).await;
+    }
+    let mut replacement = f.blocks[0].clone();
+    replacement.header.id = xp_types::HeaderId(history_id(9991));
+    f.store.apply_batch(&[replacement], true).unwrap();
+    for uri in &continuations {
+        m5_conflict(&f.app, uri).await;
+    }
+}
+
+#[tokio::test]
+async fn m5_empty_genesis_and_headerless_partial_snapshots_do_not_invent_anchors() {
+    for kind in ["empty", "genesis", "partial", "corrupt_partial"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("unavailable.redb");
+        {
+            let store = Store::open(&path).unwrap();
+            if kind == "genesis" {
+                store.seed_genesis(&mainnet_genesis()).unwrap();
+            }
+        }
+        if kind == "partial" || kind == "corrupt_partial" {
+            use xp_store::{
+                keys::k_u32,
+                tables::{META, META_INDEXED_HEIGHT, META_NEXT_TX_GIDX, META_PARTIAL_FROM},
+            };
+            let db = redb::Database::create(&path).unwrap();
+            let tx = db.begin_write().unwrap();
+            {
+                let mut meta = tx.open_table(META).unwrap();
+                meta.insert(META_INDEXED_HEIGHT, k_u32(20).as_slice())
+                    .unwrap();
+                meta.insert(
+                    META_PARTIAL_FROM,
+                    k_u32(if kind == "partial" { 21 } else { 20 }).as_slice(),
+                )
+                .unwrap();
+                meta.insert(META_NEXT_TX_GIDX, xp_store::keys::k_u64(0).as_slice())
+                    .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let app = m5_router(Arc::new(Store::open(&path).unwrap()));
+        for path in [
+            "/v1/blocks",
+            "/v1/tx-summaries",
+            "/v1/txs",
+            "/v1/tokens",
+            "/v1/richlist",
+            "/v1/registers/R4/0402/boxes",
+            "/v1/rent/eligible",
+        ] {
+            let (status, page) = get(&app, &format!("{path}?consistency=strict&limit=1")).await;
+            // A missing in-range header remains corruption (M2), never an empty
+            // snapshot. Only metadata below partial_from permits a headerless seed.
+            if kind == "corrupt_partial" {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(page["code"], "integrity_error");
+                assert!(page.get("anchor").is_none());
+                continue;
+            }
+            assert_eq!(status, StatusCode::OK, "{kind}: {path}: {page}");
+            assert_eq!(page["consistency"], "strict");
+            for key in ["anchor", "observed_anchor", "next_snapshot"] {
+                assert!(page[key].is_null(), "{kind}: {path}: {page}");
+            }
+        }
+    }
 }

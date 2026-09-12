@@ -2,6 +2,7 @@ use crate::dto::{
     box_dto_from_reader, enrich_boxes, parse_bool_param, parse_dir, parse_id, parse_limit,
     parse_u64_cursor, template_dto, AddrBoxParams, BoxDto, PageDto, TemplateDto,
 };
+use crate::paging::{Binding, Filter, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -36,19 +37,36 @@ pub async fn boxes(
         let emission = rd.emission_tree_hash()?;
         let hash = parse_id(&raw)?;
         // An unknown template is a 404, not an empty page.
-        rd.template(&hash)?.ok_or(ApiError::NotFound)?;
-        let tip = rd.indexed_height()?;
-        let page = rd.template_boxes(&hash, unspent, cursor, limit, dir)?;
-        let mut items = page
-            .items
-            .iter()
-            .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        enrich_boxes(rd, items.iter_mut())?;
-        Ok(PageDto {
-            items,
-            next_cursor: page.next_cursor.map(|c| c.to_string()),
-        })
+
+        p.paging.read(
+            rd,
+            Binding::new(
+                Route::TemplateBoxes,
+                dir.into(),
+                Filter::Boxes {
+                    entity: hash,
+                    unspent,
+                },
+            )?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                rd.template(&hash)?.ok_or(ApiError::NotFound)?;
+                let tip = rd.indexed_height()?;
+                let page = rd.template_boxes(&hash, unspent, cursor, limit, dir)?;
+                let mut items = page
+                    .items
+                    .iter()
+                    .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                enrich_boxes(rd, items.iter_mut())?;
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor: page.next_cursor.map(|c| c.to_string()),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))
