@@ -18,7 +18,7 @@ pub async fn list(
         let mut items = Vec::with_capacity(rows.len());
         for (tree, nano) in rows {
             items.push(RichlistItemDto {
-                address: rd.tree_row(&tree)?.map(|t| t.address),
+                address: Some(rd.required_tree(&tree)?.address),
                 tree_hash: hex32(&tree),
                 nano: nano.to_string(),
             });

@@ -15,7 +15,7 @@ pub async fn get_one(
     let dto = blocking(&state, move |rd| {
         let hash = parse_id(&raw)?;
         let row = rd.template(&hash)?.ok_or(ApiError::NotFound)?;
-        let example = rd.tree_row(&row.example_tree)?.map(|t| t.address);
+        let example = Some(rd.required_tree(&row.example_tree)?.address);
         Ok(template_dto(&hash, &row, example))
     })
     .await?;

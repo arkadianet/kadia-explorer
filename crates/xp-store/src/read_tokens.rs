@@ -6,7 +6,7 @@
 //! secondary index entry pointing at a row that is not there is [`StoreError::Corrupt`]
 //! rather than a silently skipped item.
 
-use crate::keys::{k_by_count, k_token_holder, k_u64, prefix_range};
+use crate::keys::{k_by_count, k_token_holder, k_token_tree, k_u64, prefix_range};
 use crate::read::{as_hash32, BoxResolver, Dir, Page};
 use crate::rows::{BoxRow, TemplateRow, TokenRow};
 use crate::tables::*;
@@ -153,6 +153,7 @@ impl Reader {
             return Ok((vec![], None));
         }
         let index = self.txn.open_table(TOKEN_HOLDERS)?;
+        let amounts = self.txn.open_table(TOKEN_HOLDER_AMT)?;
         let (lo, hi) = prefix_range(id.as_slice());
         let hi_key = match cursor {
             Some((amount, tree)) => k_token_holder(id, amount, &tree).to_vec(),
@@ -172,6 +173,13 @@ impl Reader {
             }
             let (k, _) = item?;
             let (amount, tree) = holder_key_parts(k.value())?;
+            self.required_tree(&tree)?;
+            let stored = amounts
+                .get(k_token_tree(id, &tree).as_slice())?
+                .ok_or(StoreError::Corrupt("holder entry missing amount"))?;
+            if crate::meta_u64(stored.value())? != amount {
+                return Err(StoreError::Corrupt("holder amount mismatch"));
+            }
             items.push((tree, amount));
             last = Some((amount, tree));
         }
@@ -254,7 +262,7 @@ impl Reader {
     /// box's token list should collect it into a `HashMap<Hash32, _>` and look ids up there,
     /// never index into it positionally.
     ///
-    /// Ids are skipped rather than reported missing because a partial store legitimately holds
+    /// Ids are skipped only on a declared partial store, which legitimately holds
     /// boxes carrying tokens minted before its seed height.
     pub fn token_names(
         &self,
@@ -264,6 +272,9 @@ impl Reader {
         let mut out = Vec::with_capacity(ids.len());
         for id in ids {
             let Some(v) = tokens.get(id.as_slice())? else {
+                if self.partial_from()?.is_none() {
+                    return Err(StoreError::Corrupt("referenced token row missing"));
+                }
                 continue;
             };
             let row = TokenRow::decode(v.value())?;

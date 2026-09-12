@@ -74,7 +74,7 @@ impl Store {
             // Likewise for the token tables. A chain-spec box belongs to no transaction, so
             // it can mint and burn nothing; only its holdings are indexed. Mainnet's genesis
             // boxes carry no tokens at all, but the code path stays uniform.
-            let mut tokens = Tokens::open(&txn)?;
+            let mut tokens = Tokens::open(&txn, false)?;
 
             for b in boxes {
                 let gidx = next_box;

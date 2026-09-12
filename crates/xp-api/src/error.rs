@@ -20,6 +20,8 @@ pub enum ApiError {
     BadRequest(String),
     #[error("{0}")]
     Internal(String),
+    #[error("{0}")]
+    Integrity(String),
     #[error("rate limited")]
     TooManyRequests { retry_after: u32 },
     #[error("overloaded")]
@@ -32,7 +34,7 @@ impl ApiError {
             ApiError::History { status, .. } => *status,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::Internal(_) | ApiError::Integrity(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ApiError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             ApiError::Overloaded => StatusCode::SERVICE_UNAVAILABLE,
         }
@@ -43,7 +45,7 @@ impl ApiError {
             ApiError::History { status, .. } => status.canonical_reason().unwrap_or("Error"),
             ApiError::NotFound => "Not Found",
             ApiError::BadRequest(_) => "Bad Request",
-            ApiError::Internal(_) => "Internal Server Error",
+            ApiError::Internal(_) | ApiError::Integrity(_) => "Internal Server Error",
             ApiError::TooManyRequests { .. } => "Too Many Requests",
             ApiError::Overloaded => "Service Unavailable",
         }
@@ -55,7 +57,7 @@ impl ApiError {
             ApiError::NotFound => "the requested resource does not exist".to_owned(),
             ApiError::BadRequest(d) => d.clone(),
             // Never leak the internal cause to the client; it is logged instead.
-            ApiError::Internal(_) => "internal error".to_owned(),
+            ApiError::Internal(_) | ApiError::Integrity(_) => "internal error".to_owned(),
             ApiError::TooManyRequests { retry_after } => {
                 format!("rate limit exceeded; retry after {retry_after} s")
             }
@@ -79,7 +81,7 @@ struct Problem {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status();
-        if let ApiError::Internal(msg) = &self {
+        if let ApiError::Internal(msg) | ApiError::Integrity(msg) = &self {
             tracing::error!(error = %msg, "api internal error");
         }
         // Back-pressure answers carry `Retry-After` in whole seconds (minimum 1); they are
@@ -100,6 +102,7 @@ impl IntoResponse for ApiError {
             detail: self.detail(),
             code: match &self {
                 ApiError::History { code, .. } => Some(*code),
+                ApiError::Integrity(_) => Some("integrity_error"),
                 _ => None,
             },
         };
@@ -120,6 +123,9 @@ impl IntoResponse for ApiError {
 /// well-formed request, so it maps to 500 (and is logged when rendered).
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> ApiError {
-        ApiError::Internal(format!("store: {e}"))
+        match e {
+            StoreError::Corrupt(_) => ApiError::Integrity(format!("store: {e}")),
+            _ => ApiError::Internal(format!("store: {e}")),
+        }
     }
 }

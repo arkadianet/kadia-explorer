@@ -62,6 +62,20 @@ impl Reader {
         Ok(meta.get(META_GENESIS_SEEDED)?.is_some() && meta.get(META_PARTIAL_FROM)?.is_none())
     }
 
+    /// Only an explicit partial marker permits unresolved chain references.
+    pub fn partial_from(&self) -> Result<Option<u32>, StoreError> {
+        self.txn
+            .open_table(META)?
+            .get(META_PARTIAL_FROM)?
+            .map(|v| crate::meta_u32(v.value()))
+            .transpose()
+    }
+
+    pub fn required_tree(&self, tree: &Hash32) -> Result<TreeRow, StoreError> {
+        self.tree_row(tree)?
+            .ok_or(StoreError::Corrupt("missing referenced tree"))
+    }
+
     /// Recognize the retained mainnet genesis records, including on a spent genesis.
     /// The store has no network metadata: never apply mainnet supply constants merely
     /// because seeding picked a largest box on some other chain.
@@ -86,14 +100,29 @@ impl Reader {
         let table = self.txn.open_table(HEADERS)?;
         match table.get(k_u32(height).as_slice())? {
             Some(v) => Ok(Some(HeaderRow::decode(v.value())?)),
-            None => Ok(None),
+            None => {
+                let start = self.partial_from()?.unwrap_or(1);
+                if height >= start && self.indexed_height()?.is_some_and(|tip| height <= tip) {
+                    return Err(StoreError::Corrupt("missing indexed header"));
+                }
+                Ok(None)
+            }
         }
     }
 
     pub fn height_of_header(&self, id: &Hash32) -> Result<Option<u32>, StoreError> {
         let table = self.txn.open_table(HEADER_BY_ID)?;
         match table.get(id.as_slice())? {
-            Some(v) => Ok(Some(crate::meta_u32(v.value())?)),
+            Some(v) => {
+                let height = crate::meta_u32(v.value())?;
+                let header = self
+                    .header_at(height)?
+                    .ok_or(StoreError::Corrupt("dangling header id"))?;
+                if header.id != *id {
+                    return Err(StoreError::Corrupt("header id mismatch"));
+                }
+                Ok(Some(height))
+            }
             None => Ok(None),
         }
     }
@@ -105,31 +134,21 @@ impl Reader {
         before_height: Option<u32>,
         limit: usize,
     ) -> Result<Vec<(u32, HeaderRow)>, StoreError> {
-        let hi_exclusive = match before_height {
-            Some(h) => h,
-            None => match self.indexed_height()? {
-                Some(tip) => tip + 1,
-                None => return Ok(vec![]),
-            },
-        };
-        if hi_exclusive == 0 {
+        let Some(tip) = self.indexed_height()? else {
             return Ok(vec![]);
-        }
-        let table = self.txn.open_table(HEADERS)?;
+        };
+        let start = self.partial_from()?.unwrap_or(1);
+        let hi_exclusive = before_height
+            .map(u64::from)
+            .unwrap_or(u64::from(tip) + 1)
+            .min(u64::from(tip) + 1);
         let mut out = Vec::new();
-        for item in table
-            .range::<&[u8]>((
-                Bound::Unbounded,
-                Bound::Excluded(k_u32(hi_exclusive).as_slice()),
-            ))?
-            .rev()
-        {
-            if out.len() >= limit {
-                break;
-            }
-            let (k, v) = item?;
-            let height = crate::meta_u32(k.value())?;
-            out.push((height, HeaderRow::decode(v.value())?));
+        for height in (u64::from(start)..hi_exclusive).rev().take(limit) {
+            let height = height as u32;
+            let row = self
+                .header_at(height)?
+                .ok_or(StoreError::Corrupt("missing indexed header"))?;
+            out.push((height, row));
         }
         Ok(out)
     }
@@ -163,39 +182,36 @@ impl Reader {
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
         let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
         let txs = self.txn.open_table(TXS)?;
+        let end = match self.txn.open_table(META)?.get(META_NEXT_TX_GIDX)? {
+            Some(v) => crate::meta_u64(v.value())?,
+            None if self.indexed_height()?.is_none() => 0,
+            None => return Err(StoreError::Corrupt("missing tx allocation counter")),
+        };
         let mut items = Vec::new();
         let mut last_gidx = None;
+        let mut resolve = |gidx| -> Result<(), StoreError> {
+            let id = by_gidx
+                .get(k_u64(gidx).as_slice())?
+                .ok_or(StoreError::Corrupt("missing allocated tx gidx"))?;
+            let row = self.resolve_tx(&txs, as_hash32(id.value())?)?;
+            if row.1.gidx != gidx {
+                return Err(StoreError::Corrupt("tx gidx mismatch"));
+            }
+            items.push(row);
+            last_gidx = Some(gidx);
+            Ok(())
+        };
         match dir {
             Dir::Asc => {
-                let lo = k_u64(cursor.map(|c| c.saturating_add(1)).unwrap_or(0));
-                for item in
-                    by_gidx.range::<&[u8]>((Bound::Included(lo.as_slice()), Bound::Unbounded))?
-                {
-                    if items.len() >= limit {
-                        break;
-                    }
-                    let (k, v) = item?;
-                    let gidx = crate::meta_u64(k.value())?;
-                    let tx_id = as_hash32(v.value())?;
-                    items.push(self.resolve_tx(&txs, tx_id)?);
-                    last_gidx = Some(gidx);
+                let start = cursor.map(|c| c.saturating_add(1)).unwrap_or(0);
+                for gidx in (start..end).take(limit) {
+                    resolve(gidx)?;
                 }
             }
             Dir::Desc => {
-                let hi = cursor.map(k_u64);
-                let hi_bound = match &hi {
-                    Some(h) => Bound::Excluded(h.as_slice()),
-                    None => Bound::Unbounded,
-                };
-                for item in by_gidx.range::<&[u8]>((Bound::Unbounded, hi_bound))?.rev() {
-                    if items.len() >= limit {
-                        break;
-                    }
-                    let (k, v) = item?;
-                    let gidx = crate::meta_u64(k.value())?;
-                    let tx_id = as_hash32(v.value())?;
-                    items.push(self.resolve_tx(&txs, tx_id)?);
-                    last_gidx = Some(gidx);
+                let end = cursor.unwrap_or(end).min(end);
+                for gidx in (0..end).rev().take(limit) {
+                    resolve(gidx)?;
                 }
             }
         }
@@ -486,6 +502,13 @@ impl Reader {
                     .map_err(|_| StoreError::Corrupt("bad rich key width"))?,
             );
             let tree = as_hash32(&key[8..])?;
+            let balance = self
+                .balance(&tree)?
+                .ok_or(StoreError::Corrupt("rich entry missing balance"))?;
+            self.required_tree(&tree)?;
+            if balance.nano != nano {
+                return Err(StoreError::Corrupt("rich balance mismatch"));
+            }
             items.push((tree, nano));
             last = Some((nano, tree));
         }
@@ -513,6 +536,8 @@ impl Reader {
             let key = k.value();
             let height = rent_key_height(key)?;
             let id = as_hash32(v.value())?;
+            self.box_by_id(&id)?
+                .ok_or(StoreError::Corrupt("rent entry missing box"))?;
             out.push((height, id));
         }
         Ok(out)
@@ -546,6 +571,8 @@ impl Reader {
             let mature = rent_key_height(key)?;
             let gidx = crate::keys::gidx_of_composite(key)?;
             let id = as_hash32(v.value())?;
+            self.box_by_id(&id)?
+                .ok_or(StoreError::Corrupt("rent entry missing box"))?;
             items.push((mature, id));
             last = Some((mature, gidx));
         }

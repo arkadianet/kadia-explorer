@@ -23,7 +23,7 @@ fn items_of(
         // corruption, not a client-visible condition.
         let row = rd
             .box_by_id(&box_id)?
-            .ok_or_else(|| ApiError::Internal("rent index points at a missing box".into()))?;
+            .ok_or_else(|| ApiError::Integrity("rent index points at a missing box".into()))?;
         out.push(RentItemDto {
             maturity_height,
             box_: box_dto_from_reader(rd, &box_id, &row, tip, emission)?,

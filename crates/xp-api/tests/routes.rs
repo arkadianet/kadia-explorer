@@ -2552,3 +2552,480 @@ async fn status_repeated_body_errors_reports_failure_and_recovers() {
     .await
     .expect("ingest did not publish status");
 }
+
+// M2 integrity fixtures: build complete synthetic history, close its only owner,
+// mutate one reference, close redb, then hand the file to the router's only Store.
+fn integrity_blocks() -> Vec<xp_wire::DecodedBlock> {
+    let token = mainnet_genesis()[0].id.0;
+    let mut first = history_output(101, 100, vec![(token, 70)]);
+    first.registers_json = r#"{"R4":"0402"}"#.into(); // valid non-EIP-4 name
+    let second = history_output(102, 200, vec![(token, 30)]);
+    let b1 = history_block(
+        1,
+        201,
+        [0; 32],
+        vec![history_tx(
+            301,
+            vec![mainnet_genesis()[0].id],
+            vec![first, second],
+        )],
+    );
+    let b2 = history_block(
+        2,
+        202,
+        b1.header.id.0,
+        vec![history_tx(
+            302,
+            vec![xp_types::BoxId(history_id(101))],
+            vec![history_output(103, 90, vec![(token, 60)])],
+        )],
+    );
+    vec![b1, b2]
+}
+
+fn integrity_store(
+    partial: bool,
+    edit: impl FnOnce(&redb::WriteTransaction),
+) -> (tempfile::TempDir, Store) {
+    integrity_store_at(partial, 2, edit)
+}
+
+fn integrity_store_at(
+    partial: bool,
+    height: usize,
+    edit: impl FnOnce(&redb::WriteTransaction),
+) -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("integrity.redb");
+    {
+        let store = Store::open(&path).unwrap();
+        if partial {
+            store.seed_for_tests(0, [0; 32]).unwrap();
+        } else {
+            store.seed_genesis(&mainnet_genesis()).unwrap();
+        }
+        store
+            .apply_batch(&integrity_blocks()[..height], true)
+            .unwrap();
+    }
+    {
+        let db = redb::Database::create(&path).unwrap();
+        let tx = db.begin_write().unwrap();
+        edit(&tx);
+        tx.commit().unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    (dir, store)
+}
+
+async fn assert_integrity_routes(app: &Router, paths: &[String]) {
+    for path in paths {
+        let (status, value) = get(app, path).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{path}: {value}");
+        assert_eq!(value["code"], "integrity_error", "{path}: {value}");
+        assert!(
+            value.get("items").is_none(),
+            "must not return a shortened list"
+        );
+        assert!(
+            value.get("balance").is_none(),
+            "must not return a partial total"
+        );
+    }
+    // The same damaged store must still distinguish unrelated requested ids.
+    let unknown = hex::encode([0xfa; 32]);
+    for path in [
+        format!("/v1/boxes/{unknown}"),
+        format!("/v1/txs/{unknown}"),
+        format!("/v1/tokens/{unknown}"),
+        format!("/v1/templates/{unknown}"),
+        format!("/v1/blocks/{unknown}"),
+        "/v1/blocks/999".into(),
+        "/v1/addresses/unknown".into(),
+    ] {
+        assert_eq!(get(app, &path).await.0, StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn integrity_required_rows_fail_full_store_lists_details_and_totals() {
+    use xp_store::{keys::*, tables::*};
+    let tree = xp_wire::tree_hash(&[0, 8, 0xd3]).0;
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let template = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().template_hash;
+    let token = mainnet_genesis()[0].id.0;
+    let tx_detail = format!("/v1/txs/{}", hex::encode(history_id(301)));
+    let box_detail = format!("/v1/boxes/{}", hex::encode(history_id(102)));
+    let addr = format!("/v1/addresses/{address}");
+    let token_path = format!("/v1/tokens/{}", hex::encode(token));
+    let template_path = format!("/v1/templates/{}", hex::encode(template));
+    let expansion = vec![
+        "/v1/txs".into(),
+        tx_detail.clone(),
+        "/v1/blocks/1/txs".into(),
+    ];
+    let box_pages = vec![
+        format!("{addr}/boxes"),
+        format!("{addr}/boxes?unspent=true"),
+        format!("{token_path}/boxes"),
+        format!("{token_path}/boxes?unspent=true"),
+        format!("{template_path}/boxes"),
+        format!("{template_path}/boxes?unspent=true"),
+        format!("{addr}/rent"),
+    ];
+    let mut tree_paths = expansion.clone();
+    tree_paths.extend([
+        box_detail.clone(),
+        "/v1/richlist".into(),
+        format!("{token_path}/holders"),
+        template_path.clone(),
+        "/v1/rent/upcoming?blocks=2000000".into(),
+    ]);
+    let mut box_paths = expansion.clone();
+    box_paths.extend(box_pages.clone());
+    box_paths.push("/v1/rent/upcoming?blocks=2000000".into());
+    box_paths.push(format!("{addr}/balance/at?height=1"));
+    box_paths.push(format!("{addr}/boxes/at?height=1"));
+    // Each case gets a fresh, independently damaged temporary file.
+    let cases = vec![
+        (
+            META,
+            META_NEXT_TX_GIDX.to_vec(),
+            vec!["/v1/txs".into(), "/v1/txs?dir=asc".into()],
+        ),
+        (
+            HEADERS,
+            k_u32(1).to_vec(),
+            vec![
+                "/v1/blocks".into(),
+                "/v1/blocks/1".into(),
+                format!("/v1/blocks/{}", hex::encode(history_id(201))),
+                "/v1/blocks/1/txs".into(),
+            ],
+        ),
+        (
+            TXS,
+            history_id(301).to_vec(),
+            vec![
+                "/v1/txs".into(),
+                "/v1/blocks/1/txs".into(),
+                format!("{addr}/txs"),
+                format!("{addr}/balance/at?height=1"),
+                format!("{addr}/boxes/at?height=1"),
+            ],
+        ),
+        (
+            TX_BY_GIDX,
+            k_u64(0).to_vec(),
+            vec![
+                "/v1/txs".into(),
+                "/v1/blocks/1/txs".into(),
+                format!("{addr}/txs"),
+            ],
+        ),
+        (
+            BOX_BY_GIDX,
+            k_u64(4).to_vec(),
+            box_paths
+                .clone()
+                .into_iter()
+                .filter(|p| !p.starts_with("/v1/rent/"))
+                .collect(),
+        ),
+        (BOXES, history_id(102).to_vec(), box_paths),
+        (
+            BOX_BY_GIDX,
+            k_u64(3).to_vec(),
+            vec![
+                "/v1/registers/R4/0402/boxes".into(),
+                format!("{addr}/boxes"),
+                format!("{token_path}/boxes"),
+                format!("{template_path}/boxes"),
+                tx_detail.clone(),
+                "/v1/txs".into(),
+            ],
+        ),
+        (ERGO_TREES, tree.to_vec(), tree_paths),
+        (BOXES, mainnet_genesis()[0].id.0.to_vec(), expansion.clone()),
+        (TOKENS, token.to_vec(), {
+            let mut paths = expansion.clone();
+            paths.extend([
+                box_detail.clone(),
+                addr.clone(),
+                "/v1/tokens".into(),
+                "/v1/tokens?sort=holders".into(),
+            ]);
+            paths.extend([format!("{addr}/boxes"), format!("{template_path}/boxes")]);
+            paths
+        }),
+        (
+            TREE_BALANCE,
+            tree.to_vec(),
+            vec![addr.clone(), "/v1/richlist".into()],
+        ),
+        (
+            TOKEN_HOLDER_AMT,
+            k_token_tree(&token, &tree).to_vec(),
+            vec![format!("{token_path}/holders")],
+        ),
+        (
+            META,
+            META_EMISSION_TREE_HASH.to_vec(),
+            vec!["/v1/supply".into()],
+        ),
+        (
+            TREE_BALANCE,
+            mainnet_genesis()[0].tree_hash.0.to_vec(),
+            vec!["/v1/supply".into()],
+        ),
+    ];
+    for (table, key, paths) in cases {
+        let (_dir, store) = integrity_store(false, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        assert_integrity_routes(&router_over(store, 2), &paths).await;
+    }
+}
+
+#[tokio::test]
+async fn integrity_invalid_register_json_fails_expansion_but_valid_null_is_preserved() {
+    use redb::ReadableTable;
+    use xp_store::{rows::BoxRow, tables::BOXES};
+    for json in ["{broken", "null"] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            let mut boxes = tx.open_table(BOXES).unwrap();
+            let id = history_id(102);
+            let mut row =
+                BoxRow::decode(boxes.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+            row.registers_json = json.into();
+            boxes
+                .insert(id.as_slice(), row.encode().as_slice())
+                .unwrap();
+        });
+        let app = router_over(store, 2);
+        let detail = format!("/v1/boxes/{}", hex::encode(history_id(102)));
+        if json == "null" {
+            let (status, value) = get(&app, &detail).await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(value["registers"].is_null());
+        } else {
+            assert_integrity_routes(
+                &app,
+                &[
+                    detail,
+                    "/v1/txs".into(),
+                    "/v1/blocks/1/txs".into(),
+                    format!("/v1/txs/{}", hex::encode(history_id(301))),
+                ],
+            )
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn integrity_partial_preseed_inputs_and_mints_are_explicitly_incomplete() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("preseed.redb")).unwrap();
+    let blocks = integrity_blocks();
+    // Start after the mint and the spent box were created: no corruption injection.
+    store.seed_for_tests(1, blocks[0].header.id.0).unwrap();
+    store.apply_batch(&blocks[1..], true).unwrap();
+    let app = router_over(store, 2);
+    let (status, headers, value) = get_from(
+        &app,
+        &format!("/v1/txs/{}", hex::encode(history_id(302))),
+        "127.0.0.1",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-explorer-completeness"], "incomplete");
+    assert!(value["inputs"][0]["box"].is_null());
+    assert!(value["outputs"][0]["tokens"][0]["name"].is_null());
+    assert_eq!(value["outputs"][0]["tokens"][0]["amount"], "60");
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let (status, headers, balance) =
+        get_from(&app, &format!("/v1/addresses/{address}"), "127.0.0.1", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-explorer-completeness"], "incomplete");
+    assert_eq!(balance["balance"]["nano"], "90");
+    assert_eq!(balance["balance"]["tokens"][0]["amount"], "60");
+    for path in [
+        "/v1/txs",
+        "/v1/richlist",
+        "/v1/rent/upcoming?blocks=2000000",
+    ] {
+        let (status, headers, _) = get_from(&app, path, "127.0.0.1", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers["x-explorer-completeness"], "incomplete");
+    }
+}
+
+#[tokio::test]
+async fn integrity_partial_in_range_dangling_indexes_still_fail() {
+    use xp_store::{keys::*, tables::*};
+    for (table, key, paths) in [
+        (
+            BOX_BY_GIDX,
+            k_u64(1).to_vec(),
+            vec![
+                "/v1/txs".into(),
+                "/v1/blocks/1/txs".into(),
+                format!("/v1/txs/{}", hex::encode(history_id(301))),
+            ],
+        ),
+        (
+            TOKENS,
+            mainnet_genesis()[0].id.0.to_vec(),
+            vec!["/v1/tokens".into(), "/v1/tokens?sort=holders".into()],
+        ),
+        (
+            HEADERS,
+            k_u32(1).to_vec(),
+            vec!["/v1/blocks".into(), "/v1/blocks/1".into()],
+        ),
+    ] {
+        let (_dir, store) = integrity_store(true, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        assert_integrity_routes(&router_over(store, 2), &paths).await;
+    }
+}
+
+#[tokio::test]
+async fn integrity_full_store_optional_eip4_fields_and_unknown_ids_stay_valid() {
+    let (_dir, store) = integrity_store(false, |_| {});
+    let app = router_over(store, 2);
+    let (status, headers, value) = get_from(
+        &app,
+        &format!("/v1/boxes/{}", hex::encode(history_id(102))),
+        "127.0.0.1",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-explorer-completeness"], "complete");
+    assert_eq!(value["tokens"][0]["name"], "");
+    assert!(value["tokens"][0]["decimals"].is_null());
+    // Empty paths still exercise every unrelated unknown-id assertion.
+    assert_integrity_routes(&app, &[]).await;
+}
+
+#[test]
+fn integrity_rollback_missing_spent_box_is_atomic_in_full_and_partial_stores() {
+    use xp_store::{tables::BOXES, StoreError};
+    for partial in [false, true] {
+        let (_dir, store) = integrity_store(partial, |tx| {
+            assert!(tx
+                .open_table(BOXES)
+                .unwrap()
+                .remove(history_id(101).as_slice())
+                .unwrap()
+                .is_some());
+        });
+        let before = store.fingerprint().unwrap();
+        assert!(matches!(
+            store.rollback_to(1),
+            Err(StoreError::Corrupt("undo: spent box missing"))
+        ));
+        assert_eq!(store.fingerprint().unwrap(), before);
+        assert_eq!(store.indexed_height().unwrap(), Some(2));
+    }
+}
+
+#[test]
+fn integrity_required_apply_and_rollback_references_abort_atomically() {
+    use xp_store::{keys::*, tables::*, StoreError};
+    let tree = xp_wire::tree_hash(&[0, 8, 0xd3]).0;
+    let token = mainnet_genesis()[0].id.0;
+    // Apply the second block only after independently damaging one of its required
+    // inputs. Full-store mint absence must not silently skip burns or counters.
+    for (table, key) in [
+        (META, META_NEXT_BOX_GIDX.to_vec()),
+        (META, META_NEXT_TX_GIDX.to_vec()),
+        (BOXES, history_id(101).to_vec()),
+        (ERGO_TREES, tree.to_vec()),
+        (TOKENS, token.to_vec()),
+        (HEADERS, k_u32(1).to_vec()),
+    ] {
+        let (_dir, store) = integrity_store_at(false, 1, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        let before = store.fingerprint().unwrap();
+        assert!(matches!(
+            store.apply_batch(&integrity_blocks()[1..], true),
+            Err(StoreError::Corrupt(_))
+        ));
+        assert_eq!(store.fingerprint().unwrap(), before);
+        assert_eq!(store.indexed_height().unwrap(), Some(1));
+    }
+    // These are missing indexed rows named by the existing rollback journal, not
+    // changes to UNDO encoding, retention or its verification model.
+    for (table, key) in [
+        (BOXES, history_id(103).to_vec()),
+        (ERGO_TREES, tree.to_vec()),
+        (TXS, history_id(302).to_vec()),
+        (HEADERS, k_u32(2).to_vec()),
+        (TREE_BALANCE, tree.to_vec()),
+        (TOKENS, token.to_vec()),
+    ] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        let before = store.fingerprint().unwrap();
+        assert!(matches!(store.rollback_to(1), Err(StoreError::Corrupt(_))));
+        assert_eq!(store.fingerprint().unwrap(), before);
+        assert_eq!(store.indexed_height().unwrap(), Some(2));
+    }
+}
+
+#[tokio::test]
+async fn integrity_rent_eligible_does_not_skip_a_missing_box() {
+    use xp_store::tables::BOXES;
+    let (_dir, store) = integrity_store(false, |tx| {
+        // Keep canonical coverage contiguous while moving only this fixture's
+        // maturity entries below its tip. No production file is opened.
+        let mut rent = tx.open_table(xp_store::tables::RENT_MATURES).unwrap();
+        use redb::ReadableTable;
+        let entries: Vec<_> = rent
+            .iter()
+            .unwrap()
+            .map(|entry| {
+                let (key, value) = entry.unwrap();
+                (key.value().to_vec(), value.value().to_vec())
+            })
+            .collect();
+        for (key, value) in entries {
+            let gidx = xp_store::keys::gidx_of_composite(&key).unwrap();
+            rent.remove(key.as_slice()).unwrap();
+            rent.insert(xp_store::keys::k_rent(1, gidx).as_slice(), value.as_slice())
+                .unwrap();
+        }
+        tx.open_table(BOXES)
+            .unwrap()
+            .remove(history_id(102).as_slice())
+            .unwrap();
+    });
+    assert_integrity_routes(&router_over(store, 2), &["/v1/rent/eligible".into()]).await;
+}

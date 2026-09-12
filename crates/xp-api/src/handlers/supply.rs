@@ -23,27 +23,27 @@ pub async fn supply(State(state): State<AppState>) -> Result<Json<SupplyDto>, Ap
             }
             let tree = rd
                 .emission_tree_hash()?
-                .ok_or_else(|| ApiError::Internal("missing emission tree".into()))?;
+                .ok_or_else(|| ApiError::Integrity("missing emission tree".into()))?;
             let genesis_id: [u8; 32] = hex::decode(xp_store::read::MAINNET_GENESIS[0].0)
                 .expect("static genesis id")
                 .try_into()
                 .expect("static width");
             let genesis_tree = rd
                 .box_by_id(&genesis_id)?
-                .ok_or_else(|| ApiError::Internal("missing genesis emission box".into()))?
+                .ok_or_else(|| ApiError::Integrity("missing genesis emission box".into()))?
                 .tree_hash;
             if tree != genesis_tree {
-                return Err(ApiError::Internal(
+                return Err(ApiError::Integrity(
                     "incorrect emission tree metadata".into(),
                 ));
             }
             // Balances are retained even at zero; a missing row is not exhaustion.
             let remaining = rd
                 .balance(&tree)?
-                .ok_or_else(|| ApiError::Internal("missing emission balance".into()))?
+                .ok_or_else(|| ApiError::Integrity("missing emission balance".into()))?
                 .nano;
             let outside = GENESIS_TOTAL_NANO.checked_sub(remaining).ok_or_else(|| {
-                ApiError::Internal("emission balance exceeds genesis allocation".into())
+                ApiError::Integrity("emission balance exceeds genesis allocation".into())
             })?;
             dto.emission_remaining_nano = Some(remaining.to_string());
             dto.outside_emission_nano = Some(outside.to_string());

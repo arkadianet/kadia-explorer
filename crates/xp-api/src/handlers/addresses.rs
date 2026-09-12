@@ -30,12 +30,11 @@ pub async fn get_one(
         // Echo the canonical address the store derived from the ergo tree, not the string
         // from the request path: the two agree for a well-formed request, but a client that
         // reaches the same tree by any other encoding gets back the one canonical form.
-        let canonical = rd
-            .tree_row(&tree)?
-            .map(|row| row.address)
-            .unwrap_or_else(|| addr.clone());
-        let bal = rd.balance(&tree)?;
-        let mut dto = address_dto(canonical, &tree, bal.as_ref());
+        let canonical = rd.required_tree(&tree)?.address;
+        let bal = rd
+            .balance(&tree)?
+            .ok_or_else(|| ApiError::Integrity("missing address balance".into()))?;
+        let mut dto = address_dto(canonical, &tree, &bal);
         enrich_balance(rd, &mut dto.balance)?;
         Ok(dto)
     })

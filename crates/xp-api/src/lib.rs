@@ -12,7 +12,7 @@ pub mod limit;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::Router;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -128,15 +128,48 @@ where
     counters.inflight_reads.fetch_add(1, Ordering::Relaxed);
     let guard = InflightGuard(counters);
     let store = state.store.clone();
+    let coverage = RESPONSE_FULL_HISTORY.try_with(Arc::clone).ok();
     let result = tokio::task::spawn_blocking(move || {
         // Held for the duration of the read; both drop together when it finishes.
         let _permit = permit;
         let _guard = guard;
         let rd = Reader::new(&store)?;
+        if let Some(coverage) = coverage {
+            coverage.store(if rd.full_history()? { 2 } else { 1 }, Ordering::Relaxed);
+        }
         f(&rd)
     })
     .await;
     result.map_err(|e| ApiError::Internal(format!("blocking task failed: {e}")))?
+}
+
+// Carried into the blocking closure explicitly: Tokio task locals do not propagate
+// to spawn_blocking. Coverage is read from the same snapshot as the response body.
+tokio::task_local! {
+    static RESPONSE_FULL_HISTORY: Arc<AtomicU8>;
+}
+
+async fn completeness(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let full = Arc::new(AtomicU8::new(0));
+    let mut response = RESPONSE_FULL_HISTORY
+        .scope(full.clone(), next.run(request))
+        .await;
+    // Zero means this handler did not use a Reader (e.g. /status).
+    let coverage = full.load(Ordering::Relaxed);
+    if response.status().is_success() && coverage != 0 {
+        response.headers_mut().insert(
+            "x-explorer-completeness",
+            axum::http::HeaderValue::from_static(if coverage == 2 {
+                "complete"
+            } else {
+                "incomplete"
+            }),
+        );
+    }
+    response
 }
 
 pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
@@ -186,6 +219,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .route("/v1/rent/upcoming", get(handlers::rent::upcoming))
         .route("/v1/rent/eligible", get(handlers::rent::eligible))
         .route("/v1/search", get(handlers::search::search))
+        .layer(axum::middleware::from_fn(completeness))
         // 5 s ceiling per request: every handler is a bounded store read, so anything
         // slower is a stuck disk rather than a legitimately long query.
         .layer(TimeoutLayer::with_status_code(

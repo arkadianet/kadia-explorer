@@ -5,7 +5,8 @@ Updated 2026-09-12. This is the delivery-status authority referenced by the
 Historical design text is unchanged. Current scope is the accepted
 [completion design](docs/superpowers/specs/2026-09-12-explorer-done-design.md) and
 [M1–M6 plan](docs/superpowers/plans/2026-09-12-explorer-done-plan.md), subject to the
-owner's M1 instructions: implement steps 1–3; document, but do not execute, steps 4–5.
+owner's scoped implementation requests below. This session implements M2 steps 3–4
+only; M2 steps 5–7 remain a separate later task.
 
 States: `planned` = agreed work without implementation; `implemented` = code or
 procedure exists; `verified` = specified acceptance evidence exists for the named
@@ -13,11 +14,11 @@ revision; `released` = deployment plus post-deployment smoke is evidenced.
 An implemented item is not necessarily verified. Missing evidence never means pass.
 CUT is a scope decision, not a delivery state. No release is certified here.
 
-Working revision: `8a0e3dc76b7de4b5564d64f69700fc25682af65e` plus the uncommitted M1
-diff, branch `fix/explorer-exit-code-and-rent-truth`. There is no M1 commit SHA yet.
-The two accepted September 12 planning documents remain untracked for the reviewer
-to commit with the implementation. No commit, push, PR, protection change or
-production operation was performed in this implementation session.
+Working revision: `b2a83c0914cf980c04eb0775ea7589ed7069f4ce` plus the uncommitted
+M2 steps 3–4 diff, branch `fix/explorer-exit-code-and-rent-truth`. M2 steps 1–2
+are committed at that baseline. No commit, push or production operation was
+performed in this implementation session. Earlier baseline evidence below retains
+its original provenance.
 
 ## Closed baseline correctness work
 
@@ -40,8 +41,26 @@ separate and unverified.
 | M1 — make gates unavoidable (steps 1-3) | implemented | `scripts/check.sh all` exit 0, reviewer-run outside any sandbox on Rust 1.96.0 / Node v22.22.2 |
 | M1 — steps 4-5 (enforcement, provisioning) | planned | Blocked on owner: needs a push and repo-admin rights. A committed workflow is not a gate until it runs and is required. |
 | M2 steps 1-2 — fail closed on canonical selection | implemented | `scripts/check.sh all` exit 0; 12 new/adjusted source and ingest tests pass, reviewer-run |
-| M2 steps 3-7 — integrity matrix, generated transition model, UNDO | planned | Not started |
+| M2 steps 3-4 — required-reference matrix and fail-closed reads | implemented | Uncommitted on `b2a83c0`; [matrix and fixture evidence](docs/superpowers/2026-09-12-m2-required-reference-matrix.md). Final G: `artifacts/check/all-q4clyPVj`, exit 1 only for sandbox socket refusals (`fallback`, `rust_node`, Playwright); other gates pass. |
+| M2 steps 5-7 — generated transition model, UNDO | planned | Separate later task; not started |
 | M3-M6 | planned | Not started |
+
+### M2 steps 3-4 — rollout preconditions and known limits (reviewer)
+
+1. **Deploy gate.** This milestone converts latent silent damage into visible
+   `500 integrity_error` responses. The production 89 GB store has never had an integrity
+   audit (deferred to M6), so a read-only integrity sweep against a copy must run BEFORE this
+   reaches production; otherwise pre-existing damage surfaces first as user-facing 500s.
+   This mirrors the M2 steps 1-2 precondition, where `chainSlice` support was verified on both
+   real sources before the legacy path was removed.
+2. **Diagnostic limit.** `StoreError::Corrupt` is `&'static str`, so a fired check names the
+   class ("rent entry missing box") but never the instance. An operator gets the code site, not
+   the damaged row, and the log line is the only artifact. Widening the variant would touch the
+   whole store crate and add allocation on read paths; instance-level identification belongs
+   with M4's storage attribution. Recorded so it is not rediscovered during an incident.
+3. **Detection is bounded.** Per the matrix: missing secondary memberships with no surviving
+   reference cannot be detected by an ordinary read. This work makes corruption detectable
+   where a witness exists; it does not certify the store.
 
 Nothing above is `verified` in the release sense: CI has never executed, and live parity,
 the restore drill and the capacity soak remain unrun.

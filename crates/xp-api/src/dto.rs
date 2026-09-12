@@ -429,14 +429,13 @@ pub struct BoxDto {
     pub value: String,
     pub creation_height: u32,
     /// Hex of the serialized ergo tree, and its encoded mainnet address / template hash.
-    /// All three are `null` only if the tree row is missing, which the store's own
-    /// invariants rule out.
+    /// Options preserve the wire shape; a missing required tree fails the response.
     pub ergo_tree: Option<String>,
     pub address: Option<String>,
     pub template_hash: Option<String>,
     pub tree_hash: String,
     pub tokens: Vec<TokenDto>,
-    /// The box's registers as stored, re-parsed into JSON (`null` if unparseable).
+    /// The box's registers as stored; malformed JSON fails the response.
     pub registers: serde_json::Value,
     pub size: u32,
     pub spent_by: Option<String>,
@@ -472,25 +471,28 @@ pub fn box_dto(
     tree: Option<&TreeRow>,
     tip: Option<u32>,
     emission: Option<&Hash32>,
-) -> BoxDto {
-    BoxDto {
+) -> Result<BoxDto, ApiError> {
+    let tree = tree.ok_or_else(|| ApiError::Integrity("missing box tree".into()))?;
+    let registers = serde_json::from_str(&row.registers_json)
+        .map_err(|_| ApiError::Integrity("invalid stored register JSON".into()))?;
+    Ok(BoxDto {
         id: hex32(id),
         tx_id: hex32(&row.tx_id),
         index: row.index,
         value: row.value.to_string(),
         creation_height: row.creation_height,
-        ergo_tree: tree.map(|t| hex::encode(&t.tree_bytes)),
-        address: tree.map(|t| t.address.clone()),
-        template_hash: tree.map(|t| hex32(&t.template_hash)),
+        ergo_tree: Some(hex::encode(&tree.tree_bytes)),
+        address: Some(tree.address.clone()),
+        template_hash: Some(hex32(&tree.template_hash)),
         tree_hash: hex32(&row.tree_hash),
         tokens: token_dtos(&row.tokens),
-        registers: serde_json::from_str(&row.registers_json).unwrap_or(serde_json::Value::Null),
+        registers,
         size: row.size,
         spent_by: row.spent.map(|(tx, _)| hex32(&tx)),
         spent_height: row.spent.map(|(_, h)| h),
         rent: rent_dto(row, tip),
         kind: box_kind(&row.tree_hash, emission),
-    }
+    })
 }
 
 /// Resolves the box's tree row before building the DTO.
@@ -502,7 +504,7 @@ pub fn box_dto_from_reader(
     emission: Option<&Hash32>,
 ) -> Result<BoxDto, ApiError> {
     let tree = rd.tree_row(&row.tree_hash)?;
-    Ok(box_dto(id, row, tree.as_ref(), tip, emission))
+    box_dto(id, row, tree.as_ref(), tip, emission)
 }
 
 /// A transaction input: its box id always, and the resolved box when the store holds it (a
@@ -567,7 +569,8 @@ pub fn tx_dto(
     for input_id in &row.inputs {
         let resolved = match rd.box_by_id(input_id)? {
             Some(b) => Some(box_dto_from_reader(rd, input_id, &b, tip, emission)?),
-            None => None,
+            None if rd.partial_from()?.is_some() => None,
+            None => return Err(ApiError::Integrity("missing transaction input".into())),
         };
         inputs.push(InputDto {
             id: hex32(input_id),
@@ -609,18 +612,18 @@ pub struct AddressDto {
     pub last_seen: u32,
 }
 
-pub fn address_dto(address: String, tree: &Hash32, bal: Option<&BalanceRow>) -> AddressDto {
+pub fn address_dto(address: String, tree: &Hash32, bal: &BalanceRow) -> AddressDto {
     AddressDto {
         address,
         tree_hash: hex32(tree),
         balance: BalanceDto {
-            nano: bal.map(|b| b.nano).unwrap_or(0).to_string(),
-            tokens: bal.map(|b| token_dtos(&b.tokens)).unwrap_or_default(),
+            nano: bal.nano.to_string(),
+            tokens: token_dtos(&bal.tokens),
         },
-        box_count: bal.map(|b| b.box_count).unwrap_or(0),
-        tx_count: bal.map(|b| b.tx_count).unwrap_or(0),
-        first_seen: bal.map(|b| b.first_seen).unwrap_or(0),
-        last_seen: bal.map(|b| b.last_seen).unwrap_or(0),
+        box_count: bal.box_count,
+        tx_count: bal.tx_count,
+        first_seen: bal.first_seen,
+        last_seen: bal.last_seen,
     }
 }
 

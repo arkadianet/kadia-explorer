@@ -91,7 +91,7 @@ pub async fn holders(
         let mut items = Vec::with_capacity(rows.len());
         for (tree, amount) in rows {
             items.push(TokenHolderDto {
-                address: rd.tree_row(&tree)?.map(|t| t.address),
+                address: Some(rd.required_tree(&tree)?.address),
                 tree_hash: hex32(&tree),
                 amount: amount.to_string(),
                 share_pct: share_pct(amount, supply),
