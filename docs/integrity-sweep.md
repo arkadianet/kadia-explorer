@@ -36,6 +36,39 @@ JSONL. Progress goes to stderr at each stage and about every five seconds during
 traversal; output flushes on that cadence and at start/completion. One immutable
 snapshot and the exclusive lock cover the whole scan.
 
+Progress reports `stage=... completed=N/T rows=N/T checks=N findings=N
+stage_eta_s=... overall_eta_s=unavailable(mixed_stage_costs)`. `completed`
+counts fully checked witnesses in the current stage; `rows` retains its original
+meaning (table rows entered). The row denominator sums `len()` for the 23 tables
+actually walked, from the same immutable snapshot, before checking starts.
+Each `len()` reads redb's stored entry count: 23 table opens/metadata lookups,
+constant count work per table, no entry scan or row decoding. Lookup-only tables
+are excluded. The retained-height interval and allocated-tx range have separate
+exact stage totals from metadata; they are not table rows. Metadata and emission
+checks each count as one completed group. All traversal phases are bounded;
+checks within a row are variable and do not have a precomputed denominator.
+Row percentages therefore describe traversal coverage, not elapsed-time fraction.
+
+Stages, in order: `metadata`, `retained_height`, `allocated_tx`, `headers`,
+`header_by_id`, `tx_by_gidx`, `tree_txs`, `txs`, `box_by_gidx`, `tree_boxes`,
+`tree_unspent`, `template_boxes`, `template_unspent`, `token_boxes`,
+`token_unspent`, `register_idx`, `rent_matures`, `boxes`, `ergo_trees`,
+`tree_balance`, `tokens_by_gidx`, `tokens_by_holders`, `templates`, `rich`,
+`token_holders`, `emission`, `undo`. Stage starts and ends are reported even
+for empty stages, alongside the five-second updates during checks.
+
+`stage_eta_s` estimates only the current stage from completed witnesses over a
+recent window of at most 60 seconds, sampled about every five seconds, with
+at least 15 seconds of warm-up. Rates reset at every stage. ETA explicitly says
+`unavailable(warming_up)`, `unavailable(no_recent_progress)`, or
+`unavailable(stale_window)` (an operation outlasted the sampling window);
+a finished/empty stage reports zero. A row with many nested checks can continue
+reporting without counting that row complete. This remains an estimate of recent
+throughput, not a promise about unseen rows. Whole-run ETA is deliberately omitted
+with an explicit reason because later stages have different access costs. The
+sample history is bounded (at most 13 samples); JSONL and audit semantics are
+unchanged.
+
 A declared partial store can exit 0 **within retained-reference scope**. P1 absent
 inputs and P2 absent mint rows are counted separately, never findings. P3/P4/P5
 history/amount limitations remain: `coverage_complete:false` and

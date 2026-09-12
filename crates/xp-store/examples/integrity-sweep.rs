@@ -1,7 +1,8 @@
 //! Offline required-reference audit. Contract and coverage: docs/integrity-sweep.md.
-use redb::{ReadableTable, TableHandle};
+use redb::{ReadableTable, ReadableTableMetadata, TableHandle};
 use serde_json::json;
 use std::{
+    collections::VecDeque,
     io::Write,
     path::Path,
     time::{Duration, Instant},
@@ -16,12 +17,94 @@ fn line(out: &mut impl Write, value: serde_json::Value) -> Result<()> {
     writeln!(out)?;
     Ok(())
 }
+// These are exactly the tables traversed by walk!, in traversal order. Lookup-only
+// tables are deliberately excluded. len() reads redb's stored entry count.
+const WALK_TABLES: [Tbl; 23] = [
+    HEADERS,
+    HEADER_BY_ID,
+    TX_BY_GIDX,
+    TREE_TXS,
+    TXS,
+    BOX_BY_GIDX,
+    TREE_BOXES,
+    TREE_UNSPENT,
+    TEMPLATE_BOXES,
+    TEMPLATE_UNSPENT,
+    TOKEN_BOXES,
+    TOKEN_UNSPENT,
+    REGISTER_IDX,
+    RENT_MATURES,
+    BOXES,
+    ERGO_TREES,
+    TREE_BALANCE,
+    TOKENS_BY_GIDX,
+    TOKENS_BY_HOLDERS,
+    TEMPLATES,
+    RICH,
+    TOKEN_HOLDERS,
+    UNDO,
+];
+
+// This interface cannot iterate entries or decode values.
+fn row_count(table: &impl ReadableTableMetadata) -> redb::Result<u64> {
+    table.len()
+}
+
+struct StageProgress {
+    name: String,
+    completed: u64,
+    total: u64,
+    samples: VecDeque<(Instant, u64)>,
+}
+impl StageProgress {
+    fn new(name: &str, total: u64) -> Self {
+        Self {
+            name: name.into(),
+            completed: 0,
+            total,
+            samples: VecDeque::from([(Instant::now(), 0)]),
+        }
+    }
+    fn eta(&mut self, now: Instant) -> String {
+        // At most thirteen samples spanning sixty seconds; reset at each stage.
+        while self.samples.len() > 1
+            && now.duration_since(self.samples[0].0) > Duration::from_secs(60)
+        {
+            self.samples.pop_front();
+        }
+        let (start, completed) = self.samples[0];
+        let elapsed = now.duration_since(start).as_secs_f64();
+        let advanced = self.completed - completed;
+        let eta = if self.completed == self.total {
+            "0".into()
+        } else if elapsed < 15.0 {
+            "unavailable(warming_up)".into()
+        } else if advanced == 0 {
+            "unavailable(no_recent_progress)".into()
+        } else if elapsed > 60.0 {
+            // A single slow operation may prevent sampling for an entire window.
+            "unavailable(stale_window)".into()
+        } else {
+            format!(
+                "{:.0}",
+                (self.total - self.completed) as f64 * elapsed / advanced as f64
+            )
+        };
+        if now.duration_since(self.samples.back().unwrap().0) >= Duration::from_secs(5) {
+            self.samples.push_back((now, self.completed));
+        }
+        eta
+    }
+}
+
 struct Audit<'a, W> {
     out: &'a mut W,
     counts: [u64; 28],
     checks: [u64; 28],
     partial_gaps: [u64; 2],
     rows: u64,
+    total_rows: u64,
+    stage: StageProgress,
     last: Instant,
 }
 impl<W: Write> Audit<'_, W> {
@@ -45,16 +128,30 @@ impl<W: Write> Audit<'_, W> {
     }
     fn progress(&mut self, force: bool) -> Result<()> {
         if force || self.last.elapsed() >= Duration::from_secs(5) {
+            let eta = self.stage.eta(Instant::now());
             eprintln!(
-                "rows={} checks={} findings={}",
+                "stage={} completed={}/{} rows={}/{} checks={} findings={} stage_eta_s={} overall_eta_s=unavailable(mixed_stage_costs)",
+                self.stage.name,
+                self.stage.completed,
+                self.stage.total,
                 self.rows,
+                self.total_rows,
                 self.checks.iter().sum::<u64>(),
-                self.counts.iter().sum::<u64>()
+                self.counts.iter().sum::<u64>(),
+                eta
             );
             self.out.flush()?;
             self.last = Instant::now();
         }
         Ok(())
+    }
+    fn stage(&mut self, name: &str, total: u64) -> Result<()> {
+        self.stage = StageProgress::new(name, total);
+        self.progress(true)
+    }
+    fn completed(&mut self) -> Result<()> {
+        self.stage.completed += 1;
+        self.progress(false)
     }
     fn required(
         &mut self,
@@ -169,14 +266,27 @@ fn scan(path: &Path, out: &mut impl Write) -> Result<u8> {
         json!({"type":"start","indexed_tip":tip,"indexed_tip_id":anchor,"partial_from":partial,"partial":partial.is_some(),"coverage_complete":seeded && partial.is_none(),"mainnet_recognized":recognized,"coverage":coverage}),
     )?;
     out.flush()?;
+    let table_counts: Vec<_> = WALK_TABLES
+        .iter()
+        .map(|&table| {
+            Ok((
+                table.name().to_owned(),
+                row_count(&snap.open_table(table)?)?,
+            ))
+        })
+        .collect::<Result<_>>()?;
+    let total_rows = table_counts.iter().map(|(_, count)| count).sum();
     let mut a = Audit {
         out,
         counts: [0; 28],
         checks: [0; 28],
         partial_gaps: [0; 2],
         rows: 0,
+        total_rows,
+        stage: StageProgress::new("metadata", 1),
         last: Instant::now(),
     };
+    a.progress(true)?;
     for (key, needed) in [
         (META_NEXT_BOX_GIDX, tip.is_some() || seeded),
         (META_NEXT_TX_GIDX, tip.is_some()),
@@ -200,6 +310,12 @@ fn scan(path: &Path, out: &mut impl Write) -> Result<u8> {
             HEADERS,
             &tip.to_be_bytes(),
         )?;
+        a.completed()?;
+        a.progress(true)?;
+        a.stage(
+            "retained_height",
+            (u64::from(tip) + 1).saturating_sub(u64::from(partial.unwrap_or(1))),
+        )?;
         for h in partial.unwrap_or(1)..=tip {
             for r in [1, 19] {
                 a.required(
@@ -211,9 +327,16 @@ fn scan(path: &Path, out: &mut impl Write) -> Result<u8> {
                     &h.to_be_bytes(),
                 )?;
             }
+            a.completed()?;
         }
+    } else {
+        a.completed()?;
+        a.progress(true)?;
+        a.stage("retained_height", 0)?;
     }
+    a.progress(true)?;
     if let Some(next) = number(&meta, META_NEXT_TX_GIDX)?.map(u64::from_be_bytes) {
+        a.stage("allocated_tx", next)?;
         for g in 0..next {
             a.required(
                 &snap,
@@ -223,12 +346,17 @@ fn scan(path: &Path, out: &mut impl Write) -> Result<u8> {
                 TX_BY_GIDX,
                 &g.to_be_bytes(),
             )?;
+            a.completed()?;
         }
+    } else {
+        a.stage("allocated_tx", 0)?;
     }
+    a.progress(true)?;
     macro_rules! walk { ($table:expr, $k:ident, $v:ident, $body:block) => {{
-        eprintln!("stage={}", $table.name());
+        a.stage($table.name(), table_counts.iter().find(|(name, _)| *name == $table.name()).unwrap().1)?;
         let table = snap.open_table($table)?;
-        for entry in table.iter()? { let (key,value)=entry?; let $k=key.value(); let $v=value.value(); a.rows+=1; $body a.progress(false)?; }
+        for entry in table.iter()? { let (key,value)=entry?; let $k=key.value(); let $v=value.value(); a.rows+=1; $body a.completed()?; }
+        a.progress(true)?;
     }}; }
     walk!(HEADERS, k, v, {
         let row = HeaderRow::decode(v)?;
@@ -492,6 +620,7 @@ fn scan(path: &Path, out: &mut impl Write) -> Result<u8> {
             )?;
         }
     });
+    a.stage("emission", 1)?;
     if recognized {
         let id = hex::decode(xp_store::read::MAINNET_GENESIS[0].0)?;
         let row = BoxRow::decode(snap.open_table(BOXES)?.get(id.as_slice())?.unwrap().value())?;
@@ -519,6 +648,8 @@ fn scan(path: &Path, out: &mut impl Write) -> Result<u8> {
             )?;
         }
     }
+    a.completed()?;
+    a.progress(true)?;
     walk!(UNDO, k, v, {
         let row = UndoRow::decode(v)?;
         a.required(&snap, 23, "undo", k, HEADERS, k)?;
@@ -587,6 +718,72 @@ mod tests {
     use std::io::{BufRead, Read};
     use std::process::{Command, Stdio};
     use xp_store::Store;
+
+    #[test]
+    fn denominator_uses_only_metadata_len() {
+        struct MetadataOnly(std::cell::Cell<u32>);
+        impl ReadableTableMetadata for MetadataOnly {
+            fn stats(&self) -> redb::Result<redb::TableStats> {
+                panic!("must not traverse pages for stats")
+            }
+            fn len(&self) -> redb::Result<u64> {
+                self.0.set(self.0.get() + 1);
+                Ok(81_680_000)
+            }
+        }
+        let table = MetadataOnly(std::cell::Cell::new(0));
+        assert_eq!(row_count(&table).unwrap(), 81_680_000);
+        assert_eq!(table.0.get(), 1);
+    }
+
+    #[test]
+    fn table_denominator_matches_completed_fixture_walks() {
+        let dir = tempfile::tempdir().unwrap();
+        for partial in [false, true] {
+            let path = dir.path().join(format!("{partial}.redb"));
+            fixture(&path, partial);
+            let db = read_only::open_source(&path).unwrap();
+            let snap = db.begin_read().unwrap();
+            let total: u64 = WALK_TABLES
+                .iter()
+                .map(|&table| row_count(&snap.open_table(table).unwrap()).unwrap())
+                .sum();
+            drop(snap);
+            drop(db);
+            assert_eq!(output(&path).1.last().unwrap()["rows_scanned"], total);
+        }
+    }
+
+    #[test]
+    fn eta_uses_recent_stage_progress_and_handles_stalls() {
+        let mut p = StageProgress::new("test", 1000);
+        let start = p.samples[0].0;
+        assert_eq!(p.eta(start), "unavailable(warming_up)");
+        p.completed = 100;
+        assert_eq!(p.eta(start + Duration::from_secs(20)), "180");
+        p.completed = 200;
+        assert_eq!(p.eta(start + Duration::from_secs(40)), "160");
+        // Discard the fast start. Only 10 completed in the recent 50 seconds.
+        p.completed = 210;
+        assert_eq!(p.eta(start + Duration::from_secs(90)), "3950");
+        assert_eq!(
+            p.eta(start + Duration::from_secs(151)),
+            "unavailable(no_recent_progress)"
+        );
+        p.completed = 1000;
+        assert_eq!(p.eta(start + Duration::from_secs(156)), "0");
+        let mut slow = StageProgress::new("slow", 10);
+        slow.completed = 1;
+        assert_eq!(
+            slow.eta(slow.samples[0].0 + Duration::from_secs(120)),
+            "unavailable(stale_window)"
+        );
+        let mut next = StageProgress::new("next", 10);
+        assert_eq!(next.eta(next.samples[0].0), "unavailable(warming_up)");
+        let mut empty = StageProgress::new("empty", 0);
+        assert_eq!(empty.eta(empty.samples[0].0), "0");
+        assert!(p.samples.len() <= 13);
+    }
 
     fn fixture(path: &Path, partial: bool) {
         let store = Store::open(path).unwrap();
