@@ -31,7 +31,7 @@ impl Store {
 
     /// Cheap committed occupancy, in entries. Includes spent boxes and genesis.
     pub fn register_index_entries(&self) -> Result<u64, StoreError> {
-        Ok(self.db.begin_read()?.open_table(REGISTER_IDX)?.len()?)
+        Ok(self.begin_read()?.open_table(REGISTER_IDX)?.len()?)
     }
 
     pub(crate) fn check_register_capacity<'a>(

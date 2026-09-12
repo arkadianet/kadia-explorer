@@ -9,6 +9,7 @@ pub mod dto;
 pub mod error;
 pub mod handlers;
 pub mod limit;
+mod metrics;
 
 use axum::http::StatusCode;
 use axum::routing::get;
@@ -29,6 +30,7 @@ pub use limit::Allowlist;
 /// Runtime knobs for the public API (spec §3–§5). `bin/explorer` builds it from TOML.
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
+    pub metrics_allowlist: Allowlist,
     pub per_second: u32,
     pub burst: u32,
     pub allowlist: Allowlist,
@@ -39,6 +41,7 @@ pub struct ApiConfig {
 impl Default for ApiConfig {
     fn default() -> ApiConfig {
         ApiConfig {
+            metrics_allowlist: Allowlist::default(),
             per_second: 10,
             burst: 30,
             allowlist: Allowlist::default(),
@@ -51,6 +54,7 @@ impl Default for ApiConfig {
 /// Process-lifetime counters surfaced on `/v1/status`.
 #[derive(Debug)]
 pub struct Counters {
+    pub(crate) metrics: metrics::Metrics,
     pub rate_limited_total: AtomicU64,
     pub inflight_reads: AtomicU32,
     history_permits: Arc<Semaphore>,
@@ -59,6 +63,7 @@ pub struct Counters {
 impl Default for Counters {
     fn default() -> Self {
         Self {
+            metrics: metrics::Metrics::default(),
             rate_limited_total: AtomicU64::new(0),
             inflight_reads: AtomicU32::new(0),
             history_permits: Arc::new(Semaphore::new(2)),
@@ -99,10 +104,11 @@ pub struct AppState {
 /// around to see it or not. That matters because `TimeoutLayer` drops the handler future on
 /// timeout without waiting for the spawned task — a decrement placed after `.await` in
 /// `blocking()` would then never run, leaking the counter upward by one per timeout.
-struct InflightGuard(Arc<Counters>);
+struct InflightGuard(Arc<Counters>, std::time::Instant);
 
 impl Drop for InflightGuard {
     fn drop(&mut self) {
+        self.0.metrics.worker.observe(self.1.elapsed());
         self.0.inflight_reads.fetch_sub(1, Ordering::Relaxed);
     }
 }
@@ -127,7 +133,7 @@ where
         .map_err(|_| ApiError::Overloaded)?;
     let counters = state.counters.clone();
     counters.inflight_reads.fetch_add(1, Ordering::Relaxed);
-    let guard = InflightGuard(counters);
+    let guard = InflightGuard(counters, std::time::Instant::now());
     let store = state.store.clone();
     let coverage = RESPONSE_FULL_HISTORY.try_with(Arc::clone).ok();
     let result = tokio::task::spawn_blocking(move || {
@@ -175,7 +181,17 @@ async fn completeness(
 
 pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
     let rate_limit = limit::RateLimit::new(cfg, state.counters.clone());
+    let operator_allowlist = cfg.metrics_allowlist.clone();
     Router::new()
+        .route(
+            "/v1/metrics",
+            get(
+                move |axum::extract::State(state): axum::extract::State<AppState>,
+                      request: axum::extract::Request| async move {
+                    metrics::endpoint(state, request, operator_allowlist).await
+                },
+            ),
+        )
         .route("/v1/register-capacity", get(handlers::registers::capacity))
         .route("/v1/status", get(handlers::status::status))
         .route("/v1/blocks", get(handlers::blocks::list))
@@ -237,6 +253,10 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .layer(rate_limit)
         // …and inside CORS, so a browser can read the 429 body.
         .layer(CorsLayer::permissive())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            metrics::observe,
+        ))
         .with_state(state)
 }
 
@@ -244,7 +264,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
 mod inflight_guard_tests {
     use super::*;
 
-    fn state(max_inflight_reads: u32) -> AppState {
+    pub(crate) fn state(max_inflight_reads: u32) -> AppState {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("x.redb")).unwrap();
         // Leaked so the temp dir outlives the test; these are short-lived unit tests, not a

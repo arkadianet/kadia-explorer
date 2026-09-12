@@ -40,6 +40,7 @@ fn boundaries_batch_restart_rollback_and_resume_preserve_all_bytes() {
         s.seed_for_tests(1865999, b[0].header.parent_id.0).unwrap();
         s.apply_batch(&b[..1], true).unwrap();
         assert_eq!(s.register_index_entries().unwrap(), first);
+        assert_eq!(s.cached_register_index_entries(), first);
         let before = snapshot(&s);
         assert!(!before["undo"].is_empty());
         let result = s.apply_batch(&b[1..], true);
@@ -57,16 +58,20 @@ fn boundaries_batch_restart_rollback_and_resume_preserve_all_bytes() {
             assert_eq!(snapshot(&s), before);
             s.apply_batch(&b[1..], true).unwrap();
             assert_eq!(s.register_index_entries().unwrap(), first + n);
+            assert_eq!(s.cached_register_index_entries(), first + n);
             s.rollback_to(1866000).unwrap();
             assert_eq!(s.register_index_entries().unwrap(), first);
+            assert_eq!(s.cached_register_index_entries(), first);
             drop(s);
             let s = Store::open_with_register_index_ceiling(&path, Some(first + n + 1)).unwrap();
             s.apply_batch(&b[1..], true).unwrap();
             assert_eq!(s.register_index_entries().unwrap(), first + n);
+            assert_eq!(s.cached_register_index_entries(), first + n);
         } else {
             result.unwrap();
             // Same raw register value on every output still creates two distinct gidx rows.
             assert_eq!(s.register_index_entries().unwrap(), first + n);
+            assert_eq!(s.cached_register_index_entries(), first + n);
         }
     }
 }
@@ -92,6 +97,7 @@ fn genesis_is_atomic_counted_and_idempotent_after_restart() {
         } else {
             result.unwrap();
             assert_eq!(s.register_index_entries().unwrap(), n);
+            assert_eq!(s.cached_register_index_entries(), n);
             let before = snapshot(&s);
             drop(s);
             let s = Store::open_with_register_index_ceiling(&path, Some(n)).unwrap();

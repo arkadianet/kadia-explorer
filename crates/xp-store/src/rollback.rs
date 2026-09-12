@@ -2,6 +2,7 @@
 //! [`crate::apply`], restoring the store to exactly the state it held before those blocks
 //! were applied. See [`Store::rollback_to`].
 
+use redb::ReadableTableMetadata;
 use redb::{ReadableTable, Table};
 use xp_types::{rent::maturity_height, Hash32};
 
@@ -135,6 +136,10 @@ impl Store {
             return Err(StoreError::ReindexRequired(tip - target));
         }
 
+        let _cache_writer = self
+            .register_cache_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let txn = self.db.begin_write()?;
         for h in (target + 1..=tip).rev() {
             // Scoped so the `AccessGuard` (and the table handle it borrows) drop before the
@@ -345,7 +350,10 @@ impl Store {
                 meta.insert(META_INDEXED_HEIGHT, k_u32(h - 1).as_slice())?;
             }
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
         txn.commit()?;
+        self.register_entries_cache
+            .store(entries, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

@@ -50,10 +50,25 @@ pub struct Store {
     #[cfg(feature = "test-lookup-counts")]
     pub(crate) lookups: std::sync::Arc<[std::sync::atomic::AtomicU64; 3]>,
     db: Database,
+    // Serialize commit and cache publication; scrapes never take this writer lock.
+    register_cache_writer: std::sync::Mutex<()>,
+    register_entries_cache: std::sync::atomic::AtomicU64,
+    #[cfg(feature = "test-lookup-counts")]
+    read_transactions: std::sync::atomic::AtomicU64,
     register_index_ceiling: Option<u64>,
 }
 
 impl Store {
+    /// Last published committed occupancy; atomic-only, never opens a read transaction.
+    pub fn cached_register_index_entries(&self) -> u64 {
+        self.register_entries_cache
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(feature = "test-lookup-counts")]
+    pub fn read_transaction_count(&self) -> u64 {
+        self.read_transactions
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
     /// Test-only box/tree/token enrichment reads, scoped to this store.
     #[cfg(feature = "test-lookup-counts")]
     pub fn lookup_counts(&self) -> [u64; 3] {
@@ -117,6 +132,10 @@ impl Store {
         }
         txn.commit()?;
         Ok(Store {
+            register_cache_writer: std::sync::Mutex::new(()),
+            register_entries_cache: std::sync::atomic::AtomicU64::new(entries),
+            #[cfg(feature = "test-lookup-counts")]
+            read_transactions: Default::default(),
             register_index_ceiling: ceiling,
             db,
             #[cfg(feature = "test-lookup-counts")]
@@ -126,7 +145,7 @@ impl Store {
 
     /// Height of the last block applied, or `None` for an empty store.
     pub fn indexed_height(&self) -> Result<Option<u32>, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let meta = txn.open_table(META)?;
         meta.get(META_INDEXED_HEIGHT)?
             .map(|v| meta_u32(v.value()))
@@ -140,7 +159,7 @@ impl Store {
     }
 
     pub fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let headers = txn.open_table(HEADERS)?;
         match headers.get(keys::k_u32(height).as_slice())? {
             Some(v) => Ok(Some(rows::HeaderRow::decode(v.value())?.id)),
@@ -149,6 +168,9 @@ impl Store {
     }
 
     pub fn begin_read(&self) -> Result<redb::ReadTransaction, StoreError> {
+        #[cfg(feature = "test-lookup-counts")]
+        self.read_transactions
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(self.db.begin_read()?)
     }
 
@@ -158,7 +180,7 @@ impl Store {
     /// identical fingerprint hold identical indexed state; used by tests to verify that
     /// applying and then rolling back a block is a true identity on the store's content.
     pub fn fingerprint(&self) -> Result<Hash32, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let mut hasher = Blake2b256::new();
         for t in ALL {
             if t.name() == UNDO.name() {

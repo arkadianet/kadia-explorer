@@ -1,3 +1,4 @@
+use redb::ReadableTableMetadata;
 use redb::{Durability, ReadableTable, Table, WriteTransaction};
 use std::collections::HashMap;
 use xp_types::{rent::maturity_height, Gidx, Hash32};
@@ -59,6 +60,10 @@ impl Store {
         if blocks.is_empty() {
             return Ok(());
         }
+        let _cache_writer = self
+            .register_cache_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut txn = self.db.begin_write()?;
         txn.set_durability(if durable {
             Durability::Immediate
@@ -171,7 +176,10 @@ impl Store {
             meta.insert(META_NEXT_BOX_GIDX, k_u64(next_box).as_slice())?;
             meta.insert(META_NEXT_TX_GIDX, k_u64(next_tx).as_slice())?;
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
         txn.commit()?;
+        self.register_entries_cache
+            .store(entries, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

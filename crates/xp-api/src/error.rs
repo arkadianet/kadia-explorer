@@ -87,6 +87,13 @@ struct Problem {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let event = match &self {
+            Self::Overloaded => Some(crate::metrics::Event::Overload),
+            Self::TooManyRequests { .. } => Some(crate::metrics::Event::Rejection),
+            Self::Integrity(_) => Some(crate::metrics::Event::Integrity),
+            Self::Expansion("expansion_deadline") => Some(crate::metrics::Event::Timeout),
+            _ => None,
+        };
         let status = self.status();
         if let ApiError::Internal(msg) | ApiError::Integrity(msg) = &self {
             tracing::error!(error = %msg, "api internal error");
@@ -122,6 +129,9 @@ impl IntoResponse for ApiError {
         if let Some(s) = retry_after {
             resp.headers_mut()
                 .insert(header::RETRY_AFTER, HeaderValue::from(s));
+        }
+        if let Some(event) = event {
+            resp.extensions_mut().insert(event);
         }
         resp
     }

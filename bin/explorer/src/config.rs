@@ -39,6 +39,7 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ApiSection {
+    pub metrics_allowlist: Vec<String>,
     pub max_inflight_reads: u32,
     pub trusted_proxies: Vec<String>,
     pub rate_limit: RateLimitSection,
@@ -55,6 +56,7 @@ pub struct RateLimitSection {
 impl Default for ApiSection {
     fn default() -> ApiSection {
         ApiSection {
+            metrics_allowlist: Vec::new(),
             max_inflight_reads: 32,
             trusted_proxies: vec!["127.0.0.1".into(), "::1".into()],
             rate_limit: RateLimitSection::default(),
@@ -76,6 +78,8 @@ impl TryFrom<&ApiSection> for xp_api::ApiConfig {
     type Error = String;
     fn try_from(s: &ApiSection) -> Result<xp_api::ApiConfig, String> {
         Ok(xp_api::ApiConfig {
+            metrics_allowlist: xp_api::Allowlist::parse(&s.metrics_allowlist)
+                .map_err(|e| format!("[api] metrics_allowlist: {e}"))?,
             per_second: s.rate_limit.per_second,
             burst: s.rate_limit.burst,
             allowlist: xp_api::Allowlist::parse(&s.rate_limit.allowlist)

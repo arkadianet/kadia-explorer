@@ -11,7 +11,7 @@
 //! no `TXS`/`TX_BY_GIDX` row is written for them: a lookup of that all-zero tx id finds
 //! nothing, and `boxes_of_tx` on it returns empty.
 
-use redb::{Durability, ReadableTable};
+use redb::{Durability, ReadableTable, ReadableTableMetadata};
 use xp_wire::DecodedBox;
 
 use crate::apply::{insert_output, upsert_tree};
@@ -25,7 +25,7 @@ use crate::{Store, StoreError};
 impl Store {
     /// Whether [`Store::seed_genesis`] has already run on this store.
     pub fn genesis_seeded(&self) -> Result<bool, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let meta = txn.open_table(META)?;
         Ok(meta.get(META_GENESIS_SEEDED)?.is_some())
     }
@@ -49,6 +49,10 @@ impl Store {
         if self.genesis_seeded()? {
             return Ok(());
         }
+        let _cache_writer = self
+            .register_cache_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut txn = self.db.begin_write()?;
         txn.set_durability(Durability::Immediate);
         self.check_register_capacity(&txn, boxes.iter())?;
@@ -144,7 +148,10 @@ impl Store {
             meta.insert(META_NEXT_BOX_GIDX, k_u64(next_box).as_slice())?;
             meta.insert(META_GENESIS_SEEDED, &[1u8][..])?;
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
         txn.commit()?;
+        self.register_entries_cache
+            .store(entries, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }
