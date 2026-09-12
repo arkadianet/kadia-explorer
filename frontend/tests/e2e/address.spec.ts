@@ -39,3 +39,25 @@ test('a known address shows its balance and per-tab lists', async ({ page }) => 
 	await expect(page).toHaveURL(`/address/${MOCK_ADDRESS}#rent`);
 	await expect(page.locator('table.table tbody tr').first()).toBeVisible();
 });
+
+for (const truncated of [true, false]) {
+	test(`address_rent_${truncated ? 'truncated_shows_sample_notice' : 'complete_hides_sample_notice'}`, async ({
+		page
+	}) => {
+		await page.route(`**/v1/addresses/${MOCK_ADDRESS}/rent`, async (route) => {
+			const response = await route.fetch();
+			const data = await response.json();
+			await route.fulfill({ response, json: { ...data, truncated } });
+		});
+		await page.goto(`/address/${MOCK_ADDRESS}#rent`);
+		await expect(page.locator('table.table tbody tr').first()).toBeVisible();
+		const notice = page.locator('p.notice');
+		if (truncated) {
+			await expect(notice).toHaveText(
+				'Showing a partial sample of this address’s rent-bearing boxes, sorted by maturity among those scanned; boxes not shown may mature sooner.'
+			);
+		} else {
+			await expect(notice).toHaveCount(0);
+		}
+	});
+}

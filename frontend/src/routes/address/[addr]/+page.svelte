@@ -314,8 +314,8 @@
 			{:else if rentItems && rentItems.length > 0}
 				{#if rentTruncated}
 					<p class="notice">
-						Showing the earliest-maturing boxes only — this address has more rent-bearing boxes than
-						the API returns in one response.
+						Showing a partial sample of this address’s rent-bearing boxes, sorted by maturity among
+						those scanned; boxes not shown may mature sooner.
 					</p>
 				{/if}
 				<Table dense>

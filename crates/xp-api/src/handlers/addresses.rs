@@ -12,7 +12,7 @@ use xp_types::rent::maturity_height;
 use xp_types::Hash32;
 
 /// Largest number of unspent boxes `/rent` will scan for one address before reporting
-/// `truncated: true`. The route has to sort the whole set by maturity, so it cannot stream.
+/// `truncated: true`. The route sorts the scanned boxes by maturity, so it cannot stream.
 pub const RENT_SCAN_CAP: usize = 5_000;
 
 /// `tree_by_address` returns `None` both for an unparseable address and for one that simply
@@ -96,9 +96,9 @@ pub async fn txs(
     Ok(Json(page))
 }
 
-/// The address's unspent boxes sorted by rent maturity, soonest first. Scans at most
-/// [`RENT_SCAN_CAP`] boxes; beyond that the answer is a prefix of the tree's unspent set and
-/// `truncated` is true.
+/// Scans at most [`RENT_SCAN_CAP`] of the address's unspent boxes in insertion order,
+/// then sorts those boxes by rent maturity, soonest first. When `truncated` is true,
+/// unscanned boxes may mature sooner than those returned.
 pub async fn rent(
     State(state): State<AppState>,
     Path(addr): Path<String>,

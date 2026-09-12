@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Correctness fixes from the 2026-09-12 gap audit
+
+- `fix(ingest)`: an unresolvable fork now exits `3`, not `1`. `ForkCheck::TooDeep` raised an
+  untyped error, so `needs_reindex` never matched and the documented
+  `RestartPreventExitStatus=3` never fired for the one condition it exists for — a store that
+  only a reindex can fix would restart-loop forever. The variant now carries the observed fork
+  depth and raises `StoreError::ReindexRequired`, and that error names the depth and the window
+  separately so its number means the same thing whichever path raised it.
+- `fix(api,frontend)`: truncated address rent no longer claims to be the earliest-maturing.
+  `/v1/addresses/{addr}/rent` scans up to `RENT_SCAN_CAP` boxes **in insertion order** and only
+  then sorts by maturity, so an unscanned box can mature sooner; the UI said the opposite.
+
 ### Plan 3a — ops hardening
 
 - `feat(api)`: address transaction list returns lightweight summaries (`TxSummaryDto`), no

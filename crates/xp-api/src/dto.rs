@@ -632,13 +632,14 @@ pub struct BoxRentDto {
     pub rent: RentDto,
 }
 
-/// `/v1/addresses/{addr}/rent`: not a cursor page — the whole unspent set is scanned (up to
-/// [`crate::handlers::addresses::RENT_SCAN_CAP`] boxes) so it can be sorted by maturity.
+/// `/v1/addresses/{addr}/rent`: not a cursor page — scans the unspent set in insertion order,
+/// up to [`crate::handlers::addresses::RENT_SCAN_CAP`] boxes, then sorts those by maturity.
 #[derive(Debug, Serialize)]
 pub struct AddressRentDto {
+    /// Scanned boxes sorted by maturity; unscanned boxes may mature sooner.
     pub items: Vec<BoxDto>,
-    /// True when the address holds more unspent boxes than the scan cap, so the list is a
-    /// prefix of the tree's boxes rather than every one of them.
+    /// True when the address holds more unspent boxes than the scan cap, so `items` is
+    /// only a sample selected in insertion order, then sorted by maturity.
     pub truncated: bool,
 }
 
