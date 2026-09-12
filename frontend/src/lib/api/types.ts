@@ -13,6 +13,7 @@ export interface StatusStalledDto {
 }
 
 export interface StatusDto {
+	/** Last successful /info response; does not certify source health. */
 	source_observed_at_ms?: number | null;
 	source_error?: string | null;
 	indexed: number | null;

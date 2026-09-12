@@ -2951,6 +2951,7 @@ dependencies = [
 name = "xp-api"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "hex",
@@ -2962,10 +2963,12 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",
  "xp-ingest",
+ "xp-source",
  "xp-store",
  "xp-types",
  "xp-wire",

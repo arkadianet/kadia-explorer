@@ -238,6 +238,7 @@ pub struct SupplyDto {
 
 #[derive(Debug, Serialize)]
 pub struct StatusDto {
+    /// Last successful `/info` response, independent of `source_error` and `stalled`.
     pub source_observed_at_ms: Option<u64>,
     pub source_error: Option<String>,
     pub indexed: Option<u32>,

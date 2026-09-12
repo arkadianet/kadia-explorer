@@ -383,3 +383,90 @@ async fn persistent_parent_mismatch_publishes_a_stall_and_then_recovers() {
     shutdown.cancel();
     handle.await.unwrap().unwrap();
 }
+
+/// Five answered but mismatching bodies make the height-one tip suspect. Then three
+/// /info failures raise source_error; subsequent /info answers must not clear it when
+/// the fork check cannot consult the source at all.
+struct ShortChainSource {
+    best_calls: AtomicU32,
+    header_calls: AtomicU32,
+    body_calls: AtomicU32,
+    body: String,
+}
+
+#[async_trait::async_trait]
+impl BlockSource for ShortChainSource {
+    fn name(&self) -> &str {
+        "short-chain"
+    }
+    async fn best_height(&self) -> Result<u32, SourceError> {
+        let call = self.best_calls.fetch_add(1, Ordering::SeqCst);
+        if (5..8).contains(&call) {
+            Err(SourceError::Unavailable)
+        } else {
+            Ok(2)
+        }
+    }
+    async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError> {
+        self.header_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(Some(if height == 1 { [1; 32] } else { [2; 32] }))
+    }
+    async fn full_block_json(&self, _id: &Hash32) -> Result<Option<String>, SourceError> {
+        self.body_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(Some(self.body.clone()))
+    }
+    async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
+        panic!("the store is already seeded")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn short_chain_fork_wait_preserves_live_source_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+    store.seed_for_tests(1, [1; 32]).unwrap();
+    let body = fixture_json(1866000).replace("\"height\":1866000", "\"height\":2");
+    let decoded = decode_block(&body).unwrap();
+    assert_eq!(decoded.header.height, 2);
+    assert_ne!(decoded.header.parent_id.0, [1; 32]);
+    let source = Arc::new(ShortChainSource {
+        best_calls: AtomicU32::new(0),
+        header_calls: AtomicU32::new(0),
+        body_calls: AtomicU32::new(0),
+        body,
+    });
+    let (tx, mut rx) = watch::channel(initial_status());
+    let shutdown = CancellationToken::new();
+    let handle = tokio::spawn(run(
+        store,
+        source.clone(),
+        one_at_a_time(),
+        tx,
+        shutdown.clone(),
+    ));
+
+    timeout(Duration::from_secs(45), async {
+        while rx.borrow().source_error.is_none() {
+            rx.changed().await.unwrap();
+        }
+        let error = rx.borrow().source_error.clone();
+        let header_calls = source.header_calls.load(Ordering::SeqCst);
+        assert_eq!(source.body_calls.load(Ordering::SeqCst), 5);
+        // Observe multiple iterations after /info starts answering again. Watch updates
+        // include the timestamp update and the later retry publication.
+        loop {
+            rx.changed().await.unwrap();
+            assert_eq!(rx.borrow().source_error, error);
+            assert_eq!(source.header_calls.load(Ordering::SeqCst), header_calls);
+            assert_eq!(source.body_calls.load(Ordering::SeqCst), 5);
+            if source.best_calls.load(Ordering::SeqCst) >= 10 {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("source error must survive the unconsulted fork waits");
+
+    shutdown.cancel();
+    handle.await.unwrap().unwrap();
+}

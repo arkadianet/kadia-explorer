@@ -54,6 +54,7 @@ pub enum Mode {
 
 #[derive(Clone, Debug)]
 pub struct IngestStatus {
+    /// When `/info` last answered; not a last-known-good timestamp for all source operations.
     pub source_observed_at_ms: Option<u64>,
     pub source_error: Option<String>,
     pub indexed: Option<u32>,
@@ -170,6 +171,8 @@ enum ForkCheck {
     /// The source can't answer for a height the store has — it is behind us, or on a shorter
     /// chain. Wait rather than destroying indexed state.
     Wait,
+    /// No safe fork comparison is possible; the source has not been consulted.
+    WaitWithoutSource,
     /// No common ancestor within the search window or at genesis. Carries the observed
     /// depth searched from the indexed tip, a lower bound on the fork depth.
     TooDeep(u32),
@@ -194,6 +197,10 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let source_name = source.name().to_string();
     let poll = Duration::from_millis(cfg.poll_ms);
+    // Count failed attempts, not individual concurrent requests. Three consecutive source
+    // failures tolerate a retry blip. Only a complete source attempt clears the streak:
+    // an answering /info must not hide failures further along the pipeline.
+    let mut source_failures = 0u32;
     let mut best = 0u32;
     let mut mode = Mode::Tip;
 
@@ -235,6 +242,22 @@ pub async fn run(
                 return Ok(());
             }
             continue;
+        }};
+    }
+    macro_rules! source_failed {
+        ($operation:expr, $err:expr) => {{
+            source_failures = source_failures.saturating_add(1);
+            if source_failures >= 3 {
+                status.send_modify(|s| {
+                    s.source_error = Some(format!("{}: {}", $operation, $err));
+                });
+            }
+        }};
+    }
+    macro_rules! source_recovered {
+        () => {{
+            source_failures = 0;
+            status.send_modify(|s| s.source_error = None);
         }};
     }
     // Publishes `halted` and returns the typed store error, so the caller keeps the real
@@ -293,9 +316,13 @@ pub async fn run(
             break;
         }
         let json = match source.genesis_boxes_json().await {
-            Ok(j) => j,
+            Ok(j) => {
+                source_recovered!();
+                j
+            }
             Err(e) => {
                 warn!(source = %source_name, error = %e, "genesis box fetch failed; retrying");
+                source_failed!("genesis box fetch", e);
                 retry!(None);
             }
         };
@@ -338,13 +365,12 @@ pub async fn run(
                             .unwrap_or_default()
                             .as_millis() as u64,
                     );
-                    s.source_error = None;
                 });
                 b
             }
             Err(e) => {
                 warn!(source = %source_name, error = %e, "best_height failed; retrying");
-                status.send_modify(|s| s.source_error = Some(e.to_string()));
+                source_failed!("best_height", e);
                 let cur = match store.indexed_height() {
                     Ok(v) => v,
                     Err(se) => halt_store!(None, se),
@@ -375,10 +401,15 @@ pub async fn run(
         match fork_check(&store, &source, indexed, distrust_tip).await {
             ForkCheck::Agreed => {}
             ForkCheck::Wait => {
+                source_recovered!();
                 debug!(
                     height = indexed,
                     "source has no block at our tip height; waiting"
                 );
+                retry!(cur);
+            }
+            ForkCheck::WaitWithoutSource => {
+                debug!(height = indexed, "no safe fork comparison; waiting");
                 retry!(cur);
             }
             ForkCheck::TooDeep(depth) => halt_store!(
@@ -389,6 +420,7 @@ pub async fn run(
             ForkCheck::StoreError(e) => halt_store!(cur, e),
             ForkCheck::SourceError(e) => {
                 warn!(source = %source_name, error = %e, "fork check failed; retrying");
+                source_failed!("fork check", e);
                 retry!(cur);
             }
             ForkCheck::RollbackTo(h) => {
@@ -430,6 +462,7 @@ pub async fn run(
         };
 
         if indexed >= best {
+            source_recovered!();
             publish(cur, best, mode, None, stall.as_ref().map(Stall::info));
             if sleep_or_shutdown(poll, &shutdown).await {
                 return Ok(());
@@ -447,9 +480,11 @@ pub async fn run(
             Ok(b) => b,
             Err(e) => {
                 warn!(source = %source_name, error = %e, "fetch failed; retrying");
+                source_failed!("block fetch", e);
                 retry!(cur);
             }
         };
+        source_recovered!();
         let bodies = fetched.bodies;
         if bodies.is_empty() {
             // The source advertised a higher tip than it will serve bodies for; wait it out.
@@ -550,7 +585,7 @@ enum ApplyErr {
 /// answer is never [`ForkCheck::Agreed`] and at least one block is always rolled back. The
 /// caller uses it when the tip is the suspect: nothing the source says about that height can
 /// clear it, because agreeing there is exactly what leaves ingest wedged. Below height 2 there
-/// is nothing to walk back to, so it yields [`ForkCheck::Wait`].
+/// is nothing to walk back to, so it yields [`ForkCheck::WaitWithoutSource`] without consulting the source.
 async fn fork_check(
     store: &Arc<Store>,
     source: &Arc<dyn BlockSource>,
@@ -561,7 +596,7 @@ async fn fork_check(
         // There is no height below 1 to fall back to — height 0 is not a block we hold, so
         // walking there could find no common ancestor and halt. Wait instead: a chain
         // this short cannot have the deep orphan problem `distrust_tip` exists for.
-        return ForkCheck::Wait;
+        return ForkCheck::WaitWithoutSource;
     }
     if indexed == 0 {
         return ForkCheck::Agreed;

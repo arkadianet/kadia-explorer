@@ -2451,3 +2451,104 @@ async fn rent_reports_the_signed_consensus_fee_not_just_nominal_rent() {
         assert_eq!(rent["collectible"].as_bool().unwrap(), fee > 0);
     }
 }
+
+/// Each body request waits for the test, so assertions inspect published status between
+/// attempts without depending on scheduling or wall-clock sleeps.
+struct FailingBodies {
+    tip_id: xp_types::Hash32,
+    requests: tokio::sync::mpsc::UnboundedSender<
+        tokio::sync::oneshot::Sender<Result<Option<String>, xp_source::SourceError>>,
+    >,
+}
+
+#[async_trait::async_trait]
+impl xp_source::BlockSource for FailingBodies {
+    fn name(&self) -> &str {
+        "failing-bodies"
+    }
+
+    async fn best_height(&self) -> Result<u32, xp_source::SourceError> {
+        Ok(1866003)
+    }
+
+    async fn header_id_at(
+        &self,
+        _height: u32,
+    ) -> Result<Option<xp_types::Hash32>, xp_source::SourceError> {
+        Ok(Some(self.tip_id))
+    }
+
+    async fn full_block_json(
+        &self,
+        _id: &xp_types::Hash32,
+    ) -> Result<Option<String>, xp_source::SourceError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.requests.send(tx).unwrap();
+        rx.await.unwrap()
+    }
+
+    async fn genesis_boxes_json(&self) -> Result<String, xp_source::SourceError> {
+        Ok("[]".into())
+    }
+}
+
+#[tokio::test]
+async fn status_repeated_body_errors_reports_failure_and_recovers() {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let (_dir, _app, mut state) = app_with_state(unlimited(), None);
+        let (tx, mut rx) = watch::channel(state.status.borrow().clone());
+        state.status = rx.clone();
+        let app = xp_api::router(state.clone(), &unlimited());
+        let (requests, mut bodies) = tokio::sync::mpsc::unbounded_channel();
+        let source = Arc::new(FailingBodies {
+            tip_id: state.store.header_id_at(1866002).unwrap().unwrap(),
+            requests,
+        });
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let handle = tokio::spawn(xp_ingest::run(
+            state.store.clone(),
+            source,
+            xp_ingest::IngestConfig {
+                poll_ms: 1,
+                ..Default::default()
+            },
+            tx,
+            shutdown.clone(),
+        ));
+
+        let mut request = bodies.recv().await.unwrap();
+        for attempt in 1..=4 {
+            request
+                .send(Err(xp_source::SourceError::Http("body HTTP 503".into())))
+                .unwrap();
+            request = bodies.recv().await.unwrap();
+            // The next attempt's /info has already succeeded, but must not clear the error.
+            let (code, status) = get(&app, "/v1/status").await;
+            assert_eq!(code, StatusCode::OK);
+            assert!(status["source_observed_at_ms"].is_number());
+            assert_eq!(status["indexed"], 1866002);
+            assert!(status["stalled"].is_null());
+            if attempt < 3 {
+                assert!(status["source_error"].is_null());
+            } else {
+                assert!(status["source_error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("body HTTP 503"));
+            }
+        }
+
+        // A successful response withholding the body is a stall, not a fetch error.
+        request.send(Ok(None)).unwrap();
+        while rx.borrow().stalled.is_none() {
+            rx.changed().await.unwrap();
+        }
+        let (_, status) = get(&app, "/v1/status").await;
+        assert!(status["source_error"].is_null());
+        assert_eq!(status["stalled"]["height"], 1866003);
+        shutdown.cancel();
+        handle.await.unwrap().unwrap();
+    })
+    .await
+    .expect("ingest did not publish status");
+}

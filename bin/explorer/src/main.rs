@@ -193,7 +193,7 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
     // Race the server against the ingest task so a halt (ingest returning Err while the
     // server is still up) is caught immediately and turned into a shutdown, rather than
     // leaving the server serving increasingly stale data until a signal happens to arrive.
-    let ingest_outcome = tokio::select! {
+    let (ingest_outcome, server_failed) = tokio::select! {
         biased;
         ingest_res = &mut ingest_handle => {
             match &ingest_res {
@@ -203,28 +203,32 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
             }
             // Halt (or an unexpected clean exit) still needs the server to stop.
             shutdown.cancel();
-            if let Err(e) = server_fut.await {
+            let server_res = server_fut.await;
+            if let Err(e) = &server_res {
                 error!("server error: {e:#}");
             }
-            ingest_res
+            (ingest_res, server_res.is_err())
         }
         server_res = &mut server_fut => {
-            if let Err(e) = server_res {
+            if let Err(e) = &server_res {
                 error!("server error: {e:#}");
             }
             // The server stopped (normally: a signal cancelled `shutdown`). Make sure ingest
             // is told to stop too, then let it finish its current batch.
             shutdown.cancel();
-            ingest_handle.await
+            (ingest_handle.await, server_res.is_err())
         }
     };
 
-    Ok(ingest_exit_code(ingest_outcome))
+    Ok(explorer_exit_code(ingest_outcome, server_failed))
 }
 
-fn ingest_exit_code(outcome: Result<anyhow::Result<()>, tokio::task::JoinError>) -> i32 {
+fn explorer_exit_code(
+    outcome: Result<anyhow::Result<()>, tokio::task::JoinError>,
+    server_failed: bool,
+) -> i32 {
     match outcome {
-        Ok(Ok(())) => 0,
+        Ok(Ok(())) => i32::from(server_failed),
         Ok(Err(e)) if needs_reindex(&e) => EXIT_REINDEX_REQUIRED,
         Ok(Err(_)) => 1,
         Err(_) => 1,
@@ -284,24 +288,40 @@ mod tests {
     }
 
     #[test]
-    fn ingest_exit_code_reindex_required_returns_three() {
+    fn explorer_exit_code_reindex_required_returns_three() {
         let err = anyhow::Error::from(xp_store::StoreError::ReindexRequired(
             xp_store::ROLLBACK_WINDOW,
         ))
         .context("ingest loop");
         assert!(needs_reindex(&err));
-        assert_eq!(ingest_exit_code(Ok(Err(err))), 3);
+        assert_eq!(explorer_exit_code(Ok(Err(err)), false), 3);
     }
 
     #[test]
-    fn ingest_exit_code_other_outcomes_preserve_codes() {
-        assert_eq!(ingest_exit_code(Ok(Ok(()))), 0);
+    fn explorer_exit_code_other_outcomes_preserve_codes() {
+        assert_eq!(explorer_exit_code(Ok(Ok(())), false), 0);
         assert_eq!(
-            ingest_exit_code(Ok(Err(anyhow::anyhow!("decode failed")))),
+            explorer_exit_code(Ok(Err(anyhow::anyhow!("decode failed"))), false),
             1
         );
         let err = xp_store::StoreError::Corrupt("input box missing").into();
-        assert_eq!(ingest_exit_code(Ok(Err(err))), 1);
+        assert_eq!(explorer_exit_code(Ok(Err(err)), false), 1);
+    }
+
+    #[test]
+    fn explorer_exit_code_server_failed_ingest_clean_returns_one() {
+        assert_eq!(explorer_exit_code(Ok(Ok(())), true), 1);
+    }
+
+    #[test]
+    fn explorer_exit_code_server_failed_ingest_reindex_returns_three() {
+        let err = xp_store::StoreError::ReindexRequired(5_000).into();
+        assert_eq!(explorer_exit_code(Ok(Err(err)), true), 3);
+    }
+
+    #[test]
+    fn explorer_exit_code_server_ok_ingest_clean_returns_zero() {
+        assert_eq!(explorer_exit_code(Ok(Ok(())), false), 0);
     }
 
     /// `xp_ingest` wraps the store error before returning it, so the check has to walk the
