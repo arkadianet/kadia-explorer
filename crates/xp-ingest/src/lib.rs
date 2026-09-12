@@ -409,6 +409,9 @@ pub async fn run(
                 retry!(cur);
             }
             ForkCheck::WaitWithoutSource => {
+                // Retry the normal source comparison after the existing stall backoff.
+                // This local decision is not evidence of source recovery.
+                parent_mismatch = None;
                 debug!(height = indexed, "no safe fork comparison; waiting");
                 retry!(cur);
             }

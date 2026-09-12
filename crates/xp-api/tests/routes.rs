@@ -3215,8 +3215,17 @@ async fn summary_count_overflow_is_integrity_error_for_both_input_counts() {
                 .insert(id.as_slice(), row.encode().as_slice())
                 .unwrap();
         });
+        let rd = xp_store::Reader::new(&store).unwrap();
+        let tree = integrity_blocks()[1].txs[0].outputs[0].tree_hash.0;
+        let address = rd.tree_row(&tree).unwrap().unwrap().address;
+        drop(rd);
         let app = router_over(store, 2);
-        for path in ["/v1/tx-summaries", "/v1/blocks/2/tx-summaries"] {
+        let address_path = format!("/v1/addresses/{address}/txs");
+        for path in [
+            "/v1/tx-summaries",
+            "/v1/blocks/2/tx-summaries",
+            &address_path,
+        ] {
             let (status, body) = get(&app, path).await;
             assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(body["code"], "integrity_error");

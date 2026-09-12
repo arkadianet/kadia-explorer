@@ -386,7 +386,7 @@ async fn persistent_parent_mismatch_publishes_a_stall_and_then_recovers() {
 
 /// Five answered but mismatching bodies make the height-one tip suspect. Then three
 /// /info failures raise source_error; subsequent /info answers must not clear it when
-/// the fork check cannot consult the source at all.
+/// the fork check cannot consult the source. The following retry must consult it again.
 struct ShortChainSource {
     best_calls: AtomicU32,
     header_calls: AtomicU32,
@@ -409,6 +409,10 @@ impl BlockSource for ShortChainSource {
     }
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError> {
         self.header_calls.fetch_add(1, Ordering::SeqCst);
+        // After the local no-source wait, keep the outage live during the recheck.
+        if self.best_calls.load(Ordering::SeqCst) >= 10 {
+            return Err(SourceError::Unavailable);
+        }
         Ok(Some(if height == 1 {
             [1; 32]
         } else {
@@ -457,14 +461,23 @@ async fn short_chain_fork_wait_preserves_live_source_error() {
         let error = rx.borrow().source_error.clone();
         let header_calls = source.header_calls.load(Ordering::SeqCst);
         assert_eq!(source.body_calls.load(Ordering::SeqCst), 5);
-        // Observe multiple iterations after /info starts answering again. Watch updates
-        // include the timestamp update and the later retry publication.
+        // The first answered /info takes the local wait; it must preserve the exact
+        // live error and perform no header/body calls. The next iteration must recheck.
+        let mut saw_local_wait = false;
         loop {
             rx.changed().await.unwrap();
-            assert_eq!(rx.borrow().source_error, error);
-            assert_eq!(source.header_calls.load(Ordering::SeqCst), header_calls);
+            let calls = source.header_calls.load(Ordering::SeqCst);
+            assert!(rx.borrow().source_error.is_some(), "live error was cleared");
             assert_eq!(source.body_calls.load(Ordering::SeqCst), 5);
-            if source.best_calls.load(Ordering::SeqCst) >= 10 {
+            if source.best_calls.load(Ordering::SeqCst) == 9 && calls == header_calls {
+                assert_eq!(rx.borrow().source_error, error);
+                saw_local_wait = true;
+            }
+            if calls > header_calls {
+                assert!(
+                    saw_local_wait,
+                    "must observe the no-source wait before rechecking"
+                );
                 break;
             }
         }

@@ -39,7 +39,7 @@ not add full-table scans to infer that distinction.
 | R8 | dto::tx_dto: missing input BOXES on non-partial store | R | Yes: absence forbidden without explicit partial declaration. Unseeded is not partial permission. |
 | R9 | dto::box_dto: invalid registers_json | R | Yes: malformed stored JSON is not an absent optional register; valid JSON null remains valid. |
 | R10 | read_tokens::resolve_token: either token listing index → TOKENS | R | Yes: retained mint index promises row, even in partial mode. |
-| R11 | read_tokens::token_names / dto::fill_token_names: referenced token row on non-partial store | R | Yes at enrichment caller: box/balance asset promises mint history. Name itself is O1. |
+| R11 | read_tokens::token_names / dto::fill_token_names: referenced token row on non-partial store | R | Yes at enrichment caller: a transaction-origin box/balance asset promises mint history. Exact chain-spec token origins recorded atomically in META have no mint row; only those IDs are exempt. Name itself is O1. |
 | R12 | addresses::get_one / dto::address_dto: known tree → TREE_BALANCE | R | Yes: balances persist at zero; no fabricated zero counts or amounts. |
 | R13 | addresses::get_one canonical tree reload | R | Yes: same Reader already found tree. |
 | R14 | richlist::list: indexed tree → ERGO_TREES / TREE_BALANCE | R | Yes: rich entry promises both; check balance amount agrees. |
@@ -55,7 +55,7 @@ not add full-table scans to infer that distinction.
 | R24 | rollback: spent_boxes → BOXES, excluding same-block creations | R | Yes: created_boxes explicitly identifies intentional earlier deletion. Missing pre-seed inputs never enter spent_boxes. |
 | R25 | rollback::token_row_now (new/previous tokens) | R | Yes: journal names local token rows. Already strict. |
 | R26 | rollback: current TREE_BALANCE before restoring previous balance | R | Yes: touched balances are retained, including zero. |
-| R27 | tokens::row_mut: referenced mint row on non-partial store | R | Yes: mint is inserted before output/spend counter updates; absent row cannot be optional name. |
+| R27 | tokens::row_mut: referenced mint row on non-partial store | R | Yes: mint is inserted before output/spend counter updates; absent row cannot be optional name. Chain-spec assets have no mint: exact per-token genesis origin in META permits holdings indexing, including later transfers/burns, without exempting other tokens. |
 | R28 | apply_batch / txs_by_gidx: initialized store → allocation counters | R | Yes: indexed tip requires both counters; genesis seeding requires box counter, but legitimately has no tx counter yet. Identified in final review before tightening these defaults. |
 | O1 | TokenRow name/description/decimals/token_type; dto::fill_token_names / token_kind | O | Yes: existing row with empty name or absent EIP-4 fields is valid; retain empty/null/default kind. |
 | O2 | dto::rent_dto / box spent fields | O | Yes: spent=None means unspent; absent tip means no claimable-at-tip assertion. |
@@ -140,9 +140,9 @@ final inventory is 53 rows. These refinements do not imply a prior complete audi
 
 Candidate: `b2a83c0914cf980c04eb0775ea7589ed7069f4ce` plus this uncommitted diff.
 Final command: `CARGO_TARGET_DIR=$PWD/target ./scripts/check.sh all`, **exit 1**.
-Artifacts: [results](../../artifacts/check/all-q4clyPVj/results.log),
-[revision/tool/diff manifest](../../artifacts/check/all-q4clyPVj/manifest.log),
-[log hashes](../../artifacts/check/all-q4clyPVj/logs.sha256).
+Evidence provenance: local, non-retained reviewer runs; CI has never executed.
+The historical paths `artifacts/check/all-q4clyPVj/{results.log,manifest.log,logs.sha256}`
+identify local logs/hashes only, not durable artifacts.
 
 | Gate | Result |
 |---|---|

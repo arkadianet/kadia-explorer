@@ -1,7 +1,7 @@
 use crate::dto::{
-    address_dto, box_dto_from_reader, enrich_balance, enrich_boxes, parse_bool_param, parse_dir,
-    parse_limit, parse_u64_cursor, tx_summary_dto, AddrBoxParams, AddressDto, AddressRentDto,
-    BoxDto, ListParams, PageDto, TxSummaryDto,
+    address_dto, box_dto_from_reader, checked_tx_summary_dto, enrich_balance, enrich_boxes,
+    parse_bool_param, parse_dir, parse_limit, parse_u64_cursor, AddrBoxParams, AddressDto,
+    AddressRentDto, BoxDto, ListParams, PageDto, TxSummaryDto,
 };
 use crate::paging::{Binding, Filter, Route};
 use crate::{blocking, ApiError, AppState};
@@ -122,8 +122,8 @@ pub async fn txs(
                     items: page
                         .items
                         .iter()
-                        .map(|(id, row)| tx_summary_dto(id, row))
-                        .collect(),
+                        .map(|(id, row)| checked_tx_summary_dto(id, row))
+                        .collect::<Result<Vec<_>, _>>()?,
                     next_cursor: page.next_cursor.map(|c| c.to_string()),
                 })
             },

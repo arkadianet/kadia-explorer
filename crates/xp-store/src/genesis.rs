@@ -43,16 +43,16 @@ impl Store {
     /// [`StoreError::Corrupt`] if the store has already indexed a block, because the gidx
     /// numbering it would allocate would then collide with history already written.
     pub fn seed_genesis(&self, boxes: &[DecodedBox]) -> Result<(), StoreError> {
+        let _cache_writer = self
+            .register_cache_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if self.indexed_height()?.is_some() {
             return Err(StoreError::Corrupt("genesis seeding on a non-empty store"));
         }
         if self.genesis_seeded()? {
             return Ok(());
         }
-        let _cache_writer = self
-            .register_cache_writer
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
         let mut txn = self.db.begin_write()?;
         txn.set_durability(Durability::Immediate);
         self.check_register_capacity(&txn, boxes.iter())?;
@@ -64,6 +64,14 @@ impl Store {
                 .transpose()?
                 .unwrap_or(0);
 
+            // Persist exact chain-spec origins, never a fabricated mint transaction.
+            // These markers survive spends and rollback just like genesis itself.
+            for b in boxes {
+                for (id, _) in &b.tokens {
+                    meta.insert(crate::keys::k_genesis_token(id).as_slice(), &[1u8][..])?;
+                }
+            }
+            drop(meta);
             let mut boxes_t = txn.open_table(BOXES)?;
             let mut box_by_gidx = txn.open_table(BOX_BY_GIDX)?;
             let mut ergo_trees = txn.open_table(ERGO_TREES)?;
@@ -137,6 +145,7 @@ impl Store {
             extras.finish()?;
             tokens.finish()?;
 
+            let mut meta = txn.open_table(META)?;
             // The emission box is the largest of the chain-spec boxes by five orders of
             // magnitude (93 M ERG against a treasury box of ~4 M and a proof box of 1 nanoERG),
             // so "largest value" identifies it unambiguously. Recorded here because it is the

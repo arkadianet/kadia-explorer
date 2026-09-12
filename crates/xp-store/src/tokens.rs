@@ -96,6 +96,7 @@ struct Holder {
 }
 
 pub(crate) struct Tokens<'txn> {
+    txn: &'txn WriteTransaction,
     tokens: Tb<'txn>,
     partial: bool,
     tokens_by_gidx: Tb<'txn>,
@@ -116,6 +117,7 @@ impl<'txn> Tokens<'txn> {
     /// well: redb allows a table to be open only once per write transaction.
     pub(crate) fn open(txn: &'txn WriteTransaction, partial: bool) -> Result<Self, StoreError> {
         Ok(Tokens {
+            txn,
             partial,
             tokens: txn.open_table(TOKENS)?,
             tokens_by_gidx: txn.open_table(TOKENS_BY_GIDX)?,
@@ -132,7 +134,8 @@ impl<'txn> Tokens<'txn> {
 
     /// The cached working [`TokenRow`] for `token`, or `None` if the store holds no row for it.
     ///
-    /// A missing row is allowed only on a declared partial store: the mint may predate the
+    /// A missing row is allowed for an explicitly recorded chain-spec asset (no mint),
+    /// or on a declared partial store: the mint may predate the
     /// seed point, so transfers and burns of such a token are still indexed in the holder and
     /// box tables — there is simply no row whose counters could be updated.
     fn row_mut(&mut self, token: &Hash32) -> Result<Option<&mut TokenRow>, StoreError> {
@@ -143,7 +146,12 @@ impl<'txn> Tokens<'txn> {
                 .map(|v| TokenRow::decode(v.value()))
                 .transpose()?
             else {
-                if !self.partial {
+                let genesis = self
+                    .txn
+                    .open_table(META)?
+                    .get(crate::keys::k_genesis_token(token).as_slice())?
+                    .is_some();
+                if !self.partial && !genesis {
                     return Err(StoreError::Corrupt("referenced token row missing"));
                 }
                 return Ok(None);

@@ -264,7 +264,8 @@ impl Reader {
     /// box's token list should collect it into a `HashMap<Hash32, _>` and look ids up there,
     /// never index into it positionally.
     ///
-    /// Ids are skipped only on a declared partial store, which legitimately holds
+    /// Ids are skipped for explicitly recorded chain-spec assets without a mint,
+    /// or on a declared partial store, which legitimately holds
     /// boxes carrying tokens minted before its seed height.
     pub fn token_names(
         &self,
@@ -284,7 +285,12 @@ impl Reader {
         for id in ids {
             check()?;
             let Some(v) = tokens.get(id.as_slice())? else {
-                if self.partial_from()?.is_none() {
+                let genesis = self
+                    .txn
+                    .open_table(META)?
+                    .get(crate::keys::k_genesis_token(id).as_slice())?
+                    .is_some();
+                if self.partial_from()?.is_none() && !genesis {
                     return Err(StoreError::Corrupt("referenced token row missing"));
                 }
                 continue;

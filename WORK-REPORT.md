@@ -1,13 +1,13 @@
 # Explorer delivery status
 
-Updated 2026-09-12. This is the delivery-status authority referenced by the
+Updated 2026-09-13. This is the delivery-status authority referenced by the
 [September 10 history design](docs/superpowers/specs/2026-09-10-history-and-rent-reporting-design.md).
 Historical design text is unchanged. Current scope is the accepted
 [completion design](docs/superpowers/specs/2026-09-12-explorer-done-design.md) and
 [M1–M6 plan](docs/superpowers/plans/2026-09-12-explorer-done-plan.md), subject to the
-owner's scoped implementation requests below. This session implements **M3 steps 3–4 only**.
+owner's scoped implementation requests below. M3 steps **1, 3, 4 and 5** are implemented.
 M2 is committed (`b2a83c0`, `cfb489e`, `43f5941`); the reviewer reports all five
-gates passed outside the sandbox in 118 seconds. M3 steps 1, 2, 5 and 6 remain deferred.
+gates passed outside the sandbox in 118 seconds. M3 steps 2 and 6 remain deferred; collection and load evidence are absent.
 
 States: `planned` = agreed work without implementation; `implemented` = code or
 procedure exists; `verified` = specified acceptance evidence exists for the named
@@ -15,10 +15,10 @@ revision; `released` = deployment plus post-deployment smoke is evidenced.
 An implemented item is not necessarily verified. Missing evidence never means pass.
 CUT is a scope decision, not a delivery state. No release is certified here.
 
-Working revision: `43f594188b45e139005c89d0c2507edb57c90337` plus the uncommitted
-M3 steps 3–4 diff, branch `fix/explorer-exit-code-and-rent-truth`. No commit, push or production operation was
-performed in this implementation session. Earlier baseline evidence below retains
-its original provenance.
+Working branch: `fix/explorer-exit-code-and-rent-truth`. Current M3 provenance is
+`a0f8f09` (summaries/budgets), `838d2cf` (global-list summary adoption), and
+`eacb509` (endpoint telemetry). Earlier session records below retain their historical
+scope and verification results; this review made no commit, push or production operation.
 
 ## Closed baseline correctness work
 
@@ -41,7 +41,7 @@ separate and unverified.
 | M1 — gates unavoidable (steps 1-3) | implemented | `scripts/check.sh all` exit 0, reviewer-run outside any sandbox |
 | M1 — steps 4-5 (enforcement, provisioning) | **planned / owner-blocked** | Needs a push and repo-admin rights. CI has NEVER executed. A committed workflow is not a gate. |
 | M2 — fail closed, integrity matrix, transition model | implemented | b2a83c0, cfb489e, 43f5941 |
-| M3 — summaries, budgets, frontend, telemetry (steps 1,3,4,5) | implemented | a0f8f09, 838d2cf, eacb509 |
+| M3 — summaries, budgets, global-list frontend, endpoint telemetry (steps 1,3,4,5) | implemented; scoped frontend adoption | a0f8f09, 838d2cf, eacb509; homepage and block lists retain bounded expansion |
 | M3 — steps 2, 6 (durable collection, load measurement) | **planned / infra-blocked** | Needs an external retention owner and a deployment-class host |
 | M4 — register ceiling (steps 1,3,4) | implemented | f6bf8f0; ceiling defaults UNSET so an upgrade cannot refuse to start |
 | M4 — steps 2, 5, 6, 7 (footprint, backup, restore drill, runbook) | **planned / infra-blocked** | Needs a maintenance window and an independent destination host |
@@ -78,7 +78,8 @@ run, the restore drill has never run, and the production store has never been sw
 | M2 steps 3-4 — required-reference matrix and fail-closed reads | implemented | Committed at `cfb489e`; [matrix and fixture evidence](docs/superpowers/2026-09-12-m2-required-reference-matrix.md). Final G: `artifacts/check/all-q4clyPVj`, exit 1 only for sandbox socket refusals (`fallback`, `rust_node`, Playwright); other gates pass. |
 | M2 steps 5-7 — generated transition model, UNDO | implemented; deterministic tests verified | 256 × 32 histories, independent all-table oracle, retention boundaries and deliberate mutation pass. Current G evidence and sandbox limitations below. |
 | M3 steps 3–4 — summary routes and legacy budgets | implemented; deterministic tests verified | Final G exit 1 for sandbox socket refusals only; evidence below. |
-| M3 steps 1, 2, 5, 6; M4–M6 | planned | Deferred; frontend, telemetry and production measurements not started. |
+| M3 steps 1 and 5 | implemented | Endpoint telemetry and global-list summary adoption; homepage/block expanded views are deliberate exemptions. |
+| M3 steps 2 and 6 | planned / infra-blocked | Durable collection and deployment-class load measurements remain absent. M4–M6 status is in the current milestone table above. |
 
 ### M2 steps 5–7 — independent transition and UNDO evidence
 
@@ -490,7 +491,7 @@ M4 produces and reviews concrete recovery commands before the drill.
 | Scope | State | Required artifact / current blocker |
 |---|---|---|
 | M2 integrity and transition model | implemented; current G not verified in sandbox | Matrix and deterministic store/API cases pass; 256 histories, UNDO retention and mutation evidence below. Source socket suites and Playwright require outside-sandbox G. |
-| M3 bounded reads and telemetry | steps 3–4 implemented | Zero-lookup and boundary proofs below; frontend migration, latency/RSS/drain and durable restart evidence remain deferred. |
+| M3 bounded reads and telemetry | steps 1, 3, 4, 5 implemented | Global-list summaries and endpoint instrumentation exist; latency/RSS/drain and durable restart evidence remain deferred. |
 | M4 capacity and recovery | planned | Table attribution, growth/headroom, atomic cap tests, full-size checksummed restore/catch-up: absent |
 | M5 continuation | implemented; sandbox-limited verification | Steps 1–4 committed in 2937523 / b437259; steps 5–6 uncommitted. See M5 entry below; full G remains unverified in sandbox. |
 | M6 release verification | planned | Final candidate manifest, required G, independent parity, real-API smoke, seven-day soak, recovery and rollout evidence: absent |
@@ -513,8 +514,8 @@ Accepted design §1.1 removes these from this release's obligations:
   historical holder rankings, new supply dashboards, fiat/price data, protocol
   expansion, token-name discovery, pool attribution and testnet.
 - Mempool/WebSocket remain deferred; confirmed mainnet and polling stay in scope.
-- Homepage transaction-kind badges requiring full expansion (removal belongs to M3,
-  not yet implemented); detail facts stay.
+- Homepage badges and block output totals remain: scoped frontend adoption keeps
+  the capped homepage and budgeted block expansion (838d2cf).
 - Legacy first-ID canonical guessing (removed in M2 steps 1–2);
   body-only fallback stays.
 - Guaranteed 30–40 GB physical size, byte-identical redb restoration, restoring
@@ -528,7 +529,11 @@ stable resolution into a claim about unrecorded reviewer versions. Full-size res
 is the recovery obligation; resync is not. No historical planning text was rewritten.
 
 
-## M3 steps 3–4 — 2026-09-12 candidate
+## M3 steps 3–4 — historical 2026-09-12 candidate
+
+This section records that earlier candidate only. Frontend adoption and endpoint
+telemetry were subsequently implemented in 838d2cf and eacb509; current deferrals
+are steps 2 and 6.
 
 Only the two additive summary routes and the legacy transaction expansion safety
 net are implemented in this round. No frontend edits, metrics package, external

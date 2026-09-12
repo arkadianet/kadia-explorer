@@ -206,3 +206,98 @@ fn seeding_records_the_emission_tree_hash() {
     // The emission contract is not the miner-fee contract.
     assert!(!xp_store::is_fee_tree(&emission.tree_hash.0));
 }
+
+#[test]
+fn asset_bearing_genesis_indexes_holdings_without_a_mint() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("x.redb");
+    let mut boxes = genesis_boxes();
+    let token = [0xab; 32];
+    boxes[0].tokens.push((token, 42));
+    {
+        let s = Store::open(&path).unwrap();
+        s.seed_genesis(&boxes).unwrap();
+        assert!(s.genesis_seeded().unwrap());
+    }
+    let s = Store::open(&path).unwrap();
+    let rd = xp_store::Reader::new(&s).unwrap();
+    assert_eq!(
+        rd.balance(&boxes[0].tree_hash.0).unwrap().unwrap().tokens,
+        vec![(token, 42)]
+    );
+    assert!(rd.token_names(&[token]).unwrap().is_empty());
+    assert!(rd.token_names(&[[0xcd; 32]]).is_err());
+    assert!(rd.tx_by_id(&[0; 32]).unwrap().is_none());
+}
+
+#[test]
+fn genesis_assets_survive_transfer_burn_and_rollback_without_relaxing_other_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open(&dir.path().join("x.redb")).unwrap();
+    let token = [0xab; 32];
+    let mut boxes = genesis_boxes();
+    boxes[0].tokens = vec![(token, 42)];
+    s.seed_genesis(&boxes).unwrap();
+    let mut block = fixture(1866000);
+    block.header.height = 1;
+    block.header.parent_id = xp_types::HeaderId([0; 32]);
+    let mut tx = block.txs[0].clone();
+    tx.inputs = vec![boxes[0].id];
+    tx.data_inputs.clear();
+    let mut output = boxes[0].clone();
+    output.id = xp_types::BoxId([0xa1; 32]);
+    output.tx_id = tx.id;
+    output.tokens = vec![(token, 40)];
+    tx.outputs = vec![output];
+    block.txs = vec![tx];
+    s.apply_batch(std::slice::from_ref(&block), true).unwrap();
+    {
+        let rd = xp_store::Reader::new(&s).unwrap();
+        assert_eq!(
+            rd.balance(&boxes[0].tree_hash.0).unwrap().unwrap().tokens,
+            vec![(token, 40)]
+        );
+        assert!(rd.token(&token).unwrap().is_none(), "no invented mint");
+        assert!(rd.token_names(&[token]).unwrap().is_empty());
+    }
+    s.rollback_to(0).unwrap();
+    let rd = xp_store::Reader::new(&s).unwrap();
+    assert_eq!(
+        rd.balance(&boxes[0].tree_hash.0).unwrap().unwrap().tokens,
+        vec![(token, 42)]
+    );
+    drop(rd);
+    let before = s.fingerprint().unwrap();
+    block.txs[0].outputs[0].tokens.push(([0xcd; 32], 1));
+    assert!(matches!(
+        s.apply_batch(&[block], true),
+        Err(xp_store::StoreError::Corrupt(
+            "referenced token row missing"
+        ))
+    ));
+    assert_eq!(
+        s.fingerprint().unwrap(),
+        before,
+        "unknown token aborts atomically"
+    );
+}
+
+#[test]
+fn concurrent_genesis_calls_seed_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = std::sync::Arc::new(Store::open(&dir.path().join("x.redb")).unwrap());
+    let boxes = genesis_boxes();
+    let barrier = std::sync::Barrier::new(8);
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                barrier.wait();
+                s.seed_genesis(&boxes).unwrap();
+            });
+        }
+    });
+    let reference_dir = tempfile::tempdir().unwrap();
+    let reference = Store::open(&reference_dir.path().join("x.redb")).unwrap();
+    reference.seed_genesis(&boxes).unwrap();
+    assert_eq!(s.fingerprint().unwrap(), reference.fingerprint().unwrap());
+}

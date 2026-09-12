@@ -24,21 +24,28 @@
   "delta_pct_erg": 1.4,
   "method": "COUNT and TOTAL agreement only; exact txid-set reconciliation NOT performed because the census txid export is unavailable"
  },
- "amounts_erg": {
-  "gross_rent": 3930.944,
-  "fees_paid": 1136.053,
-  "fee_share_pct": 28.9,
-  "net_kept": 2829.684
- },
- "attribution": {
-  "null_allocations": 958,
-  "null_share_pct": 18.7,
-  "null_reason": "mixed_funding_or_owner_flows"
- },
  "claimant_split_derived_from_fee_presence": {
   "bot_fee_paying": 5097,
   "miner_self_claim": 24,
   "bot_share_pct": 99.5,
   "note": "derived from family_fee_nano > 0 per the owner's rule; family records do not emit a mode field"
- }
+ },
+ "attributable": {
+  "families": 4163,
+  "gross_rent_erg": 3930.944,
+  "fees_paid_erg": 1101.26,
+  "fee_share_pct": 28.0,
+  "net_kept_erg": 2829.684,
+  "amount_basis": "Fees inferred as gross minus net from the retained rounded totals; raw family aggregation not rerun."
+ },
+ "not_attributed": {
+  "families": 958,
+  "share_pct": 18.7,
+  "fees_observed_erg": 34.793,
+  "gross_rent_erg": null,
+  "net_kept_erg": null,
+  "reason": "mixed_funding_or_owner_flows",
+  "amount_basis": "Observed fees inferred as all-family fees 1136.053 minus attributable fees 1101.260, using rounded totals."
+ },
+ "reviewer_correction": "The earlier 28.9% fee share and gross-minus-fee presentation were wrong: fees included 958 null-allocation families while gross and net covered only attributable families. The 2829.684 net belongs to the attributable cohort; blending populations produces 2794.891 instead, a 34.793 ERG discrepancy."
 }

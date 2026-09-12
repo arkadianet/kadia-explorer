@@ -22,6 +22,9 @@ New ingest regressions cover capability-error retries and publication after at l
 
 ## Gate results
 
+Evidence below describes local, non-retained reviewer runs. CI has never executed;
+these log paths identify historical local output, not durable artifacts.
+
 - `./scripts/check.sh all`: exit 1; evidence `artifacts/check/all-WY98xn9q`. Formatting and frontend PASS (120 tests, Svelte check, lint, build/bundle budget). Playwright not run: sandbox (`listen EPERM`). Initial Rust checks not run: sandbox (configured shared Cargo target is read-only).
 - `CARGO_TARGET_DIR="$PWD/target" ./scripts/check.sh rust`: exit 1; evidence `artifacts/check/rust-41KohHBU`. Formatting and Clippy PASS. New source parser tests, both new ingest regressions, and existing API health regression PASS. Source `fallback` and `rust_node` HTTP integration suites not run: sandbox (socket `PermissionDenied`). No attempt was made to fix socket restrictions.
 - This Rust run also exposed a pre-existing arbitrary id in the short-chain parent-mismatch mock. Its advertised id now matches its body, preserving the intended parent mismatch and all original assertions. Final focused orphan-suite and Clippy verification is recorded below.

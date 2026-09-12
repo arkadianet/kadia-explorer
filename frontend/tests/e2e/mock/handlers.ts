@@ -258,6 +258,19 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		return;
 	}
 
+	const blockSummaries = /^\/v1\/blocks\/([^/]+)\/tx-summaries$/.exec(path);
+	if (blockSummaries) {
+		const block = resolveBlock(d, decodeURIComponent(blockSummaries[1]));
+		if (!block) return notFound(res);
+		const ids = d.txIdsByHeight.get(block.height) ?? [];
+		const summaries = ids.flatMap((id) => {
+			const tx = d.txById.get(id);
+			return tx ? [txSummary(tx)] : [];
+		});
+		sendJson(res, 200, page(summaries, cursor, limit));
+		return;
+	}
+
 	const blockTxs = /^\/v1\/blocks\/([^/]+)\/txs$/.exec(path);
 	if (blockTxs) {
 		const block = resolveBlock(d, decodeURIComponent(blockTxs[1]));
