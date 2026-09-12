@@ -8,3 +8,6 @@
 
 # Local gate logs and fixture temporary files
 /artifacts/
+
+# Phase-1 rent candidate output (200 MB+ of JSONL; regenerate with the scanner)
+/rent-candidates.jsonl

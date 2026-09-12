@@ -158,6 +158,32 @@ tree remains uncommitted and unpushed. No `npm ci` or production operation was r
 Nothing above is `verified` in the release sense: CI has never executed, and live parity,
 the restore drill and the capacity soak remain unrun.
 
+## Rent backfill phase-1 pilot — measured 2026-09-12
+
+Run against the local full-history store, quiesced with owner permission (its indexer stopped
+with SIGTERM, exited cleanly in 4 s, restarted afterwards and caught back up to tip; ~11 minutes
+of downtime). Summary record retained at `docs/operations/2026-09-12-rent-phase1-pilot.json`.
+
+| Measure | Value |
+|---|---|
+| Rows scanned | 57,406,829 (14.3 GB) |
+| Candidate spends | 945,288 |
+| Distinct spending transactions | 132,341 |
+| **Distinct heights (sizes phase 2)** | **86,637** |
+| Candidate height range | 1,051,232 - 1,871,490 |
+| Coverage | complete (not a partial store) |
+| Scan wall time | 10 m 54 s, no network |
+
+Phase-2 fetch throughput measured separately against the local node: 94 blocks/s over 120
+randomly sampled candidate heights spread across the full range, at concurrency 12. An earlier
+40-block sample suggested 283 blocks/s and was discarded as cache-warm and adjacent. At the
+measured rate, fetching all 86,637 candidate heights is approximately 15 minutes.
+
+This replaces the design's original full-rescan estimate of ~819,000 rent-era blocks at one to
+five days. The reduction comes from generating candidates locally: `BoxRow` already stores
+`creation_height` and `spent`, so the age predicate needs no block data. Classification work on
+top of the fetch is not included in the 15 minutes and remains unmeasured.
+
 ## G baseline and reproducible invocation
 
 The owner supplied the reviewer's run **outside the sandbox on this exact baseline
