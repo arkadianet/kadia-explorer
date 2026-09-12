@@ -21,3 +21,8 @@ blake2.workspace = true
 proptest.workspace = true
 redb.workspace = true
 tempfile.workspace = true
+serde_json.workspace = true
+
+[[example]]
+name = "rent-candidates"
+test = true
