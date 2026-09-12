@@ -71,6 +71,7 @@ run_gate() {
     fi
 }
 if [[ $suite != frontend ]]; then
+    run_gate rent-classifier "$root" 'PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-rent-history.py'
     run_gate capacity-collector "$root" 'PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-register-capacity.py'
     run_gate fmt "$root" 'cargo fmt --all -- --check'
     run_gate clippy "$root" 'cargo clippy --workspace --all-targets -- -D warnings'

@@ -557,3 +557,67 @@ run; the hashed code and budget document are unchanged from the tested candidate
 The earlier `all-HKuJGS7S` run predates the decoder deadline correction and is
 superseded by `all-pr2BIDoc`. No production database or performance/load measurement
 was used. M3 steps 1, 2, 5 and 6 remain separate tasks; M3 as a whole is incomplete.
+
+## Rent history Phase 2a — 2026-09-12, uncommitted
+
+Implemented the standalone standard-library classifier/fetch/reconcile tool in
+`scripts/rent_history.py`, its 14 automated tests, and
+[operator instructions](docs/rent-classifier.md). `scripts/check.sh all` now runs
+these tests. No core schema, reporting redb, API route, external dependency,
+commit or push. The live `data/explorer.redb` was not opened.
+
+The predicate requires authenticated mature input bytes, explicitly empty proof,
+a typed in-range output pointer and the accepted recreated/fully-consumed branch
+under an explicitly supplied historical rule interval. Unsupported history and
+missing evidence remain unresolved. Signed i32 storage-charge arithmetic is
+separate from owner-tree withdrawal accounting. Generic absorber trees do not
+identify claimants. Explicit family fees are counted once; multiple claims,
+external funding, owner-flow ambiguity and incomplete family analysis have null
+allocations with reasons. Miner/bot mode is explicit and fee-free unresolved
+parents are not labeled miners. The implementation conservatively leaves all
+mixed-input gross amounts null, even where further analysis might separate flows.
+
+Confirmed negative controls run the entire classifier over repository raw blocks
+1,866,001 and 1,866,002. Both contain pinned emission and full-standard-fee
+collection transactions with empty proofs and ages 1–2. Both yield zero claims,
+zero unresolved classification predicates, and explicit age exclusions for every
+control input. Missing non-control input boxes limit census accounting but their
+proof/selector evidence excludes the rent path. This is not the owner's ten-block
+sample. Synthetic tests are algorithm checks, not positive consensus certification.
+
+The runner uses only completed Phase 1 candidate heights and the configured node,
+checks the Phase 1 canonical tip and cached block anchors, resolves confirmed spent
+boxes from the node, retains per-height JSON evidence/checkpoints, and emits a fresh
+complete JSONL stream on resume. Twelve bounded workers report progress. The owner's
+94 blocks/s measurement does not include this implementation's spent-box lookups;
+no new runtime/throughput claim is made. Evidence assurance is trusted node response,
+not independent proof/body commitment validation.
+
+Reconciliation compares exact candidate and verified txid sets, reports matched,
+only-ours, only-census, amount differences and available input reasons. It requires
+all candidate heights in the census window, the independent 5,116 IDs and supplied
+census amounts to pass. **Not reconciled:** the actual candidate JSONL, independent
+census export and audited historical parameter/rule schedule were not available.
+The configured example node socket probe was rejected by sandbox policy. Live
+backfill, real positive-branch oracle validation, the owner's ten-block control and
+performance measurement were not run. No fabricated census match or 5,116-count
+claim is made.
+
+Final gate: `CARGO_TARGET_DIR="$PWD/target" ./scripts/check.sh all`.
+Evidence: [results](artifacts/check/all-dui5p9Qy/results.log),
+[manifest](artifacts/check/all-dui5p9Qy/manifest.log),
+[source hashes](artifacts/check/all-dui5p9Qy/candidate-source-sha256.json).
+New files are copied under that run's `candidate-files/` because untracked files
+are absent from `git diff`. This ledger update follows the tested code.
+
+| Gate | Result |
+|---|---|
+| Rent classifier | PASS, 14 tests including both confirmed-block negative controls |
+| Capacity collector, formatting, workspace/all-target Clippy | PASS |
+| Rust workspace tests | Non-socket suites pass. Socket suites **not run: sandbox**: 6 fallback and 13 rust_node bind refusals; overall NOT VERIFIED |
+| Frontend tests/check/lint/build | PASS; 124 tests in 17 files |
+| Playwright | **not run: sandbox**; mock-server bind at 127.0.0.1:18099 rejected with EPERM |
+| Overall | Exit 1; not a green all-gates claim |
+
+No `npm ci` ran, and Cargo used the repository target directory, not `/tmp`.
+The earlier `all-dGGymv7R` run is superseded by `all-dui5p9Qy`.
