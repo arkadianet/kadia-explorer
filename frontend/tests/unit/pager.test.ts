@@ -159,3 +159,23 @@ describe('createPager', () => {
 		expect(seen).toEqual([undefined, undefined]);
 	});
 });
+
+it('discards in-flight results from before a filter reset', async () => {
+	let release!: (p: PageDto<number>) => void;
+	let calls = 0;
+	const pager = createPager<number>(() => {
+		calls++;
+		return calls === 1
+			? new Promise((resolve) => {
+					release = resolve;
+				})
+			: Promise.resolve(page([2], null));
+	});
+	const old = pager.loadMore();
+	pager.reset();
+	await pager.loadMore();
+	release(page([1], 'old'));
+	await old;
+	expect(pager.items).toEqual([2]);
+	expect(pager.done).toBe(true);
+});

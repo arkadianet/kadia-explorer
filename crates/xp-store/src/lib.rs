@@ -1,4 +1,6 @@
 pub mod apply;
+mod capacity;
+pub use capacity::DEFAULT_REGISTER_INDEX_CEILING;
 pub(crate) mod extras;
 pub mod genesis;
 pub mod keys;
@@ -45,10 +47,34 @@ pub(crate) fn meta_u64(b: &[u8]) -> Result<u64, StoreError> {
 }
 
 pub struct Store {
+    #[cfg(feature = "test-lookup-counts")]
+    pub(crate) lookups: std::sync::Arc<[std::sync::atomic::AtomicU64; 3]>,
     db: Database,
+    // Serialize commit and cache publication; scrapes never take this writer lock.
+    register_cache_writer: std::sync::Mutex<()>,
+    register_entries_cache: std::sync::atomic::AtomicU64,
+    #[cfg(feature = "test-lookup-counts")]
+    read_transactions: std::sync::atomic::AtomicU64,
+    register_index_ceiling: Option<u64>,
 }
 
 impl Store {
+    /// Last published committed occupancy; atomic-only, never opens a read transaction.
+    pub fn cached_register_index_entries(&self) -> u64 {
+        self.register_entries_cache
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(feature = "test-lookup-counts")]
+    pub fn read_transaction_count(&self) -> u64 {
+        self.read_transactions
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+    /// Test-only box/tree/token enrichment reads, scoped to this store.
+    #[cfg(feature = "test-lookup-counts")]
+    pub fn lookup_counts(&self) -> [u64; 3] {
+        std::array::from_fn(|i| self.lookups[i].load(std::sync::atomic::Ordering::Relaxed))
+    }
+
     /// Opens (creating if absent) the redb database at `path`, ensuring every table in
     /// [`tables::ALL`] exists. On a fresh database the current [`tables::SCHEMA_VERSION`] is
     /// recorded; on an existing one a mismatched version is refused.
@@ -60,6 +86,17 @@ impl Store {
     /// indexed at least one block while being neither genesis-seeded nor explicitly partial —
     /// a combination the current code cannot produce.
     pub fn open(path: &Path) -> Result<Store, StoreError> {
+        Self::open_with_register_index_ceiling(path, DEFAULT_REGISTER_INDEX_CEILING)
+    }
+
+    /// Opens with an optional exclusive register-entry ceiling. None is unbounded.
+    /// Refuses an explicitly configured ceiling below
+    /// committed occupancy; equality blocks subsequent apply until raised.
+    pub fn open_with_register_index_ceiling(
+        path: &Path,
+        ceiling: Option<u64>,
+    ) -> Result<Store, StoreError> {
+        use redb::ReadableTableMetadata;
         let db = Database::create(path)?;
         let txn = db.begin_write()?;
         for t in ALL {
@@ -87,13 +124,28 @@ impl Store {
                 ));
             }
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
+        if let Some(ceiling) = ceiling {
+            if ceiling < entries {
+                return Err(StoreError::RegisterCapacityConfig { entries, ceiling });
+            }
+        }
         txn.commit()?;
-        Ok(Store { db })
+        Ok(Store {
+            register_cache_writer: std::sync::Mutex::new(()),
+            register_entries_cache: std::sync::atomic::AtomicU64::new(entries),
+            #[cfg(feature = "test-lookup-counts")]
+            read_transactions: Default::default(),
+            register_index_ceiling: ceiling,
+            db,
+            #[cfg(feature = "test-lookup-counts")]
+            lookups: Default::default(),
+        })
     }
 
     /// Height of the last block applied, or `None` for an empty store.
     pub fn indexed_height(&self) -> Result<Option<u32>, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let meta = txn.open_table(META)?;
         meta.get(META_INDEXED_HEIGHT)?
             .map(|v| meta_u32(v.value()))
@@ -107,7 +159,7 @@ impl Store {
     }
 
     pub fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let headers = txn.open_table(HEADERS)?;
         match headers.get(keys::k_u32(height).as_slice())? {
             Some(v) => Ok(Some(rows::HeaderRow::decode(v.value())?.id)),
@@ -116,6 +168,9 @@ impl Store {
     }
 
     pub fn begin_read(&self) -> Result<redb::ReadTransaction, StoreError> {
+        #[cfg(feature = "test-lookup-counts")]
+        self.read_transactions
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(self.db.begin_read()?)
     }
 
@@ -125,7 +180,7 @@ impl Store {
     /// identical fingerprint hold identical indexed state; used by tests to verify that
     /// applying and then rolling back a block is a true identity on the store's content.
     pub fn fingerprint(&self) -> Result<Hash32, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let mut hasher = Blake2b256::new();
         for t in ALL {
             if t.name() == UNDO.name() {
@@ -208,11 +263,25 @@ impl Store {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("local register index capacity: {existing} existing + {additional} prospective entries reaches ceiling {ceiling}; raise register_index_ceiling above this total and restart ingest")]
+    RegisterCapacity {
+        existing: u64,
+        additional: u64,
+        ceiling: u64,
+    },
+    #[error("local register index capacity: entry count overflow")]
+    RegisterCountOverflow,
+    #[error("register_index_ceiling {ceiling} is below current occupancy {entries}; set it to at least {entries} (above occupancy plus the next batch to resume)")]
+    RegisterCapacityConfig { entries: u64, ceiling: u64 },
+    #[error("read admission: {0}")]
+    ReadLimit(&'static str),
     #[error("redb: {0}")]
     Redb(String),
     #[error("corrupt row: {0}")]
     Corrupt(&'static str),
-    #[error("fork deeper than rollback window ({0} blocks): reindex required")]
+    /// Fork depth in blocks: the requested rollback distance, or the observed distance
+    /// searched without finding a common ancestor (a lower bound on the fork depth).
+    #[error("fork depth {0} blocks: rollback unavailable (rollback window: {ROLLBACK_WINDOW} blocks); reindex required")]
     ReindexRequired(u32),
     #[error("parent mismatch at height {height}: have {have}, block says {want}")]
     ParentMismatch {

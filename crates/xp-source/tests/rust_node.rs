@@ -252,23 +252,86 @@ async fn header_id_at_chain_slice_server_error_is_an_error_not_a_fallback() {
     }
 }
 
-/// Older nodes have no `chainSlice` endpoint at all. Then — and only then — the source falls
-/// back to `/blocks/at/{h}` and its first-id convention.
+/// Even a single stored id cannot establish canonicality without `chainSlice`.
 #[tokio::test]
-async fn header_id_at_falls_back_to_blocks_at_when_chain_slice_is_missing() {
-    let first = [0x11u8; 32];
-    let second = [0x22u8; 32];
-    let ids = vec![xp_types::hex32(&first), xp_types::hex32(&second)];
-    // No `/blocks/chainSlice` route: the router answers 404, as an older node would.
+async fn missing_chain_slice_with_single_id_is_a_capability_error() {
+    assert_unsupported(vec![xp_types::hex32(&[0x11; 32])]).await;
+}
+
+#[tokio::test]
+async fn missing_chain_slice_with_orphan_first_is_a_capability_error() {
+    assert_unsupported(vec![
+        xp_types::hex32(&[0x11; 32]),
+        xp_types::hex32(&[0x22; 32]),
+    ])
+    .await;
+}
+
+async fn assert_unsupported(ids: Vec<String>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
     let app = Router::new().route(
         "/blocks/at/{height}",
         get(move || {
+            seen.fetch_add(1, Ordering::SeqCst);
             let ids = ids.clone();
             async move { Json(ids) }
         }),
     );
     let base = serve(app).await;
+    let err = RustNode::new(&base)
+        .header_id_at(1866000)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, xp_source::SourceError::Capability(_)));
+    assert!(err
+        .to_string()
+        .contains("upgrade this node or configure a primary"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
 
-    let node = RustNode::new(&base);
-    assert_eq!(node.header_id_at(1866000).await.unwrap(), Some(first));
+#[tokio::test]
+async fn unsupported_chain_slice_statuses_are_capability_errors() {
+    for status in [
+        axum::http::StatusCode::METHOD_NOT_ALLOWED,
+        axum::http::StatusCode::NOT_IMPLEMENTED,
+    ] {
+        let base =
+            serve(Router::new().route("/blocks/chainSlice", get(move || async move { status })))
+                .await;
+        assert!(matches!(
+            RustNode::new(&base).header_id_at(42).await,
+            Err(xp_source::SourceError::Capability(_))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn malformed_and_contradictory_chain_slice_are_decode_errors() {
+    for body in [
+        "not json".to_owned(),
+        "{}".to_owned(),
+        serde_json::json!([{"height": 42, "id": "bad"}]).to_string(),
+        serde_json::json!([{"height": 42}]).to_string(),
+        serde_json::json!([{"id": xp_types::hex32(&[1; 32])}]).to_string(),
+        serde_json::json!([
+            {"height": 42, "id": xp_types::hex32(&[1; 32])},
+            {"height": 42, "id": xp_types::hex32(&[2; 32])}
+        ])
+        .to_string(),
+    ] {
+        let base = serve(Router::new().route(
+            "/blocks/chainSlice",
+            get(move || {
+                let body = body.clone();
+                async move { body }
+            }),
+        ))
+        .await;
+        assert!(matches!(
+            RustNode::new(&base).header_id_at(42).await,
+            Err(xp_source::SourceError::Decode(_))
+        ));
+    }
 }

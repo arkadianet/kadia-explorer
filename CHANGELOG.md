@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Correctness fixes from the 2026-09-12 gap audit
+
+- `fix(ingest)`: an unresolvable fork now exits `3`, not `1`. `ForkCheck::TooDeep` raised an
+  untyped error, so `needs_reindex` never matched and the documented
+  `RestartPreventExitStatus=3` never fired for the one condition it exists for — a store that
+  only a reindex can fix would restart-loop forever. The variant now carries the observed fork
+  depth and raises `StoreError::ReindexRequired`, and that error names the depth and the window
+  separately so its number means the same thing whichever path raised it.
+- `fix(api,frontend)`: truncated address rent no longer claims to be the earliest-maturing.
+  `/v1/addresses/{addr}/rent` scans up to `RENT_SCAN_CAP` boxes **in insertion order** and only
+  then sorts by maturity, so an unscanned box can mature sooner; the UI said the opposite.
+
+- `fix(ingest)`: `/v1/status` no longer reports a healthy source while the source is failing.
+  `source_error` was set and cleared only by `best_height()`, so a node whose `/info` kept
+  answering while block bodies failed showed a fresh, error-free source indefinitely. Every
+  source operation now feeds one failure streak, reported after three consecutive failures, and
+  only an attempt that the source actually answered clears it — an answering `/info` cannot.
+  The fork check distinguishes "the source said no block here" from "the source was never
+  consulted", so the short-chain path cannot clear a live error.
+- `fix(explorer)`: a server that fails at runtime no longer exits `0`. The error was logged and
+  discarded, and the exit code came from the ingest outcome alone, so a supervisor read a dead
+  server as an intentional clean exit. Ingest failures keep precedence, so `3` still survives a
+  simultaneous server failure.
+
 ### Plan 3a — ops hardening
 
 - `feat(api)`: address transaction list returns lightweight summaries (`TxSummaryDto`), no

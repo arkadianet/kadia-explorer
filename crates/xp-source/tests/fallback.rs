@@ -46,6 +46,20 @@ async fn blocks_at(State(s): State<Arc<Node>>, Path(height): Path<u32>) -> Json<
     }
 }
 
+async fn chain_slice(
+    State(s): State<Arc<Node>>,
+    axum::extract::Query(q): axum::extract::Query<HashMap<String, u32>>,
+) -> Json<Vec<serde_json::Value>> {
+    let height = q["toHeight"];
+    Json(
+        s.by_height
+            .get(&height)
+            .map(|id| serde_json::json!({"height": height, "id": id}))
+            .into_iter()
+            .collect(),
+    )
+}
+
 async fn block_by_id(State(s): State<Arc<Node>>, Path(id): Path<String>) -> Response {
     match s.by_id.get(&id) {
         Some(json) => json.clone().into_response(),
@@ -61,6 +75,7 @@ async fn spawn(node: Node) -> String {
     let app = Router::new()
         .route("/info", get(info))
         .route("/blocks/at/{height}", get(blocks_at))
+        .route("/blocks/chainSlice", get(chain_slice))
         .route("/blocks/{id}", get(block_by_id))
         .route("/utxo/genesis", get(genesis))
         .with_state(Arc::new(node));

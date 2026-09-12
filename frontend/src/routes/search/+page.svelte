@@ -79,7 +79,9 @@
 		reg = r;
 		value = v;
 		formError = null;
-		const p = createPager<BoxDto>((c) => api.boxesByRegister(r, v, c, PAGE_SIZE));
+		const p = createPager<BoxDto>((c, snapshot) =>
+			api.boxesByRegister(r, v, c, PAGE_SIZE, undefined, undefined, snapshot)
+		);
 		pager = p;
 		void p.loadMore();
 	});

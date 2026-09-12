@@ -114,6 +114,13 @@ pub fn prefix_range(prefix: &[u8]) -> (Vec<u8>, Vec<u8>) {
     (lo, hi)
 }
 
+/// Exact chain-spec token origin in META; no transaction mint exists for these assets.
+pub(crate) fn k_genesis_token(id: &Hash32) -> Vec<u8> {
+    let mut key = b"genesis_token:".to_vec();
+    key.extend_from_slice(id);
+    key
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

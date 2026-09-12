@@ -2451,3 +2451,1692 @@ async fn rent_reports_the_signed_consensus_fee_not_just_nominal_rent() {
         assert_eq!(rent["collectible"].as_bool().unwrap(), fee > 0);
     }
 }
+
+/// Each body request waits for the test, so assertions inspect published status between
+/// attempts without depending on scheduling or wall-clock sleeps.
+struct FailingBodies {
+    tip_id: xp_types::Hash32,
+    requests: tokio::sync::mpsc::UnboundedSender<
+        tokio::sync::oneshot::Sender<Result<Option<String>, xp_source::SourceError>>,
+    >,
+}
+
+#[async_trait::async_trait]
+impl xp_source::BlockSource for FailingBodies {
+    fn name(&self) -> &str {
+        "failing-bodies"
+    }
+
+    async fn best_height(&self) -> Result<u32, xp_source::SourceError> {
+        Ok(1866003)
+    }
+
+    async fn header_id_at(
+        &self,
+        _height: u32,
+    ) -> Result<Option<xp_types::Hash32>, xp_source::SourceError> {
+        Ok(Some(self.tip_id))
+    }
+
+    async fn full_block_json(
+        &self,
+        _id: &xp_types::Hash32,
+    ) -> Result<Option<String>, xp_source::SourceError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.requests.send(tx).unwrap();
+        rx.await.unwrap()
+    }
+
+    async fn genesis_boxes_json(&self) -> Result<String, xp_source::SourceError> {
+        Ok("[]".into())
+    }
+}
+
+#[tokio::test]
+async fn status_repeated_body_errors_reports_failure_and_recovers() {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let (_dir, _app, mut state) = app_with_state(unlimited(), None);
+        let (tx, mut rx) = watch::channel(state.status.borrow().clone());
+        state.status = rx.clone();
+        let app = xp_api::router(state.clone(), &unlimited());
+        let (requests, mut bodies) = tokio::sync::mpsc::unbounded_channel();
+        let source = Arc::new(FailingBodies {
+            tip_id: state.store.header_id_at(1866002).unwrap().unwrap(),
+            requests,
+        });
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let handle = tokio::spawn(xp_ingest::run(
+            state.store.clone(),
+            source,
+            xp_ingest::IngestConfig {
+                poll_ms: 1,
+                ..Default::default()
+            },
+            tx,
+            shutdown.clone(),
+        ));
+
+        let mut request = bodies.recv().await.unwrap();
+        for attempt in 1..=4 {
+            request
+                .send(Err(xp_source::SourceError::Http("body HTTP 503".into())))
+                .unwrap();
+            request = bodies.recv().await.unwrap();
+            // The next attempt's /info has already succeeded, but must not clear the error.
+            let (code, status) = get(&app, "/v1/status").await;
+            assert_eq!(code, StatusCode::OK);
+            assert!(status["source_observed_at_ms"].is_number());
+            assert_eq!(status["indexed"], 1866002);
+            assert!(status["stalled"].is_null());
+            if attempt < 3 {
+                assert!(status["source_error"].is_null());
+            } else {
+                assert!(status["source_error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("body HTTP 503"));
+            }
+        }
+
+        // A successful response withholding the body is a stall, not a fetch error.
+        request.send(Ok(None)).unwrap();
+        while rx.borrow().stalled.is_none() {
+            rx.changed().await.unwrap();
+        }
+        let (_, status) = get(&app, "/v1/status").await;
+        assert!(status["source_error"].is_null());
+        assert_eq!(status["stalled"]["height"], 1866003);
+        shutdown.cancel();
+        handle.await.unwrap().unwrap();
+    })
+    .await
+    .expect("ingest did not publish status");
+}
+
+// M2 integrity fixtures: build complete synthetic history, close its only owner,
+// mutate one reference, close redb, then hand the file to the router's only Store.
+fn integrity_blocks() -> Vec<xp_wire::DecodedBlock> {
+    let token = mainnet_genesis()[0].id.0;
+    let mut first = history_output(101, 100, vec![(token, 70)]);
+    first.registers_json = r#"{"R4":"0402"}"#.into(); // valid non-EIP-4 name
+    let second = history_output(102, 200, vec![(token, 30)]);
+    let b1 = history_block(
+        1,
+        201,
+        [0; 32],
+        vec![history_tx(
+            301,
+            vec![mainnet_genesis()[0].id],
+            vec![first, second],
+        )],
+    );
+    let b2 = history_block(
+        2,
+        202,
+        b1.header.id.0,
+        vec![history_tx(
+            302,
+            vec![xp_types::BoxId(history_id(101))],
+            vec![history_output(103, 90, vec![(token, 60)])],
+        )],
+    );
+    vec![b1, b2]
+}
+
+fn integrity_store(
+    partial: bool,
+    edit: impl FnOnce(&redb::WriteTransaction),
+) -> (tempfile::TempDir, Store) {
+    integrity_store_at(partial, 2, edit)
+}
+
+fn integrity_store_at(
+    partial: bool,
+    height: usize,
+    edit: impl FnOnce(&redb::WriteTransaction),
+) -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("integrity.redb");
+    {
+        let store = Store::open(&path).unwrap();
+        if partial {
+            store.seed_for_tests(0, [0; 32]).unwrap();
+        } else {
+            store.seed_genesis(&mainnet_genesis()).unwrap();
+        }
+        store
+            .apply_batch(&integrity_blocks()[..height], true)
+            .unwrap();
+    }
+    {
+        let db = redb::Database::create(&path).unwrap();
+        let tx = db.begin_write().unwrap();
+        edit(&tx);
+        tx.commit().unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    (dir, store)
+}
+
+async fn assert_integrity_routes(app: &Router, paths: &[String]) {
+    for path in paths {
+        let (status, value) = get(app, path).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{path}: {value}");
+        assert_eq!(value["code"], "integrity_error", "{path}: {value}");
+        assert!(
+            value.get("items").is_none(),
+            "must not return a shortened list"
+        );
+        assert!(
+            value.get("balance").is_none(),
+            "must not return a partial total"
+        );
+    }
+    // The same damaged store must still distinguish unrelated requested ids.
+    let unknown = hex::encode([0xfa; 32]);
+    for path in [
+        format!("/v1/boxes/{unknown}"),
+        format!("/v1/txs/{unknown}"),
+        format!("/v1/tokens/{unknown}"),
+        format!("/v1/templates/{unknown}"),
+        format!("/v1/blocks/{unknown}"),
+        "/v1/blocks/999".into(),
+        "/v1/addresses/unknown".into(),
+    ] {
+        assert_eq!(get(app, &path).await.0, StatusCode::NOT_FOUND, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn integrity_required_rows_fail_full_store_lists_details_and_totals() {
+    use xp_store::{keys::*, tables::*};
+    let tree = xp_wire::tree_hash(&[0, 8, 0xd3]).0;
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let template = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().template_hash;
+    let token = mainnet_genesis()[0].id.0;
+    let tx_detail = format!("/v1/txs/{}", hex::encode(history_id(301)));
+    let box_detail = format!("/v1/boxes/{}", hex::encode(history_id(102)));
+    let addr = format!("/v1/addresses/{address}");
+    let token_path = format!("/v1/tokens/{}", hex::encode(token));
+    let template_path = format!("/v1/templates/{}", hex::encode(template));
+    let expansion = vec![
+        "/v1/txs".into(),
+        tx_detail.clone(),
+        "/v1/blocks/1/txs".into(),
+    ];
+    let box_pages = vec![
+        format!("{addr}/boxes"),
+        format!("{addr}/boxes?unspent=true"),
+        format!("{token_path}/boxes"),
+        format!("{token_path}/boxes?unspent=true"),
+        format!("{template_path}/boxes"),
+        format!("{template_path}/boxes?unspent=true"),
+        format!("{addr}/rent"),
+    ];
+    let mut tree_paths = expansion.clone();
+    tree_paths.extend([
+        box_detail.clone(),
+        "/v1/richlist".into(),
+        format!("{token_path}/holders"),
+        template_path.clone(),
+        "/v1/rent/upcoming?blocks=2000000".into(),
+    ]);
+    let mut box_paths = expansion.clone();
+    box_paths.extend(box_pages.clone());
+    box_paths.push("/v1/rent/upcoming?blocks=2000000".into());
+    box_paths.push(format!("{addr}/balance/at?height=1"));
+    box_paths.push(format!("{addr}/boxes/at?height=1"));
+    // Each case gets a fresh, independently damaged temporary file.
+    let cases = vec![
+        (
+            META,
+            META_NEXT_TX_GIDX.to_vec(),
+            vec!["/v1/txs".into(), "/v1/txs?dir=asc".into()],
+        ),
+        (
+            HEADERS,
+            k_u32(1).to_vec(),
+            vec![
+                "/v1/blocks".into(),
+                "/v1/blocks/1".into(),
+                format!("/v1/blocks/{}", hex::encode(history_id(201))),
+                "/v1/blocks/1/txs".into(),
+            ],
+        ),
+        (
+            TXS,
+            history_id(301).to_vec(),
+            vec![
+                "/v1/txs".into(),
+                "/v1/blocks/1/txs".into(),
+                format!("{addr}/txs"),
+                format!("{addr}/balance/at?height=1"),
+                format!("{addr}/boxes/at?height=1"),
+            ],
+        ),
+        (
+            TX_BY_GIDX,
+            k_u64(0).to_vec(),
+            vec![
+                "/v1/txs".into(),
+                "/v1/blocks/1/txs".into(),
+                format!("{addr}/txs"),
+            ],
+        ),
+        (
+            BOX_BY_GIDX,
+            k_u64(4).to_vec(),
+            box_paths
+                .clone()
+                .into_iter()
+                .filter(|p| !p.starts_with("/v1/rent/"))
+                .collect(),
+        ),
+        (BOXES, history_id(102).to_vec(), box_paths),
+        (
+            BOX_BY_GIDX,
+            k_u64(3).to_vec(),
+            vec![
+                "/v1/registers/R4/0402/boxes".into(),
+                format!("{addr}/boxes"),
+                format!("{token_path}/boxes"),
+                format!("{template_path}/boxes"),
+                tx_detail.clone(),
+                "/v1/txs".into(),
+            ],
+        ),
+        (ERGO_TREES, tree.to_vec(), tree_paths),
+        (BOXES, mainnet_genesis()[0].id.0.to_vec(), expansion.clone()),
+        (TOKENS, token.to_vec(), {
+            let mut paths = expansion.clone();
+            paths.extend([
+                box_detail.clone(),
+                addr.clone(),
+                "/v1/tokens".into(),
+                "/v1/tokens?sort=holders".into(),
+            ]);
+            paths.extend([format!("{addr}/boxes"), format!("{template_path}/boxes")]);
+            paths
+        }),
+        (
+            TREE_BALANCE,
+            tree.to_vec(),
+            vec![addr.clone(), "/v1/richlist".into()],
+        ),
+        (
+            TOKEN_HOLDER_AMT,
+            k_token_tree(&token, &tree).to_vec(),
+            vec![format!("{token_path}/holders")],
+        ),
+        (
+            META,
+            META_EMISSION_TREE_HASH.to_vec(),
+            vec!["/v1/supply".into()],
+        ),
+        (
+            TREE_BALANCE,
+            mainnet_genesis()[0].tree_hash.0.to_vec(),
+            vec!["/v1/supply".into()],
+        ),
+    ];
+    for (table, key, paths) in cases {
+        let (_dir, store) = integrity_store(false, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        assert_integrity_routes(&router_over(store, 2), &paths).await;
+    }
+}
+
+#[tokio::test]
+async fn integrity_invalid_register_json_fails_expansion_but_valid_null_is_preserved() {
+    use redb::ReadableTable;
+    use xp_store::{rows::BoxRow, tables::BOXES};
+    for json in ["{broken", "null"] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            let mut boxes = tx.open_table(BOXES).unwrap();
+            let id = history_id(102);
+            let mut row =
+                BoxRow::decode(boxes.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+            row.registers_json = json.into();
+            boxes
+                .insert(id.as_slice(), row.encode().as_slice())
+                .unwrap();
+        });
+        let app = router_over(store, 2);
+        let detail = format!("/v1/boxes/{}", hex::encode(history_id(102)));
+        if json == "null" {
+            let (status, value) = get(&app, &detail).await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(value["registers"].is_null());
+        } else {
+            assert_integrity_routes(
+                &app,
+                &[
+                    detail,
+                    "/v1/txs".into(),
+                    "/v1/blocks/1/txs".into(),
+                    format!("/v1/txs/{}", hex::encode(history_id(301))),
+                ],
+            )
+            .await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn integrity_partial_preseed_inputs_and_mints_are_explicitly_incomplete() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("preseed.redb")).unwrap();
+    let blocks = integrity_blocks();
+    // Start after the mint and the spent box were created: no corruption injection.
+    store.seed_for_tests(1, blocks[0].header.id.0).unwrap();
+    store.apply_batch(&blocks[1..], true).unwrap();
+    let app = router_over(store, 2);
+    let (status, headers, value) = get_from(
+        &app,
+        &format!("/v1/txs/{}", hex::encode(history_id(302))),
+        "127.0.0.1",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-explorer-completeness"], "incomplete");
+    assert!(value["inputs"][0]["box"].is_null());
+    assert!(value["outputs"][0]["tokens"][0]["name"].is_null());
+    assert_eq!(value["outputs"][0]["tokens"][0]["amount"], "60");
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let (status, headers, balance) =
+        get_from(&app, &format!("/v1/addresses/{address}"), "127.0.0.1", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-explorer-completeness"], "incomplete");
+    assert_eq!(balance["balance"]["nano"], "90");
+    assert_eq!(balance["balance"]["tokens"][0]["amount"], "60");
+    for path in [
+        "/v1/txs",
+        "/v1/richlist",
+        "/v1/rent/upcoming?blocks=2000000",
+    ] {
+        let (status, headers, _) = get_from(&app, path, "127.0.0.1", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers["x-explorer-completeness"], "incomplete");
+    }
+}
+
+#[tokio::test]
+async fn integrity_partial_in_range_dangling_indexes_still_fail() {
+    use xp_store::{keys::*, tables::*};
+    for (table, key, paths) in [
+        (
+            BOX_BY_GIDX,
+            k_u64(1).to_vec(),
+            vec![
+                "/v1/txs".into(),
+                "/v1/blocks/1/txs".into(),
+                format!("/v1/txs/{}", hex::encode(history_id(301))),
+            ],
+        ),
+        (
+            TOKENS,
+            mainnet_genesis()[0].id.0.to_vec(),
+            vec!["/v1/tokens".into(), "/v1/tokens?sort=holders".into()],
+        ),
+        (
+            HEADERS,
+            k_u32(1).to_vec(),
+            vec!["/v1/blocks".into(), "/v1/blocks/1".into()],
+        ),
+    ] {
+        let (_dir, store) = integrity_store(true, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        assert_integrity_routes(&router_over(store, 2), &paths).await;
+    }
+}
+
+#[tokio::test]
+async fn integrity_full_store_optional_eip4_fields_and_unknown_ids_stay_valid() {
+    let (_dir, store) = integrity_store(false, |_| {});
+    let app = router_over(store, 2);
+    let (status, headers, value) = get_from(
+        &app,
+        &format!("/v1/boxes/{}", hex::encode(history_id(102))),
+        "127.0.0.1",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["x-explorer-completeness"], "complete");
+    assert_eq!(value["tokens"][0]["name"], "");
+    assert!(value["tokens"][0]["decimals"].is_null());
+    // Empty paths still exercise every unrelated unknown-id assertion.
+    assert_integrity_routes(&app, &[]).await;
+}
+
+#[test]
+fn integrity_rollback_missing_spent_box_is_atomic_in_full_and_partial_stores() {
+    use xp_store::{tables::BOXES, StoreError};
+    for partial in [false, true] {
+        let (_dir, store) = integrity_store(partial, |tx| {
+            assert!(tx
+                .open_table(BOXES)
+                .unwrap()
+                .remove(history_id(101).as_slice())
+                .unwrap()
+                .is_some());
+        });
+        let before = store.fingerprint().unwrap();
+        assert!(matches!(
+            store.rollback_to(1),
+            Err(StoreError::Corrupt("undo: spent box missing"))
+        ));
+        assert_eq!(store.fingerprint().unwrap(), before);
+        assert_eq!(store.indexed_height().unwrap(), Some(2));
+    }
+}
+
+#[test]
+fn integrity_required_apply_and_rollback_references_abort_atomically() {
+    use xp_store::{keys::*, tables::*, StoreError};
+    let tree = xp_wire::tree_hash(&[0, 8, 0xd3]).0;
+    let token = mainnet_genesis()[0].id.0;
+    // Apply the second block only after independently damaging one of its required
+    // inputs. Full-store mint absence must not silently skip burns or counters.
+    for (table, key) in [
+        (META, META_NEXT_BOX_GIDX.to_vec()),
+        (META, META_NEXT_TX_GIDX.to_vec()),
+        (BOXES, history_id(101).to_vec()),
+        (ERGO_TREES, tree.to_vec()),
+        (TOKENS, token.to_vec()),
+        (HEADERS, k_u32(1).to_vec()),
+    ] {
+        let (_dir, store) = integrity_store_at(false, 1, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        let before = store.fingerprint().unwrap();
+        assert!(matches!(
+            store.apply_batch(&integrity_blocks()[1..], true),
+            Err(StoreError::Corrupt(_))
+        ));
+        assert_eq!(store.fingerprint().unwrap(), before);
+        assert_eq!(store.indexed_height().unwrap(), Some(1));
+    }
+    // These are missing indexed rows named by the existing rollback journal, not
+    // changes to UNDO encoding, retention or its verification model.
+    for (table, key) in [
+        (BOXES, history_id(103).to_vec()),
+        (ERGO_TREES, tree.to_vec()),
+        (TXS, history_id(302).to_vec()),
+        (HEADERS, k_u32(2).to_vec()),
+        (TREE_BALANCE, tree.to_vec()),
+        (TOKENS, token.to_vec()),
+    ] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            assert!(tx
+                .open_table(table)
+                .unwrap()
+                .remove(key.as_slice())
+                .unwrap()
+                .is_some());
+        });
+        let before = store.fingerprint().unwrap();
+        assert!(matches!(store.rollback_to(1), Err(StoreError::Corrupt(_))));
+        assert_eq!(store.fingerprint().unwrap(), before);
+        assert_eq!(store.indexed_height().unwrap(), Some(2));
+    }
+}
+
+#[tokio::test]
+async fn integrity_rent_eligible_does_not_skip_a_missing_box() {
+    use xp_store::tables::BOXES;
+    let (_dir, store) = integrity_store(false, |tx| {
+        // Keep canonical coverage contiguous while moving only this fixture's
+        // maturity entries below its tip. No production file is opened.
+        let mut rent = tx.open_table(xp_store::tables::RENT_MATURES).unwrap();
+        use redb::ReadableTable;
+        let entries: Vec<_> = rent
+            .iter()
+            .unwrap()
+            .map(|entry| {
+                let (key, value) = entry.unwrap();
+                (key.value().to_vec(), value.value().to_vec())
+            })
+            .collect();
+        for (key, value) in entries {
+            let gidx = xp_store::keys::gidx_of_composite(&key).unwrap();
+            rent.remove(key.as_slice()).unwrap();
+            rent.insert(xp_store::keys::k_rent(1, gidx).as_slice(), value.as_slice())
+                .unwrap();
+        }
+        tx.open_table(BOXES)
+            .unwrap()
+            .remove(history_id(102).as_slice())
+            .unwrap();
+    });
+    assert_integrity_routes(&router_over(store, 2), &["/v1/rent/eligible".into()]).await;
+}
+
+#[tokio::test]
+async fn summary_routes_match_all_fixture_fields_without_enrichment() {
+    use xp_store::{read::Dir, Reader};
+    let (_dir, app, state) = app_with_state(unlimited(), None);
+    let rd = Reader::new(&state.store).unwrap();
+    let rows = rd.txs_by_gidx(None, 500, Dir::Asc).unwrap().items;
+    let expected: Vec<Value> = rows
+        .iter()
+        .map(|(id, row)| {
+            serde_json::json!({
+                "id": hex::encode(id), "height": row.height, "index": row.index,
+                "timestamp": row.timestamp, "size": row.size, "fee": row.fee.to_string(),
+                "input_count": row.inputs.len(), "data_input_count": row.data_inputs.len(),
+                "output_count": row.output_count,
+            })
+        })
+        .collect();
+    assert!(!expected.is_empty());
+    assert_eq!(state.store.lookup_counts(), [0; 3]);
+    for dir in ["asc", "desc"] {
+        let mut routes = vec![("/v1/tx-summaries".to_string(), expected.clone())];
+        for height in 1866000..=1866002 {
+            let block: Vec<_> = expected
+                .iter()
+                .filter(|row| row["height"] == height)
+                .cloned()
+                .collect();
+            routes.push((format!("/v1/blocks/{height}/tx-summaries"), block.clone()));
+            let id = hex::encode(rd.header_at(height).unwrap().unwrap().id);
+            routes.push((format!("/v1/blocks/{id}/tx-summaries"), block));
+        }
+        for (route, mut wanted) in routes {
+            if dir == "desc" {
+                wanted.reverse();
+            }
+            let mut actual = Vec::new();
+            let mut cursor = None;
+            for _ in 0..=wanted.len() {
+                let path = format!(
+                    "{route}?limit=1&dir={dir}{}",
+                    cursor
+                        .as_ref()
+                        .map(|c| format!("&cursor={c}"))
+                        .unwrap_or_default()
+                );
+                let (status, value) = get(&app, &path).await;
+                assert_eq!(status, StatusCode::OK, "{path}: {value}");
+                actual.extend(value["items"].as_array().unwrap().iter().cloned());
+                let next = value["next_cursor"].as_str().map(str::to_owned);
+                if next.is_none() {
+                    break;
+                }
+                assert_ne!(next, cursor, "exclusive cursor must advance");
+                cursor = next;
+            }
+            assert_eq!(actual, wanted, "{route} {dir}");
+            assert_eq!(state.store.lookup_counts(), [0; 3], "{route} enriched rows");
+        }
+    }
+    for route in ["/v1/tx-summaries", "/v1/blocks/1866000/tx-summaries"] {
+        for query in ["limit=0", "limit=no", "cursor=no", "dir=no"] {
+            assert_eq!(
+                get(&app, &format!("{route}?{query}")).await.0,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        for query in ["cursor=18446744073709551615&dir=asc", "cursor=0&dir=desc"] {
+            assert_eq!(
+                get(&app, &format!("{route}?{query}")).await.1["items"],
+                serde_json::json!([])
+            );
+        }
+    }
+    assert_eq!(
+        get(&app, "/v1/blocks/999/tx-summaries").await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(state.store.lookup_counts(), [0; 3]);
+
+    // Compare the new implementation's complete legacy JSON with the original DTO path,
+    // and demonstrate that the same per-store counters detect actual enrichment.
+    let tip = rd.indexed_height().unwrap();
+    let emission = rd.emission_tree_hash().unwrap();
+    let mut full = rows
+        .iter()
+        .map(|(id, row)| xp_api::dto::tx_dto(&rd, id, row, tip, emission.as_ref()).unwrap())
+        .collect::<Vec<_>>();
+    xp_api::dto::enrich_txs(&rd, full.iter_mut()).unwrap();
+    let full = serde_json::to_value(full).unwrap();
+    assert_eq!(
+        get(&app, "/v1/txs?dir=asc&limit=500").await.1["items"],
+        full
+    );
+    for (summary, tx) in expected.iter().zip(full.as_array().unwrap()) {
+        for key in ["id", "height", "index", "timestamp", "size", "fee"] {
+            assert_eq!(summary[key], tx[key]);
+        }
+        for (count, field) in [
+            ("input_count", "inputs"),
+            ("data_input_count", "data_inputs"),
+            ("output_count", "outputs"),
+        ] {
+            assert_eq!(summary[count], tx[field].as_array().unwrap().len());
+        }
+        assert_eq!(
+            get(
+                &app,
+                &format!("/v1/txs/{}", summary["id"].as_str().unwrap())
+            )
+            .await
+            .1,
+            *tx
+        );
+    }
+    for height in 1866000..=1866002 {
+        let wanted: Vec<_> = full
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tx| tx["height"] == height)
+            .cloned()
+            .collect();
+        assert_eq!(
+            get(&app, &format!("/v1/blocks/{height}/txs")).await.1,
+            serde_json::json!(wanted)
+        );
+    }
+    let counts = state.store.lookup_counts();
+    assert!(
+        counts[0] > 0 && counts[1] > 0 && counts[2] > 0,
+        "positive control: {counts:?}"
+    );
+}
+
+#[tokio::test]
+async fn legacy_expansion_rejects_one_oversized_transaction_without_partial_arrays() {
+    use redb::ReadableTable;
+    use xp_store::{rows::TxRow, tables::TXS};
+    let (_dir, store) = integrity_store(false, |tx| {
+        let mut table = tx.open_table(TXS).unwrap();
+        let id = history_id(302);
+        let mut row = TxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+        row.inputs = vec![[0xff; 32]; 10_001];
+        table
+            .insert(id.as_slice(), row.encode().as_slice())
+            .unwrap();
+    });
+    let app = router_over(store, 2);
+    for path in [
+        format!("/v1/txs/{}", hex::encode(history_id(302))),
+        "/v1/txs?dir=asc".into(),
+        "/v1/blocks/2/txs".into(),
+    ] {
+        let (status, headers, body) = get_from(&app, &path, "127.0.0.1", None).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{path}: {body}");
+        assert_eq!(headers["content-type"], "application/problem+json");
+        assert_eq!(body["code"], "expansion_work_limit");
+        assert!(!body.is_array() && body.get("items").is_none());
+    }
+    assert_eq!(
+        get(&app, "/v1/blocks/2/tx-summaries").await.0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn summary_count_overflow_is_integrity_error_for_both_input_counts() {
+    use redb::ReadableTable;
+    use xp_store::{rows::TxRow, tables::TXS};
+    for data_inputs in [false, true] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            let mut table = tx.open_table(TXS).unwrap();
+            let id = history_id(302);
+            let mut row =
+                TxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+            let ids = vec![[0xff; 32]; usize::from(u16::MAX) + 1];
+            if data_inputs {
+                row.data_inputs = ids;
+            } else {
+                row.inputs = ids;
+            }
+            table
+                .insert(id.as_slice(), row.encode().as_slice())
+                .unwrap();
+        });
+        let rd = xp_store::Reader::new(&store).unwrap();
+        let tree = integrity_blocks()[1].txs[0].outputs[0].tree_hash.0;
+        let address = rd.tree_row(&tree).unwrap().unwrap().address;
+        drop(rd);
+        let app = router_over(store, 2);
+        let address_path = format!("/v1/addresses/{address}/txs");
+        for path in [
+            "/v1/tx-summaries",
+            "/v1/blocks/2/tx-summaries",
+            &address_path,
+        ] {
+            let (status, body) = get(&app, path).await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(body["code"], "integrity_error");
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_block_budget_is_cumulative_and_never_returns_a_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(&dir.path().join("cumulative.redb")).unwrap();
+    store.seed_genesis(&mainnet_genesis()).unwrap();
+    let mut txs: Vec<_> = integrity_blocks()
+        .into_iter()
+        .flat_map(|block| block.txs)
+        .collect();
+    for tx in &mut txs {
+        tx.data_inputs = vec![mainnet_genesis()[0].id; 5_000];
+    }
+    store
+        .apply_batch(&[history_block(1, 201, [0; 32], txs)], true)
+        .unwrap();
+    let app = router_over(store, 1);
+    for id in [301, 302] {
+        assert_eq!(
+            get(&app, &format!("/v1/txs/{}", hex::encode(history_id(id))))
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
+    for route in ["/v1/blocks/1/txs", "/v1/txs?dir=asc"] {
+        let (status, value) = get(&app, route).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{route}: {value}");
+        assert_eq!(value["code"], "expansion_work_limit");
+        assert!(!value.is_array() && value.get("items").is_none());
+    }
+    assert_eq!(
+        get(&app, "/v1/blocks/1/tx-summaries").await.1["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn legacy_admission_rejects_oversized_enrichment_rows_before_decode() {
+    use redb::ReadableTable;
+    use xp_store::{
+        rows::{BoxRow, TokenRow, TreeRow},
+        tables::*,
+    };
+    for kind in ["registers", "tree", "token"] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            let huge = "x".repeat(2 * 1024 * 1024);
+            match kind {
+                "registers" => {
+                    let mut table = tx.open_table(BOXES).unwrap();
+                    let id = history_id(103);
+                    let mut row =
+                        BoxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+                    row.registers_json = serde_json::json!({"R4": huge}).to_string();
+                    table
+                        .insert(id.as_slice(), row.encode().as_slice())
+                        .unwrap();
+                }
+                "tree" => {
+                    let mut table = tx.open_table(ERGO_TREES).unwrap();
+                    let id = xp_wire::tree_hash(&[0, 8, 0xd3]).0;
+                    let mut row =
+                        TreeRow::decode(table.get(id.as_slice()).unwrap().unwrap().value())
+                            .unwrap();
+                    row.tree_bytes = huge.into_bytes();
+                    table
+                        .insert(id.as_slice(), row.encode().as_slice())
+                        .unwrap();
+                }
+                "token" => {
+                    let mut table = tx.open_table(TOKENS).unwrap();
+                    let id = mainnet_genesis()[0].id.0;
+                    let mut row =
+                        TokenRow::decode(table.get(id.as_slice()).unwrap().unwrap().value())
+                            .unwrap();
+                    row.name = huge;
+                    table
+                        .insert(id.as_slice(), row.encode().as_slice())
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+        });
+        let app = router_over(store, 2);
+        for route in [
+            format!("/v1/txs/{}", hex::encode(history_id(302))),
+            "/v1/blocks/2/txs".into(),
+        ] {
+            let (status, value) = get(&app, &route).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{kind}: {value}");
+            assert_eq!(value["code"], "expansion_decode_limit");
+        }
+        assert_eq!(
+            get(&app, "/v1/blocks/2/tx-summaries").await.0,
+            StatusCode::OK
+        );
+    }
+}
+
+#[tokio::test]
+async fn summary_block_empty_missing_range_and_exact_count_boundary() {
+    use redb::ReadableTable;
+    use xp_store::{
+        keys::k_u32,
+        rows::{HeaderRow, TxRow},
+        tables::{HEADERS, TXS},
+    };
+    for case in ["empty", "missing", "max_count"] {
+        let (_dir, store) = integrity_store(false, |tx| {
+            if case == "max_count" {
+                let mut table = tx.open_table(TXS).unwrap();
+                let id = history_id(302);
+                let mut row =
+                    TxRow::decode(table.get(id.as_slice()).unwrap().unwrap().value()).unwrap();
+                row.inputs = vec![[0; 32]; usize::from(u16::MAX)];
+                row.data_inputs = vec![[0; 32]; usize::from(u16::MAX)];
+                table
+                    .insert(id.as_slice(), row.encode().as_slice())
+                    .unwrap();
+            } else {
+                let mut table = tx.open_table(HEADERS).unwrap();
+                let key = k_u32(2);
+                let mut row =
+                    HeaderRow::decode(table.get(key.as_slice()).unwrap().unwrap().value()).unwrap();
+                row.tx_count = if case == "empty" { 0 } else { 2 };
+                table
+                    .insert(key.as_slice(), row.encode().as_slice())
+                    .unwrap();
+            }
+        });
+        let app = router_over(store, 2);
+        let (status, value) = get(&app, "/v1/blocks/2/tx-summaries?dir=asc").await;
+        match case {
+            "empty" => {
+                assert_eq!(status, StatusCode::OK);
+                // M5 adds explicit best-effort metadata; retain exact whole-response
+                // equality, the empty items/cursor and the unchanged legacy array check.
+                assert_eq!(
+                    value,
+                    serde_json::json!({
+                        "items": [], "next_cursor": null,
+                        "consistency": "best_effort",
+                        "observed_anchor": { "height": 2, "block_id": hex::encode(history_id(202)) },
+                        "anchor": null, "next_snapshot": null
+                    })
+                );
+                assert_eq!(get(&app, "/v1/blocks/2/txs").await.1, serde_json::json!([]));
+            }
+            "missing" => {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(value["code"], "integrity_error");
+            }
+            "max_count" => {
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(value["items"][0]["input_count"], u16::MAX);
+                assert_eq!(value["items"][0]["data_input_count"], u16::MAX);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn register_capacity_exposes_exact_committed_count_with_read_admission() {
+    let (_dir, app, state) = app_with_state(unlimited(), None);
+    let (status, body) = get(&app, "/v1/register-capacity").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["entries"],
+        state.store.register_index_entries().unwrap().to_string()
+    );
+    assert_eq!(body["ceiling"], serde_json::Value::Null);
+    let _permits = state
+        .read_permits
+        .clone()
+        .acquire_many_owned(32)
+        .await
+        .unwrap();
+    assert_eq!(
+        get(&app, "/v1/register-capacity").await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn register_capacity_exposes_configured_ceiling_as_exact_decimal() {
+    let (_dir, _app, mut state) = app_with_state(unlimited(), None);
+    let dir = tempfile::tempdir().unwrap();
+    state.store = Arc::new(
+        Store::open_with_register_index_ceiling(&dir.path().join("x.redb"), Some(u64::MAX))
+            .unwrap(),
+    );
+    let app = xp_api::router(state, &unlimited());
+    let (status, body) = get(&app, "/v1/register-capacity").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["entries"], "0");
+    assert_eq!(body["ceiling"], u64::MAX.to_string());
+}
+
+// M5: every ordinary route/order uses the real router and disposable stores.
+const M5_BASE: u32 = 1_100_000;
+
+struct M5Fixture {
+    dir: tempfile::TempDir,
+    store: Arc<Store>,
+    app: Router,
+    blocks: Vec<xp_wire::DecodedBlock>,
+    trees: Vec<Vec<u8>>,
+    paths: Vec<(String, bool)>, // immutable membership
+}
+
+fn m5_router(store: Arc<Store>) -> Router {
+    let (_, status) = watch::channel(IngestStatus {
+        source_observed_at_ms: None,
+        source_error: None,
+        indexed: store.indexed_height().unwrap(),
+        best: M5_BASE + 6,
+        mode: Mode::Tip,
+        source: "test".into(),
+        halted: None,
+        stalled: None,
+    });
+    let cfg = unlimited();
+    xp_api::router(
+        xp_api::AppState {
+            store,
+            status,
+            counters: Arc::new(Counters::default()),
+            read_permits: Arc::new(Semaphore::new(32)),
+        },
+        &cfg,
+    )
+}
+
+fn m5_fixture() -> M5Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open(&dir.path().join("m5.redb")).unwrap());
+    store.seed_for_tests(M5_BASE, history_id(9000)).unwrap();
+    let mut trees = vec![vec![0, 8, 0xd3]];
+    for tx in fixture(1866000).txs {
+        for out in tx.outputs {
+            if !trees.contains(&out.tree_bytes) && xp_wire::tree_info(&out.tree_bytes).is_ok() {
+                trees.push(out.tree_bytes);
+            }
+            if trees.len() == 6 {
+                break;
+            }
+        }
+        if trees.len() == 6 {
+            break;
+        }
+    }
+    assert_eq!(trees.len(), 6);
+    let mut txs = Vec::new();
+    for token in 0..6 {
+        let outputs = trees
+            .iter()
+            .enumerate()
+            .map(|(i, tree)| {
+                let mut out = history_output(
+                    10000 + token * 10 + i as u32,
+                    if token == 0 {
+                        (6 - i) as u64 * 1_000_000
+                    } else {
+                        100
+                    },
+                    vec![(history_id(20000 + token), (6 - i) as u64 * 100)],
+                );
+                out.tree_bytes = tree.clone();
+                out.tree_hash = xp_wire::tree_hash(tree);
+                out.registers_json = r#"{"R4":"0402"}"#.into();
+                out
+            })
+            .collect();
+        txs.push(history_tx(
+            30000 + token,
+            vec![xp_types::BoxId(history_id(20000 + token))],
+            outputs,
+        ));
+    }
+    // Insert nonmatching transactions between address-summary members. The final
+    // sparse suffix is nonempty globally but contains no further tree[0] members.
+    let mut sparse_txs = Vec::new();
+    for (i, tx) in txs.into_iter().enumerate() {
+        sparse_txs.push(tx);
+        let mut out = history_output(50000 + i as u32, 10, vec![]);
+        out.tree_bytes = trees[1].clone();
+        out.tree_hash = xp_wire::tree_hash(&out.tree_bytes);
+        out.registers_json = "{}".into();
+        sparse_txs.push(history_tx(51000 + i as u32, vec![], vec![out]));
+    }
+    let txs = sparse_txs;
+    let mut blocks = vec![history_block(M5_BASE + 1, 9001, history_id(9000), txs)];
+    for h in 2..=6 {
+        blocks.push(history_block(
+            M5_BASE + h,
+            9000 + h,
+            history_id(8999 + h),
+            vec![],
+        ));
+    }
+    store.apply_batch(&blocks, true).unwrap();
+    let info = xp_wire::tree_info(&trees[0]).unwrap();
+    let token = hex::encode(history_id(20000));
+    let mut paths = vec![
+        ("/v1/blocks?".into(), true),
+        ("/v1/tokens?sort=newest&".into(), false),
+        ("/v1/tokens?sort=holders&".into(), false),
+        (format!("/v1/tokens/{token}/holders?"), false),
+        ("/v1/richlist?".into(), false),
+        ("/v1/rent/eligible?".into(), false),
+    ];
+    for dir in ["asc", "desc"] {
+        for (path, immutable) in [
+            ("/v1/tx-summaries".into(), true),
+            (format!("/v1/blocks/{}/tx-summaries", M5_BASE + 1), true),
+            (format!("/v1/addresses/{}/txs", info.address), true),
+            ("/v1/txs".into(), false),
+            ("/v1/registers/R4/0402/boxes".into(), false),
+        ] {
+            paths.push((format!("{path}?dir={dir}&"), immutable));
+        }
+        for path in [
+            format!("/v1/addresses/{}/boxes", info.address),
+            format!("/v1/tokens/{token}/boxes"),
+            format!("/v1/templates/{}/boxes", hex::encode(info.template_hash)),
+        ] {
+            for unspent in [false, true] {
+                paths.push((format!("{path}?dir={dir}&unspent={unspent}&"), false));
+            }
+        }
+    }
+    let app = m5_router(store.clone());
+    M5Fixture {
+        dir,
+        store,
+        app,
+        blocks,
+        trees,
+        paths,
+    }
+}
+
+fn m5_next(path: &str, page: &Value, limit: usize) -> Option<String> {
+    page["next_cursor"].as_str().map(|cursor| {
+        let token = page["next_snapshot"]
+            .as_str()
+            .expect("strict page must pair its cursor with a snapshot");
+        format!("{path}consistency=strict&limit={limit}&cursor={cursor}&snapshot={token}")
+    })
+}
+
+async fn m5_walk(
+    app: &Router,
+    path: &str,
+    limit: usize,
+    first: Option<Value>,
+) -> (Vec<Value>, usize) {
+    let mut uri = format!("{path}consistency=strict&limit={limit}");
+    let mut first = first;
+    let mut items = vec![];
+    let mut pages = 0;
+    loop {
+        let page = match first.take() {
+            Some(page) => page,
+            None => {
+                let (status, page) = get(app, &uri).await;
+                assert_eq!(status, StatusCode::OK, "{uri}: {page}");
+                page
+            }
+        };
+        pages += 1;
+        assert!(pages < 100, "nonterminating walk: {path}");
+        assert_eq!(page["consistency"], "strict", "{path}");
+        let rows = page["items"].as_array().unwrap();
+        assert!(rows.len() <= limit);
+        items.extend(rows.clone());
+        match m5_next(path, &page, limit) {
+            Some(next) => {
+                assert_eq!(rows.len(), limit, "exact limit: {path}");
+                uri = next;
+            }
+            None => {
+                assert!(page["next_snapshot"].is_null());
+                break;
+            }
+        }
+    }
+    let unique: HashSet<_> = items.iter().map(Value::to_string).collect();
+    assert_eq!(unique.len(), items.len(), "duplicate items: {path}");
+    (items, pages)
+}
+
+#[tokio::test]
+async fn m5_every_family_three_pages_both_directions_exact_limit_last_and_restart() {
+    let mut f = m5_fixture();
+    let mut saved = vec![];
+    for (path, _) in &f.paths {
+        let (expected, _) = m5_walk(&f.app, path, 500, None).await;
+        let (actual, pages) = m5_walk(&f.app, path, 2, None).await;
+        assert!(pages >= 3, "too few pages: {path}");
+        assert_eq!(actual, expected, "page identity: {path}");
+        let (status, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        assert_eq!(status, StatusCode::OK);
+        saved.push((path.clone(), first, expected));
+    }
+    // Close every Store/Router owner and reopen the database. No retained Reader.
+    drop(f.app);
+    drop(f.store);
+    f.store = Arc::new(Store::open(&f.dir.path().join("m5.redb")).unwrap());
+    f.app = m5_router(f.store.clone());
+    for (path, first, expected) in saved {
+        let (actual, pages) = m5_walk(&f.app, &path, 2, Some(first)).await;
+        assert!(pages >= 3);
+        assert_eq!(actual, expected, "restart: {path}");
+    }
+}
+
+fn m5_reorder(f: &M5Fixture, id: u32) -> xp_wire::DecodedBlock {
+    let inputs = f.blocks[0].txs[0].outputs.iter().map(|o| o.id).collect();
+    let outputs = f
+        .trees
+        .iter()
+        .enumerate()
+        .map(|(i, tree)| {
+            let mut out = history_output(
+                40000 + i as u32,
+                (i + 1) as u64 * 1_000_000,
+                vec![(history_id(20000), (i + 1) as u64 * 100)],
+            );
+            out.tree_bytes = tree.clone();
+            out.tree_hash = xp_wire::tree_hash(tree);
+            out.registers_json = r#"{"R4":"0402"}"#.into();
+            out
+        })
+        .collect();
+    history_block(
+        M5_BASE + 7,
+        id,
+        history_id(9006),
+        vec![history_tx(id + 100, inputs, outputs)],
+    )
+}
+
+async fn m5_conflict(app: &Router, uri: &str) {
+    let (status, body) = get(app, uri).await;
+    assert_eq!(status, StatusCode::CONFLICT, "STRICT SNAPSHOT REGRESSION: returning a page can silently mix rankings or fork membership: {uri}: {body}");
+    assert_eq!(body["code"], "snapshot_changed");
+    assert!(
+        body.get("items").is_none(),
+        "409 must not carry a plausible page"
+    );
+}
+
+#[tokio::test]
+async fn m5_apply_reorders_holders_and_richlist_current_pages_must_409_immutable_stays_identical() {
+    let f = m5_fixture();
+    let mut saved = vec![];
+    for (path, immutable) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        let (expected, _) = m5_walk(&f.app, path, 2, Some(first.clone())).await;
+        saved.push((path, immutable, first, expected));
+    }
+    f.store.apply_batch(&[m5_reorder(&f, 9007)], true).unwrap();
+    for (path, immutable, first, expected) in saved {
+        if *immutable {
+            let uri = m5_next(path, &first, 2).unwrap();
+            let (_, next) = get(&f.app, &uri).await;
+            assert_eq!(next["anchor"], first["anchor"]);
+            assert_ne!(next["observed_anchor"], first["observed_anchor"]);
+            let (actual, _) = m5_walk(&f.app, path, 2, Some(first)).await;
+            assert_eq!(
+                actual, expected,
+                "append introduced new items or duplicates: {path}"
+            );
+        } else {
+            m5_conflict(&f.app, &m5_next(path, &first, 2).unwrap()).await;
+            let (status, restarted) =
+                get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+            assert_eq!(status, StatusCode::OK, "restart: {path}: {restarted}");
+            if path.contains("/holders?") || path.contains("/richlist?") {
+                assert_ne!(
+                    restarted["items"][0]["tree_hash"], first["items"][0]["tree_hash"],
+                    "fixture must ACTUALLY reorder ranking keys: {path}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn m5_replaced_anchor_and_forked_gidx_reuse_explicitly_invalidate_every_family() {
+    let f = m5_fixture();
+    let mut saved = vec![];
+    for (path, _) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        saved.push(m5_next(path, &first, 2).unwrap());
+    }
+    // Replace the anchor at the identical height. All routes must reject its id.
+    f.store.rollback_to(M5_BASE + 5).unwrap();
+    for uri in &saved {
+        m5_conflict(&f.app, uri).await;
+    }
+    f.store
+        .apply_batch(
+            &[history_block(M5_BASE + 6, 9906, history_id(9005), vec![])],
+            true,
+        )
+        .unwrap();
+    for uri in &saved {
+        m5_conflict(&f.app, uri).await;
+    }
+    // Allocate transaction/box gidx, save pages, roll back and reuse the exact gidx.
+    let mut append = m5_reorder(&f, 9907);
+    append.header.parent_id = xp_types::HeaderId(history_id(9906));
+    f.store.apply_batch(&[append.clone()], true).unwrap();
+    let mut fork_pages = vec![];
+    for (path, _) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        fork_pages.push(m5_next(path, &first, 2).unwrap());
+    }
+    let old_gidx = xp_store::Reader::new(&f.store)
+        .unwrap()
+        .tx_by_id(&append.txs[0].id.0)
+        .unwrap()
+        .unwrap()
+        .gidx;
+    f.store.rollback_to(M5_BASE + 6).unwrap();
+    let mut fork = append.clone();
+    fork.header.id = xp_types::HeaderId(history_id(9997));
+    fork.txs[0].id = xp_types::TxId(history_id(9998));
+    for out in &mut fork.txs[0].outputs {
+        out.tx_id = xp_types::TxId(history_id(9998));
+        out.id.0[31] ^= 1;
+    }
+    f.store.apply_batch(&[fork.clone()], true).unwrap();
+    let rd = xp_store::Reader::new(&f.store).unwrap();
+    assert_eq!(
+        rd.tx_by_id(&fork.txs[0].id.0).unwrap().unwrap().gidx,
+        old_gidx
+    );
+    assert!(rd.tx_by_id(&append.txs[0].id.0).unwrap().is_none());
+    for uri in &fork_pages {
+        m5_conflict(&f.app, uri).await;
+    }
+}
+
+#[tokio::test]
+async fn m5_http_binding_rejection_legacy_metadata_and_sparse_terminal_page() {
+    let f = m5_fixture();
+    for (path, _) in &f.paths {
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        let (_, second) = get(&f.app, &m5_next(path, &first, 2).unwrap()).await;
+        for (token_page, cursor_page) in [(&first, &second), (&second, &first)] {
+            let uri = format!(
+                "{path}consistency=strict&limit=2&snapshot={}&cursor={}",
+                token_page["next_snapshot"].as_str().unwrap(),
+                cursor_page["next_cursor"].as_str().unwrap()
+            );
+            assert_eq!(
+                get(&f.app, &uri).await.0,
+                StatusCode::BAD_REQUEST,
+                "cursor/token cross-pair: {path}"
+            );
+        }
+        let cursor = first["next_cursor"].as_str().unwrap();
+        for extra in [
+            "consistency=strict&".to_string(),
+            "consistency=unknown&".into(),
+            format!("snapshot={}&", first["next_snapshot"].as_str().unwrap()),
+        ] {
+            assert_eq!(
+                get(&f.app, &format!("{path}{extra}cursor={cursor}"))
+                    .await
+                    .0,
+                StatusCode::BAD_REQUEST,
+                "{path}: {extra}"
+            );
+        }
+        assert_eq!(
+            get(
+                &f.app,
+                &format!(
+                    "{path}consistency=strict&snapshot={}",
+                    first["next_snapshot"].as_str().unwrap()
+                )
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        let (status, legacy) = get(&f.app, &format!("{path}cursor={cursor}&limit=2")).await;
+        assert_eq!(status, StatusCode::OK, "legacy: {path}: {legacy}");
+        assert_eq!(legacy["items"], second["items"]);
+        assert_eq!(legacy["consistency"], "best_effort");
+        assert_eq!(legacy["observed_anchor"], first["observed_anchor"]);
+        assert!(legacy["anchor"].is_null());
+        assert!(legacy["next_snapshot"].is_null());
+        if path.contains("dir=asc") || path.contains("dir=desc") {
+            let changed = if path.contains("dir=asc") {
+                path.replace("dir=asc", "dir=desc")
+            } else {
+                path.replace("dir=desc", "dir=asc")
+            };
+            assert_eq!(
+                get(&f.app, &m5_next(&changed, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "direction: {path}"
+            );
+        }
+        if path.contains("unspent=") {
+            let changed = if path.contains("unspent=true") {
+                path.replace("unspent=true", "unspent=false")
+            } else {
+                path.replace("unspent=false", "unspent=true")
+            };
+            assert_eq!(
+                get(&f.app, &m5_next(&changed, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "unspent: {path}"
+            );
+        }
+    }
+    let token0 = hex::encode(history_id(20000));
+    let token1 = hex::encode(history_id(20001));
+    let a0 = xp_wire::tree_info(&f.trees[0]).unwrap();
+    let a1 = xp_wire::tree_info(&f.trees[1]).unwrap();
+    for (a, b) in [
+        (
+            format!("/v1/tokens/{token0}/holders?"),
+            format!("/v1/tokens/{token1}/holders?"),
+        ),
+        (
+            format!("/v1/tokens/{token0}/boxes?"),
+            format!("/v1/tokens/{token1}/boxes?"),
+        ),
+        (
+            format!("/v1/addresses/{}/boxes?", a0.address),
+            format!("/v1/addresses/{}/boxes?", a1.address),
+        ),
+        (
+            format!("/v1/addresses/{}/txs?", a0.address),
+            format!("/v1/addresses/{}/txs?", a1.address),
+        ),
+        (
+            format!("/v1/templates/{}/boxes?", hex::encode(a0.template_hash)),
+            format!("/v1/templates/{}/boxes?", hex::encode(a1.template_hash)),
+        ),
+        ("/v1/tx-summaries?".into(), "/v1/txs?".into()),
+    ] {
+        for (source, target) in [(&a, &b), (&b, &a)] {
+            let (_, first) = get(&f.app, &format!("{source}consistency=strict&limit=2")).await;
+            assert_eq!(
+                get(&f.app, &m5_next(target, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "entity/route binding: {source} -> {target}"
+            );
+        }
+    }
+    for (source, targets) in [
+        (
+            "/v1/registers/R4/0402/boxes?".to_string(),
+            vec![
+                "/v1/registers/R5/0402/boxes?".into(),
+                "/v1/registers/R4/0404/boxes?".into(),
+            ],
+        ),
+        (
+            format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 1),
+            vec![format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 2)],
+        ),
+        (
+            "/v1/tokens?sort=newest&".into(),
+            vec!["/v1/tokens?sort=holders&".into()],
+        ),
+        (
+            "/v1/tokens?sort=holders&".into(),
+            vec!["/v1/tokens?sort=newest&".into()],
+        ),
+    ] {
+        let (_, first) = get(&f.app, &format!("{source}consistency=strict&limit=2")).await;
+        for target in targets {
+            assert_eq!(
+                get(&f.app, &m5_next(&target, &first, 2).unwrap()).await.0,
+                StatusCode::BAD_REQUEST,
+                "filter: {source} -> {target}"
+            );
+        }
+    }
+    for (source, missing) in [
+        (
+            format!("/v1/addresses/{}/txs?", a0.address),
+            "/v1/addresses/unknown/txs?".to_string(),
+        ),
+        (
+            format!("/v1/addresses/{}/boxes?", a0.address),
+            "/v1/addresses/unknown/boxes?".to_string(),
+        ),
+        (
+            format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 1),
+            "/v1/blocks/4294967295/tx-summaries?".to_string(),
+        ),
+    ] {
+        let (_, first) = get(&f.app, &format!("{source}consistency=strict&limit=2")).await;
+        assert_eq!(
+            get(&f.app, &m5_next(&missing, &first, 2).unwrap()).await.0,
+            StatusCode::BAD_REQUEST,
+            "changed selector: {missing}"
+        );
+        assert_eq!(
+            get(&f.app, &format!("{missing}consistency=strict")).await.0,
+            StatusCode::NOT_FOUND,
+            "unknown initial selector keeps its 404: {missing}"
+        );
+    }
+    // Block height and canonical id normalize to the same binding.
+    let path = format!("/v1/blocks/{}/tx-summaries?", M5_BASE + 1);
+    let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+    let id_path = format!("/v1/blocks/{}/tx-summaries?", hex::encode(history_id(9001)));
+    assert_eq!(
+        get(&f.app, &m5_next(&id_path, &first, 2).unwrap()).await.0,
+        StatusCode::OK
+    );
+    // Six sparse address members end at gidx 10, below allocation end 12.
+    let path = format!("/v1/addresses/{}/txs?dir=asc&", a0.address);
+    let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=6")).await;
+    assert_eq!(first["items"].as_array().unwrap().len(), 6);
+    let next = m5_next(&path, &first, 6).unwrap();
+    f.store.apply_batch(&[m5_reorder(&f, 9007)], true).unwrap();
+    let (status, empty) = get(&f.app, &next).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty["items"], serde_json::json!([]));
+    assert!(empty["next_cursor"].is_null());
+    assert!(empty["next_snapshot"].is_null());
+    assert_eq!(empty["anchor"], first["anchor"]);
+}
+
+#[tokio::test]
+async fn m5_reorg_removing_selected_entities_and_rebinding_block_height_is_409() {
+    let f = m5_fixture();
+    f.store.rollback_to(M5_BASE + 1).unwrap();
+    let mut continuations = vec![];
+    for (path, _) in &f.paths {
+        if path.starts_with("/v1/blocks?") {
+            continue;
+        } // only two headers at this tip
+        let (_, first) = get(&f.app, &format!("{path}consistency=strict&limit=2")).await;
+        continuations.push(m5_next(path, &first, 2).unwrap());
+    }
+    let id_path = format!("/v1/blocks/{}/tx-summaries?", hex::encode(history_id(9001)));
+    let (_, first) = get(&f.app, &format!("{id_path}consistency=strict&limit=2")).await;
+    continuations.push(m5_next(&id_path, &first, 2).unwrap());
+    f.store.rollback_to(M5_BASE).unwrap();
+    for uri in &continuations {
+        m5_conflict(&f.app, uri).await;
+    }
+    let mut replacement = f.blocks[0].clone();
+    replacement.header.id = xp_types::HeaderId(history_id(9991));
+    f.store.apply_batch(&[replacement], true).unwrap();
+    for uri in &continuations {
+        m5_conflict(&f.app, uri).await;
+    }
+}
+
+#[tokio::test]
+async fn m5_empty_genesis_and_headerless_partial_snapshots_do_not_invent_anchors() {
+    for kind in ["empty", "genesis", "partial", "corrupt_partial"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("unavailable.redb");
+        {
+            let store = Store::open(&path).unwrap();
+            if kind == "genesis" {
+                store.seed_genesis(&mainnet_genesis()).unwrap();
+            }
+        }
+        if kind == "partial" || kind == "corrupt_partial" {
+            use xp_store::{
+                keys::k_u32,
+                tables::{META, META_INDEXED_HEIGHT, META_NEXT_TX_GIDX, META_PARTIAL_FROM},
+            };
+            let db = redb::Database::create(&path).unwrap();
+            let tx = db.begin_write().unwrap();
+            {
+                let mut meta = tx.open_table(META).unwrap();
+                meta.insert(META_INDEXED_HEIGHT, k_u32(20).as_slice())
+                    .unwrap();
+                meta.insert(
+                    META_PARTIAL_FROM,
+                    k_u32(if kind == "partial" { 21 } else { 20 }).as_slice(),
+                )
+                .unwrap();
+                meta.insert(META_NEXT_TX_GIDX, xp_store::keys::k_u64(0).as_slice())
+                    .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let app = m5_router(Arc::new(Store::open(&path).unwrap()));
+        for path in [
+            "/v1/blocks",
+            "/v1/tx-summaries",
+            "/v1/txs",
+            "/v1/tokens",
+            "/v1/richlist",
+            "/v1/registers/R4/0402/boxes",
+            "/v1/rent/eligible",
+        ] {
+            let (status, page) = get(&app, &format!("{path}?consistency=strict&limit=1")).await;
+            // A missing in-range header remains corruption (M2), never an empty
+            // snapshot. Only metadata below partial_from permits a headerless seed.
+            if kind == "corrupt_partial" {
+                assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+                assert_eq!(page["code"], "integrity_error");
+                assert!(page.get("anchor").is_none());
+                continue;
+            }
+            assert_eq!(status, StatusCode::OK, "{kind}: {path}: {page}");
+            assert_eq!(page["consistency"], "strict");
+            for key in ["anchor", "observed_anchor", "next_snapshot"] {
+                assert!(page[key].is_null(), "{kind}: {path}: {page}");
+            }
+        }
+    }
+}
+
+// A pre-M5 consumer knows only these fields; serde must ignore all strict additions.
+#[tokio::test]
+async fn m5_pre_m5_client_parses_legacy_pages_and_strict_amounts_and_ids() {
+    #[derive(serde::Deserialize)]
+    struct LegacyPage {
+        items: Vec<LegacyRichItem>,
+        next_cursor: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct LegacyRichItem {
+        address: Option<String>,
+        tree_hash: String,
+        nano: String,
+    }
+    let f = m5_fixture();
+    for strict in [false, true] {
+        let query = if strict { "&consistency=strict" } else { "" };
+        let (status, body) = get(&f.app, &format!("/v1/richlist?limit=2{query}")).await;
+        assert_eq!(status, StatusCode::OK);
+        let page: LegacyPage = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(page.items.len(), 2);
+        for item in &page.items {
+            assert!(item.address.is_some());
+            assert_eq!(item.tree_hash.len(), 64);
+            assert!(item
+                .tree_hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+            assert!(item.nano.bytes().all(|b| b.is_ascii_digit()));
+            assert!(item.nano.parse::<u64>().unwrap() > 0);
+        }
+        let cursor = page.next_cursor.unwrap();
+        let suffix = if strict {
+            format!(
+                "&consistency=strict&snapshot={}",
+                body["next_snapshot"].as_str().unwrap()
+            )
+        } else {
+            String::new()
+        };
+        // This is the unchanged pre-M5 request shape in the legacy iteration.
+        let (status, next) = get(
+            &f.app,
+            &format!("/v1/richlist?limit=2&cursor={cursor}{suffix}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let next: LegacyPage = serde_json::from_value(next).unwrap();
+        assert_eq!(next.items.len(), 2);
+        assert_ne!(page.items[0].tree_hash, next.items[0].tree_hash);
+    }
+}
+
+#[tokio::test]
+async fn m5_strict_expanded_wire_preserves_decimal_amounts_and_hex_ids() {
+    let f = m5_fixture();
+    let (status, body) = get(&f.app, "/v1/txs?dir=asc&limit=1&consistency=strict").await;
+    assert_eq!(status, StatusCode::OK);
+    let tx = &body["items"][0];
+    let hex_id = |value: &serde_json::Value| {
+        let value = value.as_str().expect("id must remain a JSON string");
+        assert_eq!(value.len(), 64);
+        assert!(value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+    };
+    let decimal = |value: &serde_json::Value| {
+        let value = value.as_str().expect("amount must remain a JSON string");
+        assert!(!value.is_empty());
+        assert!(value.bytes().all(|b| b.is_ascii_digit()));
+        value.parse::<u64>().unwrap();
+    };
+    hex_id(&tx["id"]);
+    decimal(&tx["fee"]);
+    let output = &tx["outputs"][0];
+    hex_id(&output["id"]);
+    hex_id(&output["tx_id"]);
+    decimal(&output["value"]);
+    hex_id(&output["tokens"][0]["id"]);
+    decimal(&output["tokens"][0]["amount"]);
+}

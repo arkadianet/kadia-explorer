@@ -22,8 +22,9 @@ const DAY_MS = 86_400_000;
 async function blockWindow(fetch: typeof globalThis.fetch): Promise<BlockDto[]> {
 	const items: BlockDto[] = [];
 	let cursor: string | undefined;
+	let snapshot: string | undefined;
 	for (let round = 0; round < 6; round++) {
-		const page = await api.blocks(cursor, PAGE, undefined, fetch);
+		const page = await api.blocks(cursor, PAGE, undefined, fetch, snapshot);
 		items.push(...page.items);
 		const newest = items[0]?.timestamp ?? 0;
 		const oldest = items[items.length - 1]?.timestamp ?? 0;
@@ -31,6 +32,7 @@ async function blockWindow(fetch: typeof globalThis.fetch): Promise<BlockDto[]> 
 			break;
 		}
 		cursor = page.next_cursor;
+		snapshot = page.next_snapshot ?? undefined;
 	}
 	return items;
 }
@@ -65,6 +67,7 @@ export const load: PageLoad = async ({ fetch }) => {
 	// take down the page — every section gets its own success/error result to render from.
 	const [blocks, txs, rent, tokens, richlist, status] = await Promise.all([
 		safe<BlockDto[]>(blockWindow(fetch)),
+		// Expanded by design: bounded at 12, and the card needs output values absent from summaries.
 		safe<PageDto<TxDto>>(api.txs(undefined, 12, undefined, fetch)),
 		safe(api.rentUpcoming(720, 500, fetch)),
 		safe<TokenInfoDto[]>(topTokens(fetch)),

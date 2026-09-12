@@ -107,7 +107,7 @@ fn too_large() -> ApiError {
     )
 }
 fn integrity(detail: &str) -> ApiError {
-    ApiError::Internal(detail.into())
+    ApiError::Integrity(detail.into())
 }
 fn checked_add(a: u128, b: u128) -> Result<u128, ApiError> {
     a.checked_add(b)

@@ -4,15 +4,18 @@
 //! [`Reader`] (a point-in-time snapshot) inside `spawn_blocking`, since redb reads are
 //! synchronous and may touch disk.
 
+mod budget;
 pub mod dto;
 pub mod error;
 pub mod handlers;
 pub mod limit;
+mod metrics;
+pub mod paging;
 
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::Router;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -28,6 +31,7 @@ pub use limit::Allowlist;
 /// Runtime knobs for the public API (spec §3–§5). `bin/explorer` builds it from TOML.
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
+    pub metrics_allowlist: Allowlist,
     pub per_second: u32,
     pub burst: u32,
     pub allowlist: Allowlist,
@@ -38,6 +42,7 @@ pub struct ApiConfig {
 impl Default for ApiConfig {
     fn default() -> ApiConfig {
         ApiConfig {
+            metrics_allowlist: Allowlist::default(),
             per_second: 10,
             burst: 30,
             allowlist: Allowlist::default(),
@@ -50,6 +55,7 @@ impl Default for ApiConfig {
 /// Process-lifetime counters surfaced on `/v1/status`.
 #[derive(Debug)]
 pub struct Counters {
+    pub(crate) metrics: metrics::Metrics,
     pub rate_limited_total: AtomicU64,
     pub inflight_reads: AtomicU32,
     history_permits: Arc<Semaphore>,
@@ -58,6 +64,7 @@ pub struct Counters {
 impl Default for Counters {
     fn default() -> Self {
         Self {
+            metrics: metrics::Metrics::default(),
             rate_limited_total: AtomicU64::new(0),
             inflight_reads: AtomicU32::new(0),
             history_permits: Arc::new(Semaphore::new(2)),
@@ -98,10 +105,11 @@ pub struct AppState {
 /// around to see it or not. That matters because `TimeoutLayer` drops the handler future on
 /// timeout without waiting for the spawned task — a decrement placed after `.await` in
 /// `blocking()` would then never run, leaking the counter upward by one per timeout.
-struct InflightGuard(Arc<Counters>);
+struct InflightGuard(Arc<Counters>, std::time::Instant);
 
 impl Drop for InflightGuard {
     fn drop(&mut self) {
+        self.0.metrics.worker.observe(self.1.elapsed());
         self.0.inflight_reads.fetch_sub(1, Ordering::Relaxed);
     }
 }
@@ -126,28 +134,77 @@ where
         .map_err(|_| ApiError::Overloaded)?;
     let counters = state.counters.clone();
     counters.inflight_reads.fetch_add(1, Ordering::Relaxed);
-    let guard = InflightGuard(counters);
+    let guard = InflightGuard(counters, std::time::Instant::now());
     let store = state.store.clone();
+    let coverage = RESPONSE_FULL_HISTORY.try_with(Arc::clone).ok();
     let result = tokio::task::spawn_blocking(move || {
         // Held for the duration of the read; both drop together when it finishes.
         let _permit = permit;
         let _guard = guard;
         let rd = Reader::new(&store)?;
+        if let Some(coverage) = coverage {
+            coverage.store(if rd.full_history()? { 2 } else { 1 }, Ordering::Relaxed);
+        }
         f(&rd)
     })
     .await;
     result.map_err(|e| ApiError::Internal(format!("blocking task failed: {e}")))?
 }
 
+// Carried into the blocking closure explicitly: Tokio task locals do not propagate
+// to spawn_blocking. Coverage is read from the same snapshot as the response body.
+tokio::task_local! {
+    static RESPONSE_FULL_HISTORY: Arc<AtomicU8>;
+}
+
+async fn completeness(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let full = Arc::new(AtomicU8::new(0));
+    let mut response = RESPONSE_FULL_HISTORY
+        .scope(full.clone(), next.run(request))
+        .await;
+    // Zero means this handler did not use a Reader (e.g. /status).
+    let coverage = full.load(Ordering::Relaxed);
+    if response.status().is_success() && coverage != 0 {
+        response.headers_mut().insert(
+            "x-explorer-completeness",
+            axum::http::HeaderValue::from_static(if coverage == 2 {
+                "complete"
+            } else {
+                "incomplete"
+            }),
+        );
+    }
+    response
+}
+
 pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
     let rate_limit = limit::RateLimit::new(cfg, state.counters.clone());
+    let operator_allowlist = cfg.metrics_allowlist.clone();
     Router::new()
+        .route(
+            "/v1/metrics",
+            get(
+                move |axum::extract::State(state): axum::extract::State<AppState>,
+                      request: axum::extract::Request| async move {
+                    metrics::endpoint(state, request, operator_allowlist).await
+                },
+            ),
+        )
+        .route("/v1/register-capacity", get(handlers::registers::capacity))
         .route("/v1/status", get(handlers::status::status))
         .route("/v1/blocks", get(handlers::blocks::list))
         .route("/v1/blocks/{height_or_id}", get(handlers::blocks::get_one))
         .route(
             "/v1/blocks/{height_or_id}/txs",
             get(handlers::blocks::block_txs),
+        )
+        .route("/v1/tx-summaries", get(handlers::txs::summaries))
+        .route(
+            "/v1/blocks/{height_or_id}/tx-summaries",
+            get(handlers::blocks::summaries),
         )
         .route("/v1/txs", get(handlers::txs::list))
         .route("/v1/txs/{id}", get(handlers::txs::get_one))
@@ -186,6 +243,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .route("/v1/rent/upcoming", get(handlers::rent::upcoming))
         .route("/v1/rent/eligible", get(handlers::rent::eligible))
         .route("/v1/search", get(handlers::search::search))
+        .layer(axum::middleware::from_fn(completeness))
         // 5 s ceiling per request: every handler is a bounded store read, so anything
         // slower is a stuck disk rather than a legitimately long query.
         .layer(TimeoutLayer::with_status_code(
@@ -196,6 +254,10 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .layer(rate_limit)
         // …and inside CORS, so a browser can read the 429 body.
         .layer(CorsLayer::permissive())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            metrics::observe,
+        ))
         .with_state(state)
 }
 
@@ -203,7 +265,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
 mod inflight_guard_tests {
     use super::*;
 
-    fn state(max_inflight_reads: u32) -> AppState {
+    pub(crate) fn state(max_inflight_reads: u32) -> AppState {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("x.redb")).unwrap();
         // Leaked so the temp dir outlives the test; these are short-lived unit tests, not a
@@ -264,6 +326,8 @@ mod inflight_guard_tests {
         // The blocking task is still running (parked on `unblock_rx.recv()`); the permit and
         // counter must not yet be released just because the awaiting future was dropped —
         // they live inside the still-running spawn_blocking closure.
+        assert_eq!(state.read_permits.available_permits(), 1);
+        assert_eq!(state.counters.inflight_reads.load(Ordering::Relaxed), 1);
         unblock_tx.send(()).unwrap();
 
         // Give the still-running spawn_blocking task a moment to finish and drop its guard.

@@ -39,3 +39,31 @@ test('a known address shows its balance and per-tab lists', async ({ page }) => 
 	await expect(page).toHaveURL(`/address/${MOCK_ADDRESS}#rent`);
 	await expect(page.locator('table.table tbody tr').first()).toBeVisible();
 });
+
+for (const truncated of [true, false]) {
+	test(`address_rent_${truncated ? 'truncated_shows_sample_notice' : 'complete_hides_sample_notice'}`, async ({
+		page
+	}) => {
+		await page.route(`**/v1/addresses/${MOCK_ADDRESS}/rent`, async (route) => {
+			// Read the body to completion BEFORE fulfilling, and fulfil from the captured
+			// text rather than handing the live APIResponse back: passing `response`
+			// alongside `json` lets Playwright dispose it mid-read under parallel load,
+			// which failed this test intermittently ("Response has been disposed") while
+			// passing every time in isolation.
+			const response = await route.fetch();
+			const status = response.status();
+			const data = JSON.parse(await response.text());
+			await route.fulfill({ status, json: { ...data, truncated } });
+		});
+		await page.goto(`/address/${MOCK_ADDRESS}#rent`);
+		await expect(page.locator('table.table tbody tr').first()).toBeVisible();
+		const notice = page.locator('p.notice');
+		if (truncated) {
+			await expect(notice).toHaveText(
+				'Showing a partial sample of this address’s rent-bearing boxes, sorted by maturity among those scanned; boxes not shown may mature sooner.'
+			);
+		} else {
+			await expect(notice).toHaveCount(0);
+		}
+	});
+}

@@ -105,7 +105,20 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
 
     // Store is held here for the whole run and dropped last, after the server and the ingest
     // task have both stopped touching it.
-    let store = Arc::new(Store::open(&db_path).context("opening store")?);
+    let store = Arc::new(
+        Store::open_with_register_index_ceiling(&db_path, cfg.register_index_ceiling)
+            .context("opening store")?,
+    );
+    let entries = store
+        .register_index_entries()
+        .context("reading register occupancy")?;
+    match cfg.register_index_ceiling {
+        None => warn!(
+            entries,
+            "no register ceiling configured; register index growth is unbounded"
+        ),
+        Some(ceiling) => info!(entries, ceiling, "register index ceiling enforced"),
+    }
     let primary: Arc<dyn BlockSource> = Arc::new(RustNode::new(&cfg.source.url));
     // A fallback only ever supplies block *bodies* the primary announces but won't serve; the
     // chain being followed still comes from the primary alone (see `xp_source::Fallback`).
@@ -193,7 +206,7 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
     // Race the server against the ingest task so a halt (ingest returning Err while the
     // server is still up) is caught immediately and turned into a shutdown, rather than
     // leaving the server serving increasingly stale data until a signal happens to arrive.
-    let ingest_outcome = tokio::select! {
+    let (ingest_outcome, server_failed) = tokio::select! {
         biased;
         ingest_res = &mut ingest_handle => {
             match &ingest_res {
@@ -203,29 +216,36 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
             }
             // Halt (or an unexpected clean exit) still needs the server to stop.
             shutdown.cancel();
-            if let Err(e) = server_fut.await {
+            let server_res = server_fut.await;
+            if let Err(e) = &server_res {
                 error!("server error: {e:#}");
             }
-            ingest_res
+            (ingest_res, server_res.is_err())
         }
         server_res = &mut server_fut => {
-            if let Err(e) = server_res {
+            if let Err(e) = &server_res {
                 error!("server error: {e:#}");
             }
             // The server stopped (normally: a signal cancelled `shutdown`). Make sure ingest
             // is told to stop too, then let it finish its current batch.
             shutdown.cancel();
-            ingest_handle.await
+            (ingest_handle.await, server_res.is_err())
         }
     };
 
-    let exit_code = match ingest_outcome {
-        Ok(Ok(())) => 0,
+    Ok(explorer_exit_code(ingest_outcome, server_failed))
+}
+
+fn explorer_exit_code(
+    outcome: Result<anyhow::Result<()>, tokio::task::JoinError>,
+    server_failed: bool,
+) -> i32 {
+    match outcome {
+        Ok(Ok(())) => i32::from(server_failed),
         Ok(Err(e)) if needs_reindex(&e) => EXIT_REINDEX_REQUIRED,
         Ok(Err(_)) => 1,
         Err(_) => 1,
-    };
-    Ok(exit_code)
+    }
 }
 
 /// Whether an ingest error chain bottoms out in [`xp_store::StoreError::ReindexRequired`].
@@ -278,6 +298,43 @@ mod tests {
         );
         assert!(parse_args(["--config".to_string()].into_iter()).is_err());
         assert!(parse_args(["oops".to_string()].into_iter()).is_err());
+    }
+
+    #[test]
+    fn explorer_exit_code_reindex_required_returns_three() {
+        let err = anyhow::Error::from(xp_store::StoreError::ReindexRequired(
+            xp_store::ROLLBACK_WINDOW,
+        ))
+        .context("ingest loop");
+        assert!(needs_reindex(&err));
+        assert_eq!(explorer_exit_code(Ok(Err(err)), false), 3);
+    }
+
+    #[test]
+    fn explorer_exit_code_other_outcomes_preserve_codes() {
+        assert_eq!(explorer_exit_code(Ok(Ok(())), false), 0);
+        assert_eq!(
+            explorer_exit_code(Ok(Err(anyhow::anyhow!("decode failed"))), false),
+            1
+        );
+        let err = xp_store::StoreError::Corrupt("input box missing").into();
+        assert_eq!(explorer_exit_code(Ok(Err(err)), false), 1);
+    }
+
+    #[test]
+    fn explorer_exit_code_server_failed_ingest_clean_returns_one() {
+        assert_eq!(explorer_exit_code(Ok(Ok(())), true), 1);
+    }
+
+    #[test]
+    fn explorer_exit_code_server_failed_ingest_reindex_returns_three() {
+        let err = xp_store::StoreError::ReindexRequired(5_000).into();
+        assert_eq!(explorer_exit_code(Ok(Err(err)), true), 3);
+    }
+
+    #[test]
+    fn explorer_exit_code_server_ok_ingest_clean_returns_zero() {
+        assert_eq!(explorer_exit_code(Ok(Ok(())), false), 0);
     }
 
     /// `xp_ingest` wraps the store error before returning it, so the check has to walk the

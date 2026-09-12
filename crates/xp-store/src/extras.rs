@@ -208,6 +208,14 @@ impl<'txn> Extras<'txn> {
     }
 }
 
+/// Exact number of register rows created by `on_output` for a fresh gidx.
+pub(crate) fn register_count(o: &DecodedBox) -> u64 {
+    REG_PATTERNS
+        .iter()
+        .filter(|p| register_hex(&o.registers_json, p).is_some())
+        .count() as u64
+}
+
 /// The raw hex of the register whose key `pattern` names (one of [`REG_PATTERNS`]) in a
 /// box's `registers_json`, or `None` if that register is absent.
 ///

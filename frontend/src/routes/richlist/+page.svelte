@@ -8,7 +8,9 @@
 	import { createPager } from '$lib/pager/pager.svelte';
 	import type { RichlistItemDto, SupplyDto } from '$lib/api/types';
 
-	const pager = createPager<RichlistItemDto>((cursor) => api.richlist(cursor, 50));
+	const pager = createPager<RichlistItemDto>((cursor, snapshot) =>
+		api.richlist(cursor, 50, undefined, snapshot)
+	);
 
 	$effect(() => {
 		if (pager.items.length === 0) void pager.loadMore();

@@ -29,7 +29,7 @@ supervisor notices.
 | `0` | Clean shutdown after `SIGTERM`/`Ctrl+C`. |
 | `1` | Ingest halted (a corrupt store, an undecodable block, ...). Restarting may help. |
 | `2` | Bad arguments, or the config/store/listener could not be set up at startup. |
-| `3` | Ingest halted needing a full reindex: a fork deeper than the rollback window. Restarting **cannot** help — the store must be deleted and re-synced. |
+| `3` | Ingest halted needing a full reindex: a fork with no common ancestor within the rollback window or at genesis, or unavailable rollback undo data. Restarting **cannot** help — the store must be deleted and re-synced. |
 
 Under systemd, exclude code 3 from the restart policy so the unit doesn't loop forever on a
 store that can only be fixed by hand:
@@ -75,6 +75,24 @@ tip_lag_for_bulk = 64
 An unrecognized `source.kind` is rejected at startup with a clear error naming the value.
 
 ## API
+
+**Legacy cursor exception: bare cursors are best-effort.** Requests without
+`consistency=strict` keep the existing query fields, cursor encoding and
+`items` / `next_cursor` JSON shape, but pages can duplicate or omit rows when the
+chain changes. Additive metadata labels these responses `consistency: "best_effort"`;
+it does not make a legacy walk snapshot-consistent.
+
+For ordinary paged routes, start with `consistency=strict`, then send both the
+returned `next_cursor` as `cursor` and `next_snapshot` as `snapshot`, retaining
+the same route, filters and order. Responses add `anchor`, `observed_anchor` and
+`next_snapshot`; amounts remain decimal strings and ids remain lowercase hex.
+Mutable projections return HTTP 409 on any tip change. Immutable blocks and
+transaction summaries can continue below their original surviving anchor.
+On 409 discard all accumulated rows and offer an explicit restart from page one;
+never concatenate the restarted results or automatically retry a moving tip.
+Malformed or mismatched pairs return 400. See the
+[route-policy matrix](../../docs/superpowers/2026-09-12-m5-route-policy-matrix.md)
+for the complete policy and the separate historical, capped-sample and array contracts.
 
 See `xp-api` for the full `/v1` route tree (`/v1/status`, `/v1/blocks`, `/v1/txs`,
 `/v1/boxes`, `/v1/addresses`, `/v1/tokens`, `/v1/templates`, `/v1/registers`, ...).

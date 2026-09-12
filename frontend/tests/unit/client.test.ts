@@ -73,9 +73,11 @@ describe('api.tokens', () => {
 	it('requests /v1/tokens with sort, cursor and limit', async () => {
 		const body = { items: [], next_cursor: null };
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body));
-		const result = await api.tokens('holders', 'c1', 20, fetchFn);
+		const result = await api.tokens('holders', 'c1', 20, fetchFn, 'aa');
 		const calledUrl = fetchFn.mock.calls[0][0] as string;
-		expect(calledUrl).toBe('/v1/tokens?sort=holders&cursor=c1&limit=20');
+		expect(calledUrl).toBe(
+			'/v1/tokens?sort=holders&cursor=c1&limit=20&consistency=strict&snapshot=aa'
+		);
 		expect(result).toEqual(body);
 	});
 });
@@ -93,9 +95,11 @@ describe('api.tokenHolders', () => {
 	it('requests /v1/tokens/{id}/holders with cursor and limit, no dir', async () => {
 		const body = { items: [], next_cursor: null };
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body));
-		const result = await api.tokenHolders('abc', 'c1', 20, fetchFn);
+		const result = await api.tokenHolders('abc', 'c1', 20, fetchFn, 'aa');
 		const calledUrl = fetchFn.mock.calls[0][0] as string;
-		expect(calledUrl).toBe('/v1/tokens/abc/holders?cursor=c1&limit=20');
+		expect(calledUrl).toBe(
+			'/v1/tokens/abc/holders?cursor=c1&limit=20&consistency=strict&snapshot=aa'
+		);
 		expect(result).toEqual(body);
 	});
 });
@@ -104,9 +108,11 @@ describe('api.tokenBoxes', () => {
 	it('requests /v1/tokens/{id}/boxes with unspent, cursor, limit and dir', async () => {
 		const body = { items: [], next_cursor: null };
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body));
-		const result = await api.tokenBoxes('abc', true, 'c1', 20, 'asc', fetchFn);
+		const result = await api.tokenBoxes('abc', true, 'c1', 20, 'asc', fetchFn, 'aa');
 		const calledUrl = fetchFn.mock.calls[0][0] as string;
-		expect(calledUrl).toBe('/v1/tokens/abc/boxes?unspent=true&cursor=c1&limit=20&dir=asc');
+		expect(calledUrl).toBe(
+			'/v1/tokens/abc/boxes?unspent=true&cursor=c1&limit=20&dir=asc&consistency=strict&snapshot=aa'
+		);
 		expect(result).toEqual(body);
 	});
 });
@@ -124,9 +130,11 @@ describe('api.templateBoxes', () => {
 	it('requests /v1/templates/{hash}/boxes with unspent, cursor, limit and dir', async () => {
 		const body = { items: [], next_cursor: null };
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body));
-		const result = await api.templateBoxes('abc', false, 'c1', 20, 'desc', fetchFn);
+		const result = await api.templateBoxes('abc', false, 'c1', 20, 'desc', fetchFn, 'aa');
 		const calledUrl = fetchFn.mock.calls[0][0] as string;
-		expect(calledUrl).toBe('/v1/templates/abc/boxes?unspent=false&cursor=c1&limit=20&dir=desc');
+		expect(calledUrl).toBe(
+			'/v1/templates/abc/boxes?unspent=false&cursor=c1&limit=20&dir=desc&consistency=strict&snapshot=aa'
+		);
 		expect(result).toEqual(body);
 	});
 });
@@ -135,9 +143,11 @@ describe('api.boxesByRegister', () => {
 	it('requests /v1/registers/{reg}/{valueHex}/boxes with cursor, limit and dir', async () => {
 		const body = { items: [], next_cursor: null };
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body));
-		const result = await api.boxesByRegister('R4', 'deadbeef', 'c1', 20, 'asc', fetchFn);
+		const result = await api.boxesByRegister('R4', 'deadbeef', 'c1', 20, 'asc', fetchFn, 'aa');
 		const calledUrl = fetchFn.mock.calls[0][0] as string;
-		expect(calledUrl).toBe('/v1/registers/R4/deadbeef/boxes?cursor=c1&limit=20&dir=asc');
+		expect(calledUrl).toBe(
+			'/v1/registers/R4/deadbeef/boxes?cursor=c1&limit=20&dir=asc&consistency=strict&snapshot=aa'
+		);
 		expect(result).toEqual(body);
 	});
 });

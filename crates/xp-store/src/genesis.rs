@@ -11,7 +11,7 @@
 //! no `TXS`/`TX_BY_GIDX` row is written for them: a lookup of that all-zero tx id finds
 //! nothing, and `boxes_of_tx` on it returns empty.
 
-use redb::{Durability, ReadableTable};
+use redb::{Durability, ReadableTable, ReadableTableMetadata};
 use xp_wire::DecodedBox;
 
 use crate::apply::{insert_output, upsert_tree};
@@ -25,7 +25,7 @@ use crate::{Store, StoreError};
 impl Store {
     /// Whether [`Store::seed_genesis`] has already run on this store.
     pub fn genesis_seeded(&self) -> Result<bool, StoreError> {
-        let txn = self.db.begin_read()?;
+        let txn = self.begin_read()?;
         let meta = txn.open_table(META)?;
         Ok(meta.get(META_GENESIS_SEEDED)?.is_some())
     }
@@ -43,6 +43,10 @@ impl Store {
     /// [`StoreError::Corrupt`] if the store has already indexed a block, because the gidx
     /// numbering it would allocate would then collide with history already written.
     pub fn seed_genesis(&self, boxes: &[DecodedBox]) -> Result<(), StoreError> {
+        let _cache_writer = self
+            .register_cache_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if self.indexed_height()?.is_some() {
             return Err(StoreError::Corrupt("genesis seeding on a non-empty store"));
         }
@@ -51,6 +55,7 @@ impl Store {
         }
         let mut txn = self.db.begin_write()?;
         txn.set_durability(Durability::Immediate);
+        self.check_register_capacity(&txn, boxes.iter())?;
         {
             let mut meta = txn.open_table(META)?;
             let mut next_box = meta
@@ -59,6 +64,14 @@ impl Store {
                 .transpose()?
                 .unwrap_or(0);
 
+            // Persist exact chain-spec origins, never a fabricated mint transaction.
+            // These markers survive spends and rollback just like genesis itself.
+            for b in boxes {
+                for (id, _) in &b.tokens {
+                    meta.insert(crate::keys::k_genesis_token(id).as_slice(), &[1u8][..])?;
+                }
+            }
+            drop(meta);
             let mut boxes_t = txn.open_table(BOXES)?;
             let mut box_by_gidx = txn.open_table(BOX_BY_GIDX)?;
             let mut ergo_trees = txn.open_table(ERGO_TREES)?;
@@ -74,7 +87,7 @@ impl Store {
             // Likewise for the token tables. A chain-spec box belongs to no transaction, so
             // it can mint and burn nothing; only its holdings are indexed. Mainnet's genesis
             // boxes carry no tokens at all, but the code path stays uniform.
-            let mut tokens = Tokens::open(&txn)?;
+            let mut tokens = Tokens::open(&txn, false)?;
 
             for b in boxes {
                 let gidx = next_box;
@@ -132,6 +145,7 @@ impl Store {
             extras.finish()?;
             tokens.finish()?;
 
+            let mut meta = txn.open_table(META)?;
             // The emission box is the largest of the chain-spec boxes by five orders of
             // magnitude (93 M ERG against a treasury box of ~4 M and a proof box of 1 nanoERG),
             // so "largest value" identifies it unambiguously. Recorded here because it is the
@@ -143,7 +157,10 @@ impl Store {
             meta.insert(META_NEXT_BOX_GIDX, k_u64(next_box).as_slice())?;
             meta.insert(META_GENESIS_SEEDED, &[1u8][..])?;
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
         txn.commit()?;
+        self.register_entries_cache
+            .store(entries, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

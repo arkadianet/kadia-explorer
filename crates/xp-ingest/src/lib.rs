@@ -1,8 +1,9 @@
 //! The ingest pipeline: fetch → fork-check → apply.
 //!
 //! [`run`] drives a [`Store`] towards a [`BlockSource`]'s best chain forever, until the
-//! supplied [`CancellationToken`] is cancelled or an unrecoverable condition (a fork deeper
-//! than [`ROLLBACK_WINDOW`], a corrupt store, an undecodable block) forces it to halt.
+//! supplied [`CancellationToken`] is cancelled or an unrecoverable condition (a fork with no
+//! common ancestor within [`ROLLBACK_WINDOW`] or at genesis, a corrupt store, an undecodable
+//! block) forces it to halt.
 //! Progress is published on a [`watch`] channel so a server can serve it as a health page.
 
 use futures::StreamExt;
@@ -53,6 +54,7 @@ pub enum Mode {
 
 #[derive(Clone, Debug)]
 pub struct IngestStatus {
+    /// When `/info` last answered; not a last-known-good timestamp for all source operations.
     pub source_observed_at_ms: Option<u64>,
     pub source_error: Option<String>,
     pub indexed: Option<u32>,
@@ -169,8 +171,11 @@ enum ForkCheck {
     /// The source can't answer for a height the store has — it is behind us, or on a shorter
     /// chain. Wait rather than destroying indexed state.
     Wait,
-    /// The common ancestor is further back than [`ROLLBACK_WINDOW`]: unrecoverable.
-    TooDeep,
+    /// No safe fork comparison is possible; the source has not been consulted.
+    WaitWithoutSource,
+    /// No common ancestor within the search window or at genesis. Carries the observed
+    /// depth searched from the indexed tip, a lower bound on the fork depth.
+    TooDeep(u32),
     /// A transient source error; wait and retry.
     SourceError(SourceError),
     /// The store itself failed to answer. Never a chain disagreement: hard failure.
@@ -180,8 +185,9 @@ enum ForkCheck {
 /// Drives `store` towards `source`'s best chain until `shutdown` is cancelled.
 ///
 /// Returns `Ok(())` on shutdown. Returns `Err` only for conditions that cannot be retried
-/// out of: a fork deeper than [`ROLLBACK_WINDOW`], an undecodable block body, or a store
-/// error other than [`StoreError::ParentMismatch`]. Source errors are always transient.
+/// out of: a fork with no common ancestor within [`ROLLBACK_WINDOW`] or at genesis, an
+/// undecodable block body, or a store error other than [`StoreError::ParentMismatch`].
+/// Source errors are always transient.
 pub async fn run(
     store: Arc<Store>,
     source: Arc<dyn BlockSource>,
@@ -191,6 +197,10 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let source_name = source.name().to_string();
     let poll = Duration::from_millis(cfg.poll_ms);
+    // Count failed attempts, not individual concurrent requests. Three consecutive source
+    // failures tolerate a retry blip. Only a complete source attempt clears the streak:
+    // an answering /info must not hide failures further along the pipeline.
+    let mut source_failures = 0u32;
     let mut best = 0u32;
     let mut mode = Mode::Tip;
 
@@ -234,16 +244,37 @@ pub async fn run(
             continue;
         }};
     }
+    macro_rules! source_failed {
+        ($operation:expr, $err:expr) => {{
+            source_failures = source_failures.saturating_add(1);
+            if source_failures >= 3 {
+                status.send_modify(|s| {
+                    s.source_error = Some(format!("{}: {}", $operation, $err));
+                });
+            }
+        }};
+    }
+    macro_rules! source_recovered {
+        () => {{
+            source_failures = 0;
+            status.send_modify(|s| s.source_error = None);
+        }};
+    }
     // Publishes `halted` and returns the typed store error, so the caller keeps the real
     // cause (and its source chain) rather than a re-worded string.
     macro_rules! halt_store {
         ($indexed:expr, $err:expr) => {{
             let err: StoreError = $err;
+            let reason = err.to_string();
+            halt_store!($indexed, err, reason);
+        }};
+        ($indexed:expr, $err:expr, $reason:expr) => {{
+            let err: StoreError = $err;
             publish(
                 $indexed,
                 best,
                 mode,
-                Some(err.to_string()),
+                Some($reason),
                 stall.as_ref().map(Stall::info),
             );
             return Err(err.into());
@@ -285,9 +316,13 @@ pub async fn run(
             break;
         }
         let json = match source.genesis_boxes_json().await {
-            Ok(j) => j,
+            Ok(j) => {
+                source_recovered!();
+                j
+            }
             Err(e) => {
                 warn!(source = %source_name, error = %e, "genesis box fetch failed; retrying");
+                source_failed!("genesis box fetch", e);
                 retry!(None);
             }
         };
@@ -330,13 +365,12 @@ pub async fn run(
                             .unwrap_or_default()
                             .as_millis() as u64,
                     );
-                    s.source_error = None;
                 });
                 b
             }
             Err(e) => {
                 warn!(source = %source_name, error = %e, "best_height failed; retrying");
-                status.send_modify(|s| s.source_error = Some(e.to_string()));
+                source_failed!("best_height", e);
                 let cur = match store.indexed_height() {
                     Ok(v) => v,
                     Err(se) => halt_store!(None, se),
@@ -367,19 +401,29 @@ pub async fn run(
         match fork_check(&store, &source, indexed, distrust_tip).await {
             ForkCheck::Agreed => {}
             ForkCheck::Wait => {
+                source_recovered!();
                 debug!(
                     height = indexed,
                     "source has no block at our tip height; waiting"
                 );
                 retry!(cur);
             }
-            ForkCheck::TooDeep => halt!(
+            ForkCheck::WaitWithoutSource => {
+                // Retry the normal source comparison after the existing stall backoff.
+                // This local decision is not evidence of source recovery.
+                parent_mismatch = None;
+                debug!(height = indexed, "no safe fork comparison; waiting");
+                retry!(cur);
+            }
+            ForkCheck::TooDeep(depth) => halt_store!(
                 cur,
-                format!("reindex required: fork deeper than {ROLLBACK_WINDOW} blocks")
+                StoreError::ReindexRequired(depth),
+                format!("reindex required: fork depth {depth} blocks; rollback unavailable (rollback window: {ROLLBACK_WINDOW} blocks)")
             ),
             ForkCheck::StoreError(e) => halt_store!(cur, e),
             ForkCheck::SourceError(e) => {
                 warn!(source = %source_name, error = %e, "fork check failed; retrying");
+                source_failed!("fork check", e);
                 retry!(cur);
             }
             ForkCheck::RollbackTo(h) => {
@@ -421,6 +465,7 @@ pub async fn run(
         };
 
         if indexed >= best {
+            source_recovered!();
             publish(cur, best, mode, None, stall.as_ref().map(Stall::info));
             if sleep_or_shutdown(poll, &shutdown).await {
                 return Ok(());
@@ -438,9 +483,11 @@ pub async fn run(
             Ok(b) => b,
             Err(e) => {
                 warn!(source = %source_name, error = %e, "fetch failed; retrying");
+                source_failed!("block fetch", e);
                 retry!(cur);
             }
         };
+        source_recovered!();
         let bodies = fetched.bodies;
         if bodies.is_empty() {
             // The source advertised a higher tip than it will serve bodies for; wait it out.
@@ -467,9 +514,17 @@ pub async fn run(
         let applied = tokio::task::spawn_blocking(move || -> Result<u32, ApplyErr> {
             let blocks: Vec<DecodedBlock> = bodies
                 .iter()
-                .map(|j| decode_block(j))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| ApplyErr::Decode(e.to_string()))?;
+                .map(|(height, id, json)| {
+                    let block = decode_block(json).map_err(|e| ApplyErr::Decode(e.to_string()))?;
+                    if block.header.id.0 != *id || block.header.height != *height {
+                        return Err(ApplyErr::Decode(format!(
+                            "body does not match canonical request at height {height}, id {}",
+                            xp_types::hex32(id)
+                        )));
+                    }
+                    Ok(block)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let tip = blocks.last().map(|b| b.header.height).unwrap_or(0);
             s.apply_batch(&blocks, durable).map_err(ApplyErr::Store)?;
             Ok(tip)
@@ -541,7 +596,7 @@ enum ApplyErr {
 /// answer is never [`ForkCheck::Agreed`] and at least one block is always rolled back. The
 /// caller uses it when the tip is the suspect: nothing the source says about that height can
 /// clear it, because agreeing there is exactly what leaves ingest wedged. Below height 2 there
-/// is nothing to walk back to, so it yields [`ForkCheck::Wait`].
+/// is nothing to walk back to, so it yields [`ForkCheck::WaitWithoutSource`] without consulting the source.
 async fn fork_check(
     store: &Arc<Store>,
     source: &Arc<dyn BlockSource>,
@@ -550,9 +605,9 @@ async fn fork_check(
 ) -> ForkCheck {
     if distrust_tip && indexed <= 1 {
         // There is no height below 1 to fall back to — height 0 is not a block we hold, so
-        // walking there would read as a fork past the window and halt. Wait instead: a chain
+        // walking there could find no common ancestor and halt. Wait instead: a chain
         // this short cannot have the deep orphan problem `distrust_tip` exists for.
-        return ForkCheck::Wait;
+        return ForkCheck::WaitWithoutSource;
     }
     if indexed == 0 {
         return ForkCheck::Agreed;
@@ -579,7 +634,9 @@ async fn fork_check(
             }
             _ => {
                 if h == 0 || indexed - h >= ROLLBACK_WINDOW {
-                    return ForkCheck::TooDeep;
+                    // At genesis this is `indexed`: the distance searched to height 0,
+                    // not a fabricated distance to a common ancestor we never found.
+                    return ForkCheck::TooDeep(indexed - h);
                 }
                 h -= 1;
             }
@@ -589,7 +646,7 @@ async fn fork_check(
 
 /// What one height's fetch produced.
 enum FetchOne {
-    Body(String),
+    Body(u32, Hash32, String),
     /// The source has no header at that height: it is simply behind us.
     NoHeader,
     /// The source announced a header but would not serve its body — a hole in the source.
@@ -598,7 +655,7 @@ enum FetchOne {
 
 /// The contiguous run of bodies from `lo`, and why it stopped.
 struct FetchedRange {
-    bodies: Vec<String>,
+    bodies: Vec<(u32, Hash32, String)>,
     /// `Some(h)` when the run stopped at a height the source announced a header for but has
     /// no body for. Distinguished from "the source is behind us" because only this one can
     /// last forever, and so is what a stall is reported on.
@@ -620,7 +677,7 @@ async fn fetch_range(
             match src.header_id_at(h).await? {
                 None => Ok(FetchOne::NoHeader),
                 Some(id) => Ok(match src.full_block_json(&id).await? {
-                    Some(json) => FetchOne::Body(json),
+                    Some(json) => FetchOne::Body(h, id, json),
                     None => FetchOne::NoBody,
                 }),
             }
@@ -636,7 +693,7 @@ async fn fetch_range(
     };
     for (i, r) in fetched.into_iter().enumerate() {
         match r? {
-            FetchOne::Body(json) => out.bodies.push(json),
+            FetchOne::Body(height, id, json) => out.bodies.push((height, id, json)),
             FetchOne::NoHeader => break,
             FetchOne::NoBody => {
                 out.missing_body_at = Some(lo + i as u32);

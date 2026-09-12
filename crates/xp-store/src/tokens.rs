@@ -96,7 +96,9 @@ struct Holder {
 }
 
 pub(crate) struct Tokens<'txn> {
+    txn: &'txn WriteTransaction,
     tokens: Tb<'txn>,
+    partial: bool,
     tokens_by_gidx: Tb<'txn>,
     tokens_by_holders: Tb<'txn>,
     token_boxes: Tb<'txn>,
@@ -113,8 +115,10 @@ pub(crate) struct Tokens<'txn> {
 impl<'txn> Tokens<'txn> {
     /// Opens the seven tables this module owns. They must not be opened by the caller as
     /// well: redb allows a table to be open only once per write transaction.
-    pub(crate) fn open(txn: &'txn WriteTransaction) -> Result<Self, StoreError> {
+    pub(crate) fn open(txn: &'txn WriteTransaction, partial: bool) -> Result<Self, StoreError> {
         Ok(Tokens {
+            txn,
+            partial,
             tokens: txn.open_table(TOKENS)?,
             tokens_by_gidx: txn.open_table(TOKENS_BY_GIDX)?,
             tokens_by_holders: txn.open_table(TOKENS_BY_HOLDERS)?,
@@ -130,7 +134,8 @@ impl<'txn> Tokens<'txn> {
 
     /// The cached working [`TokenRow`] for `token`, or `None` if the store holds no row for it.
     ///
-    /// A missing row is normal, not corruption: on a partial store the mint may predate the
+    /// A missing row is allowed for an explicitly recorded chain-spec asset (no mint),
+    /// or on a declared partial store: the mint may predate the
     /// seed point, so transfers and burns of such a token are still indexed in the holder and
     /// box tables — there is simply no row whose counters could be updated.
     fn row_mut(&mut self, token: &Hash32) -> Result<Option<&mut TokenRow>, StoreError> {
@@ -141,6 +146,14 @@ impl<'txn> Tokens<'txn> {
                 .map(|v| TokenRow::decode(v.value()))
                 .transpose()?
             else {
+                let genesis = self
+                    .txn
+                    .open_table(META)?
+                    .get(crate::keys::k_genesis_token(token).as_slice())?
+                    .is_some();
+                if !self.partial && !genesis {
+                    return Err(StoreError::Corrupt("referenced token row missing"));
+                }
                 return Ok(None);
             };
             self.rows.insert(*token, (prev.clone(), Some(prev)));
@@ -504,7 +517,7 @@ mod tests {
 
         // A fully-synced store treats the deficit as corruption...
         let txn = s.db.begin_write().unwrap();
-        let mut t = Tokens::open(&txn).unwrap();
+        let mut t = Tokens::open(&txn, false).unwrap();
         assert!(matches!(
             t.on_spend(&row, false),
             Err(StoreError::Corrupt("token holder underflow"))
@@ -515,7 +528,7 @@ mod tests {
         // ...while a partial store, whose history legitimately starts after the box was
         // created, saturates at zero and records the holder as never having existed.
         let txn = s.db.begin_write().unwrap();
-        let mut t = Tokens::open(&txn).unwrap();
+        let mut t = Tokens::open(&txn, true).unwrap();
         t.on_spend(&row, true).unwrap();
         let undo = t.finish().unwrap();
         assert_eq!(undo.prev_holder_amts, vec![(token, tree, None)]);

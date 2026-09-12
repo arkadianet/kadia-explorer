@@ -1,3 +1,8 @@
+# Register ceiling is unset by default: growth is unbounded; startup logs a warning.
+# Opt in after measuring capacity; example syntax: register_index_ceiling = 42
+# A configured ceiling below occupancy refuses startup. Reaching it aborts the batch.
+# Set above current occupancy + next batch additions, then restart to resume.
+
 data_dir = "./data"
 bind = "127.0.0.1:8090"
 [source]

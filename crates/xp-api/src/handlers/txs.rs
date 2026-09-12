@@ -1,51 +1,107 @@
+use crate::budget::Budget;
 use crate::dto::{
-    enrich_txs, parse_dir, parse_id, parse_limit, parse_u64_cursor, tx_dto, ListParams, PageDto,
-    TxDto,
+    checked_tx_summary_dto, parse_dir, parse_id, parse_limit, parse_u64_cursor, ListParams,
+    PageDto, TxSummaryDto,
 };
+use crate::paging::{Binding, Filter, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
+use axum::response::Response;
 use axum::Json;
+
+pub async fn summaries(
+    State(state): State<AppState>,
+    Query(p): Query<ListParams>,
+) -> Result<Json<PageDto<TxSummaryDto>>, ApiError> {
+    let limit = parse_limit(p.limit.as_deref())?;
+    let cursor = parse_u64_cursor(p.cursor.as_deref())?;
+    let dir = parse_dir(p.dir.as_deref())?;
+    Ok(Json(
+        blocking(&state, move |rd| {
+            p.paging.read(
+                rd,
+                Binding::new(Route::GlobalSummaries, dir.into(), Filter::None)?,
+                p.cursor.as_deref(),
+                |ctx| {
+                    let rd = ctx.reader();
+                    let page = rd.txs_by_gidx_bounded(cursor, limit, dir, ctx.tx_end()?)?;
+                    Ok(PageDto {
+                        paging: Default::default(),
+                        items: page
+                            .items
+                            .iter()
+                            .map(|(id, row)| checked_tx_summary_dto(id, row))
+                            .collect::<Result<_, _>>()?,
+                        next_cursor: page.next_cursor.map(|c| c.to_string()),
+                    })
+                },
+            )
+        })
+        .await?,
+    ))
+}
 
 /// The global tx range by gidx; `desc` (newest first) by default.
 pub async fn list(
     State(state): State<AppState>,
     Query(p): Query<ListParams>,
-) -> Result<Json<PageDto<TxDto>>, ApiError> {
+) -> Result<Response, ApiError> {
     let limit = parse_limit(p.limit.as_deref())?;
-    let cursor = parse_u64_cursor(p.cursor.as_deref())?;
+    let mut cursor = parse_u64_cursor(p.cursor.as_deref())?;
     let dir = parse_dir(p.dir.as_deref())?;
-    let page = blocking(&state, move |rd| {
-        let emission = rd.emission_tree_hash()?;
-        let tip = rd.indexed_height()?;
-        let page = rd.txs_by_gidx(cursor, limit, dir)?;
-        let mut items = page
-            .items
-            .iter()
-            .map(|(id, row)| tx_dto(rd, id, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        enrich_txs(rd, items.iter_mut())?;
-        Ok(PageDto {
-            items,
-            next_cursor: page.next_cursor.map(|c| c.to_string()),
-        })
+    blocking(&state, move |rd| {
+        let mut budget = Budget::new();
+        let page = p.paging.read(
+            rd,
+            Binding::new(Route::Transactions, dir.into(), Filter::None)?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let emission = rd.emission_tree_hash()?;
+                let tip = rd.indexed_height()?;
+                let mut items = Vec::new();
+                let mut next_cursor = None;
+                for _ in 0..limit {
+                    budget.check()?;
+                    let page = rd
+                        .txs_by_gidx_admitted(cursor, 1, dir, |bytes| budget.admit_tx_row(bytes))?;
+                    let Some((id, row)) = page.items.first() else {
+                        next_cursor = None;
+                        break;
+                    };
+                    items.push(budget.tx(rd, id, row, tip, emission.as_ref())?);
+                    cursor = page.next_cursor;
+                    next_cursor = cursor.map(|c| c.to_string());
+                    if cursor.is_none() {
+                        break;
+                    }
+                }
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor,
+                })
+            },
+        )?;
+        budget.json(&page)
     })
-    .await?;
-    Ok(Json(page))
+    .await
 }
 
 pub async fn get_one(
     State(state): State<AppState>,
     Path(raw): Path<String>,
-) -> Result<Json<TxDto>, ApiError> {
-    let dto = blocking(&state, move |rd| {
+) -> Result<Response, ApiError> {
+    blocking(&state, move |rd| {
+        let mut budget = Budget::new();
         let emission = rd.emission_tree_hash()?;
         let id = parse_id(&raw)?;
-        let row = rd.tx_by_id(&id)?.ok_or(ApiError::NotFound)?;
+        let row = rd
+            .tx_by_id_admitted(&id, |bytes| budget.admit_tx_row(bytes))?
+            .ok_or(ApiError::NotFound)?;
         let tip = rd.indexed_height()?;
-        let mut dto = tx_dto(rd, &id, &row, tip, emission.as_ref())?;
-        enrich_txs(rd, std::iter::once(&mut dto))?;
-        Ok(dto)
+        let dto = budget.tx(rd, &id, &row, tip, emission.as_ref())?;
+        budget.json(&dto)
     })
-    .await?;
-    Ok(Json(dto))
+    .await
 }

@@ -6,7 +6,7 @@
 //! secondary index entry pointing at a row that is not there is [`StoreError::Corrupt`]
 //! rather than a silently skipped item.
 
-use crate::keys::{k_by_count, k_token_holder, k_u64, prefix_range};
+use crate::keys::{k_by_count, k_token_holder, k_token_tree, k_u64, prefix_range};
 use crate::read::{as_hash32, BoxResolver, Dir, Page};
 use crate::rows::{BoxRow, TemplateRow, TokenRow};
 use crate::tables::*;
@@ -44,6 +44,7 @@ fn register_prefix(reg: u8, value_hash: &Hash32) -> Vec<u8> {
 
 impl Reader {
     pub fn token(&self, id: &Hash32) -> Result<Option<TokenRow>, StoreError> {
+        self.count_lookup(2, 1);
         let table = self.txn.open_table(TOKENS)?;
         match table.get(id.as_slice())? {
             Some(v) => Ok(Some(TokenRow::decode(v.value())?)),
@@ -57,6 +58,7 @@ impl Reader {
         tokens: &impl ReadableTable<&'static [u8], &'static [u8]>,
         id: Hash32,
     ) -> Result<(Hash32, TokenRow), StoreError> {
+        self.count_lookup(2, 1);
         let row = tokens
             .get(id.as_slice())?
             .map(|v| TokenRow::decode(v.value()))
@@ -153,6 +155,7 @@ impl Reader {
             return Ok((vec![], None));
         }
         let index = self.txn.open_table(TOKEN_HOLDERS)?;
+        let amounts = self.txn.open_table(TOKEN_HOLDER_AMT)?;
         let (lo, hi) = prefix_range(id.as_slice());
         let hi_key = match cursor {
             Some((amount, tree)) => k_token_holder(id, amount, &tree).to_vec(),
@@ -172,6 +175,13 @@ impl Reader {
             }
             let (k, _) = item?;
             let (amount, tree) = holder_key_parts(k.value())?;
+            self.required_tree(&tree)?;
+            let stored = amounts
+                .get(k_token_tree(id, &tree).as_slice())?
+                .ok_or(StoreError::Corrupt("holder entry missing amount"))?;
+            if crate::meta_u64(stored.value())? != amount {
+                return Err(StoreError::Corrupt("holder amount mismatch"));
+            }
             items.push((tree, amount));
             last = Some((amount, tree));
         }
@@ -254,19 +264,38 @@ impl Reader {
     /// box's token list should collect it into a `HashMap<Hash32, _>` and look ids up there,
     /// never index into it positionally.
     ///
-    /// Ids are skipped rather than reported missing because a partial store legitimately holds
+    /// Ids are skipped for explicitly recorded chain-spec assets without a mint,
+    /// or on a declared partial store, which legitimately holds
     /// boxes carrying tokens minted before its seed height.
     pub fn token_names(
         &self,
         ids: &[Hash32],
     ) -> Result<Vec<(Hash32, String, Option<u8>)>, StoreError> {
+        self.token_names_checked(ids, || Ok(()))
+    }
+
+    pub fn token_names_checked(
+        &self,
+        ids: &[Hash32],
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Vec<(Hash32, String, Option<u8>)>, StoreError> {
         let tokens = self.txn.open_table(TOKENS)?;
+        self.count_lookup(2, ids.len() as u64);
         let mut out = Vec::with_capacity(ids.len());
         for id in ids {
+            check()?;
             let Some(v) = tokens.get(id.as_slice())? else {
+                let genesis = self
+                    .txn
+                    .open_table(META)?
+                    .get(crate::keys::k_genesis_token(id).as_slice())?
+                    .is_some();
+                if self.partial_from()?.is_none() && !genesis {
+                    return Err(StoreError::Corrupt("referenced token row missing"));
+                }
                 continue;
             };
-            let row = TokenRow::decode(v.value())?;
+            let row = TokenRow::decode_checked(v.value(), &mut check)?;
             out.push((*id, row.name, row.decimals));
         }
         Ok(out)

@@ -1,3 +1,4 @@
+use redb::ReadableTableMetadata;
 use redb::{Durability, ReadableTable, Table, WriteTransaction};
 use std::collections::HashMap;
 use xp_types::{rent::maturity_height, Gidx, Hash32};
@@ -59,12 +60,21 @@ impl Store {
         if blocks.is_empty() {
             return Ok(());
         }
+        let _cache_writer = self
+            .register_cache_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut txn = self.db.begin_write()?;
         txn.set_durability(if durable {
             Durability::Immediate
         } else {
             Durability::None
         });
+
+        self.check_register_capacity(
+            &txn,
+            blocks.iter().flat_map(|b| &b.txs).flat_map(|t| &t.outputs),
+        )?;
 
         let (mut height, mut prev_id) = {
             let meta = txn.open_table(META)?;
@@ -88,13 +98,18 @@ impl Store {
         };
         let (mut next_box, mut next_tx) = {
             let meta = txn.open_table(META)?;
-            let rd = |k: &[u8]| -> Result<Gidx, StoreError> {
-                meta.get(k)?
-                    .map(|v| crate::meta_u64(v.value()))
-                    .transpose()
-                    .map(|v| v.unwrap_or(0))
+            let seeded = meta.get(META_GENESIS_SEEDED)?.is_some();
+            let rd = |k: &[u8], required: bool| -> Result<Gidx, StoreError> {
+                match meta.get(k)? {
+                    Some(v) => crate::meta_u64(v.value()),
+                    None if !required => Ok(0),
+                    None => Err(StoreError::Corrupt("missing allocation counter")),
+                }
             };
-            (rd(META_NEXT_BOX_GIDX)?, rd(META_NEXT_TX_GIDX)?)
+            (
+                rd(META_NEXT_BOX_GIDX, prev_id.is_some() || seeded)?,
+                rd(META_NEXT_TX_GIDX, prev_id.is_some())?,
+            )
         };
         let partial = txn.open_table(META)?.get(META_PARTIAL_FROM)?.is_some();
 
@@ -161,7 +176,10 @@ impl Store {
             meta.insert(META_NEXT_BOX_GIDX, k_u64(next_box).as_slice())?;
             meta.insert(META_NEXT_TX_GIDX, k_u64(next_tx).as_slice())?;
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
         txn.commit()?;
+        self.register_entries_cache
+            .store(entries, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }
@@ -182,7 +200,7 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
     let mut extras = Extras::open(ctx.txn)?;
     // Owns the seven TOKEN*/TOKENS* tables plus this block's token-row and holder caches;
     // `finish()` below flushes them and hands back the undo bookkeeping.
-    let mut tokens = Tokens::open(ctx.txn)?;
+    let mut tokens = Tokens::open(ctx.txn, ctx.partial)?;
 
     let mut fees = 0u64;
     let mut touched_balances: HashMap<Hash32, BalanceRow> = HashMap::new();

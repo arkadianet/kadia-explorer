@@ -7,6 +7,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
 	try {
 		const [block, txs] = await Promise.all([
 			api.block(params.id, fetch),
+			// Expanded by design: bounded by the M3a work budget rather than pagination;
+			// the summary contract has no output total, which this page displays.
 			api.blockTxs(params.id, fetch)
 		]);
 		return { block, txs };

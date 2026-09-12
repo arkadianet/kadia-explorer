@@ -1,8 +1,9 @@
 use crate::dto::{
-    address_dto, box_dto_from_reader, enrich_balance, enrich_boxes, parse_bool_param, parse_dir,
-    parse_limit, parse_u64_cursor, tx_summary_dto, AddrBoxParams, AddressDto, AddressRentDto,
-    BoxDto, ListParams, PageDto, TxSummaryDto,
+    address_dto, box_dto_from_reader, checked_tx_summary_dto, enrich_balance, enrich_boxes,
+    parse_bool_param, parse_dir, parse_limit, parse_u64_cursor, AddrBoxParams, AddressDto,
+    AddressRentDto, BoxDto, ListParams, PageDto, TxSummaryDto,
 };
+use crate::paging::{Binding, Filter, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -12,7 +13,7 @@ use xp_types::rent::maturity_height;
 use xp_types::Hash32;
 
 /// Largest number of unspent boxes `/rent` will scan for one address before reporting
-/// `truncated: true`. The route has to sort the whole set by maturity, so it cannot stream.
+/// `truncated: true`. The route sorts the scanned boxes by maturity, so it cannot stream.
 pub const RENT_SCAN_CAP: usize = 5_000;
 
 /// `tree_by_address` returns `None` both for an unparseable address and for one that simply
@@ -30,12 +31,11 @@ pub async fn get_one(
         // Echo the canonical address the store derived from the ergo tree, not the string
         // from the request path: the two agree for a well-formed request, but a client that
         // reaches the same tree by any other encoding gets back the one canonical form.
-        let canonical = rd
-            .tree_row(&tree)?
-            .map(|row| row.address)
-            .unwrap_or_else(|| addr.clone());
-        let bal = rd.balance(&tree)?;
-        let mut dto = address_dto(canonical, &tree, bal.as_ref());
+        let canonical = rd.required_tree(&tree)?.address;
+        let bal = rd
+            .balance(&tree)?
+            .ok_or_else(|| ApiError::Integrity("missing address balance".into()))?;
+        let mut dto = address_dto(canonical, &tree, &bal);
         enrich_balance(rd, &mut dto.balance)?;
         Ok(dto)
     })
@@ -54,19 +54,41 @@ pub async fn boxes(
     let unspent = parse_bool_param(p.unspent.as_deref(), "unspent")?;
     let page = blocking(&state, move |rd| {
         let emission = rd.emission_tree_hash()?;
-        let tree = tree_of(rd, &addr)?;
-        let tip = rd.indexed_height()?;
-        let page = rd.tree_boxes(&tree, unspent, cursor, limit, dir)?;
-        let mut items = page
-            .items
-            .iter()
-            .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
-            .collect::<Result<Vec<_>, _>>()?;
-        enrich_boxes(rd, items.iter_mut())?;
-        Ok(PageDto {
-            items,
-            next_cursor: page.next_cursor.map(|c| c.to_string()),
-        })
+        let tree = p.paging.resolve(
+            rd,
+            Route::AddressBoxes,
+            dir.into(),
+            p.cursor.as_deref(),
+            || tree_of(rd, &addr),
+        )?;
+        p.paging.read(
+            rd,
+            Binding::new(
+                Route::AddressBoxes,
+                dir.into(),
+                Filter::Boxes {
+                    entity: tree,
+                    unspent,
+                },
+            )?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let tip = rd.indexed_height()?;
+                let page = rd.tree_boxes(&tree, unspent, cursor, limit, dir)?;
+                let mut items = page
+                    .items
+                    .iter()
+                    .map(|(id, row)| box_dto_from_reader(rd, id, row, tip, emission.as_ref()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                enrich_boxes(rd, items.iter_mut())?;
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items,
+                    next_cursor: page.next_cursor.map(|c| c.to_string()),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))
@@ -81,24 +103,39 @@ pub async fn txs(
     let cursor = parse_u64_cursor(p.cursor.as_deref())?;
     let dir = parse_dir(p.dir.as_deref())?;
     let page = blocking(&state, move |rd| {
-        let tree = tree_of(rd, &addr)?;
-        let page = rd.tree_txs(&tree, cursor, limit, dir)?;
-        Ok(PageDto {
-            items: page
-                .items
-                .iter()
-                .map(|(id, row)| tx_summary_dto(id, row))
-                .collect(),
-            next_cursor: page.next_cursor.map(|c| c.to_string()),
-        })
+        let tree = p.paging.resolve(
+            rd,
+            Route::AddressSummaries,
+            dir.into(),
+            p.cursor.as_deref(),
+            || tree_of(rd, &addr),
+        )?;
+        p.paging.read(
+            rd,
+            Binding::new(Route::AddressSummaries, dir.into(), Filter::Entity(tree))?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let page = rd.tree_txs_bounded(&tree, cursor, limit, dir, ctx.tx_end()?)?;
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items: page
+                        .items
+                        .iter()
+                        .map(|(id, row)| checked_tx_summary_dto(id, row))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    next_cursor: page.next_cursor.map(|c| c.to_string()),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))
 }
 
-/// The address's unspent boxes sorted by rent maturity, soonest first. Scans at most
-/// [`RENT_SCAN_CAP`] boxes; beyond that the answer is a prefix of the tree's unspent set and
-/// `truncated` is true.
+/// Scans at most [`RENT_SCAN_CAP`] of the address's unspent boxes in insertion order,
+/// then sorts those boxes by rent maturity, soonest first. When `truncated` is true,
+/// unscanned boxes may mature sooner than those returned.
 pub async fn rent(
     State(state): State<AppState>,
     Path(addr): Path<String>,

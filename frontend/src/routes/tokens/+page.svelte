@@ -43,7 +43,9 @@
 	$effect(() => {
 		if (pagerSort === sort) return;
 		pagerSort = sort;
-		const p = createPager<TokenInfoDto>((cursor) => api.tokens(sort, cursor, PAGE_SIZE));
+		const p = createPager<TokenInfoDto>((cursor, snapshot) =>
+			api.tokens(sort, cursor, PAGE_SIZE, undefined, snapshot)
+		);
 		pager = p;
 		void p.loadMore();
 	});

@@ -9,7 +9,9 @@
 	import { formatKb } from '$lib/format/size';
 	import type { BlockDto } from '$lib/api/types';
 
-	const pager = createPager<BlockDto>((cursor) => api.blocks(cursor, 50));
+	const pager = createPager<BlockDto>((cursor, snapshot) =>
+		api.blocks(cursor, 50, undefined, undefined, snapshot)
+	);
 
 	$effect(() => {
 		if (pager.items.length === 0) void pager.loadMore();

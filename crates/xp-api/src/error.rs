@@ -8,6 +8,8 @@ use xp_store::StoreError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
+    #[error("legacy transaction expansion exceeded {0}")]
+    Expansion(&'static str),
     #[error("{detail}")]
     History {
         status: StatusCode,
@@ -20,6 +22,8 @@ pub enum ApiError {
     BadRequest(String),
     #[error("{0}")]
     Internal(String),
+    #[error("{0}")]
+    Integrity(String),
     #[error("rate limited")]
     TooManyRequests { retry_after: u32 },
     #[error("overloaded")]
@@ -30,9 +34,10 @@ impl ApiError {
     fn status(&self) -> StatusCode {
         match self {
             ApiError::History { status, .. } => *status,
+            ApiError::Expansion(_) => StatusCode::UNPROCESSABLE_ENTITY,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
-            ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ApiError::Internal(_) | ApiError::Integrity(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ApiError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             ApiError::Overloaded => StatusCode::SERVICE_UNAVAILABLE,
         }
@@ -41,9 +46,10 @@ impl ApiError {
     fn title(&self) -> &'static str {
         match self {
             ApiError::History { status, .. } => status.canonical_reason().unwrap_or("Error"),
+            ApiError::Expansion(_) => "Unprocessable Entity",
             ApiError::NotFound => "Not Found",
             ApiError::BadRequest(_) => "Bad Request",
-            ApiError::Internal(_) => "Internal Server Error",
+            ApiError::Internal(_) | ApiError::Integrity(_) => "Internal Server Error",
             ApiError::TooManyRequests { .. } => "Too Many Requests",
             ApiError::Overloaded => "Service Unavailable",
         }
@@ -52,10 +58,13 @@ impl ApiError {
     fn detail(&self) -> String {
         match self {
             ApiError::History { detail, .. } => detail.clone(),
+            ApiError::Expansion(_) => {
+                "transaction expansion limit exceeded; use transaction summaries".into()
+            }
             ApiError::NotFound => "the requested resource does not exist".to_owned(),
             ApiError::BadRequest(d) => d.clone(),
             // Never leak the internal cause to the client; it is logged instead.
-            ApiError::Internal(_) => "internal error".to_owned(),
+            ApiError::Internal(_) | ApiError::Integrity(_) => "internal error".to_owned(),
             ApiError::TooManyRequests { retry_after } => {
                 format!("rate limit exceeded; retry after {retry_after} s")
             }
@@ -78,8 +87,15 @@ struct Problem {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let event = match &self {
+            Self::Overloaded => Some(crate::metrics::Event::Overload),
+            Self::TooManyRequests { .. } => Some(crate::metrics::Event::Rejection),
+            Self::Integrity(_) => Some(crate::metrics::Event::Integrity),
+            Self::Expansion("expansion_deadline") => Some(crate::metrics::Event::Timeout),
+            _ => None,
+        };
         let status = self.status();
-        if let ApiError::Internal(msg) = &self {
+        if let ApiError::Internal(msg) | ApiError::Integrity(msg) = &self {
             tracing::error!(error = %msg, "api internal error");
         }
         // Back-pressure answers carry `Retry-After` in whole seconds (minimum 1); they are
@@ -100,6 +116,8 @@ impl IntoResponse for ApiError {
             detail: self.detail(),
             code: match &self {
                 ApiError::History { code, .. } => Some(*code),
+                ApiError::Integrity(_) => Some("integrity_error"),
+                ApiError::Expansion(code) => Some(*code),
                 _ => None,
             },
         };
@@ -112,6 +130,9 @@ impl IntoResponse for ApiError {
             resp.headers_mut()
                 .insert(header::RETRY_AFTER, HeaderValue::from(s));
         }
+        if let Some(event) = event {
+            resp.extensions_mut().insert(event);
+        }
         resp
     }
 }
@@ -120,6 +141,10 @@ impl IntoResponse for ApiError {
 /// well-formed request, so it maps to 500 (and is logged when rendered).
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> ApiError {
-        ApiError::Internal(format!("store: {e}"))
+        match e {
+            StoreError::ReadLimit(code) => ApiError::Expansion(code),
+            StoreError::Corrupt(_) => ApiError::Integrity(format!("store: {e}")),
+            _ => ApiError::Internal(format!("store: {e}")),
+        }
     }
 }

@@ -3,6 +3,10 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+fn default_register_index_ceiling() -> Option<u64> {
+    xp_store::DEFAULT_REGISTER_INDEX_CEILING
+}
+
 fn default_poll_ms() -> u64 {
     xp_ingest::IngestConfig::default().poll_ms
 }
@@ -22,6 +26,8 @@ fn default_tip_lag_for_bulk() -> u32 {
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub data_dir: PathBuf,
+    #[serde(default = "default_register_index_ceiling")]
+    pub register_index_ceiling: Option<u64>,
     pub bind: String,
     pub source: SourceConfig,
     #[serde(default)]
@@ -33,6 +39,7 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ApiSection {
+    pub metrics_allowlist: Vec<String>,
     pub max_inflight_reads: u32,
     pub trusted_proxies: Vec<String>,
     pub rate_limit: RateLimitSection,
@@ -49,6 +56,7 @@ pub struct RateLimitSection {
 impl Default for ApiSection {
     fn default() -> ApiSection {
         ApiSection {
+            metrics_allowlist: Vec::new(),
             max_inflight_reads: 32,
             trusted_proxies: vec!["127.0.0.1".into(), "::1".into()],
             rate_limit: RateLimitSection::default(),
@@ -70,6 +78,8 @@ impl TryFrom<&ApiSection> for xp_api::ApiConfig {
     type Error = String;
     fn try_from(s: &ApiSection) -> Result<xp_api::ApiConfig, String> {
         Ok(xp_api::ApiConfig {
+            metrics_allowlist: xp_api::Allowlist::parse(&s.metrics_allowlist)
+                .map_err(|e| format!("[api] metrics_allowlist: {e}"))?,
             per_second: s.rate_limit.per_second,
             burst: s.rate_limit.burst,
             allowlist: xp_api::Allowlist::parse(&s.rate_limit.allowlist)
@@ -148,6 +158,17 @@ mod tests {
     use super::*;
 
     const EXAMPLE: &str = include_str!("../../../explorer.example.toml");
+
+    #[test]
+    fn register_ceiling_defaults_and_parses_override() {
+        let cfg = Config::parse(EXAMPLE).unwrap();
+        assert_eq!(cfg.register_index_ceiling, None);
+        let cfg = Config::parse(&format!("register_index_ceiling = 42\n{EXAMPLE}")).unwrap();
+        assert_eq!(cfg.register_index_ceiling, Some(42));
+        let cfg = Config::parse(&format!("register_index_ceiling = 0\n{EXAMPLE}")).unwrap();
+        assert_eq!(cfg.register_index_ceiling, Some(0));
+        assert!(Config::parse(&format!("register_index_ceiling = -1\n{EXAMPLE}")).is_err());
+    }
 
     #[test]
     fn parses_example_toml() {

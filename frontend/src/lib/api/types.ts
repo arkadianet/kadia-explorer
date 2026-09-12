@@ -4,6 +4,10 @@
 export interface PageDto<T> {
 	items: T[];
 	next_cursor: string | null;
+	next_snapshot?: string | null;
+	consistency?: 'strict' | 'best_effort';
+	anchor?: { height: number; block_id: string } | null;
+	observed_anchor?: { height: number; block_id: string } | null;
 }
 
 export interface StatusStalledDto {
@@ -13,6 +17,7 @@ export interface StatusStalledDto {
 }
 
 export interface StatusDto {
+	/** Last successful /info response; does not certify source health. */
 	source_observed_at_ms?: number | null;
 	source_error?: string | null;
 	indexed: number | null;
@@ -93,7 +98,7 @@ export interface TxDto {
 	outputs: BoxDto[];
 }
 
-/** `/v1/addresses/{addr}/txs` — a cheap summary of a transaction, without inputs/outputs. */
+/** Transaction summary routes and address history: counts without expanded inputs/outputs. */
 export interface TxSummaryDto {
 	id: string;
 	height: number;

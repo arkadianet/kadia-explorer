@@ -2,6 +2,7 @@
 //! [`crate::apply`], restoring the store to exactly the state it held before those blocks
 //! were applied. See [`Store::rollback_to`].
 
+use redb::ReadableTableMetadata;
 use redb::{ReadableTable, Table};
 use xp_types::{rent::maturity_height, Hash32};
 
@@ -135,6 +136,10 @@ impl Store {
             return Err(StoreError::ReindexRequired(tip - target));
         }
 
+        let _cache_writer = self
+            .register_cache_writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let txn = self.db.begin_write()?;
         for h in (target + 1..=tip).rev() {
             // Scoped so the `AccessGuard` (and the table handle it borrows) drop before the
@@ -222,6 +227,9 @@ impl Store {
                             .transpose()?;
                         decoded
                     };
+                    if existing.is_none() && !undo.created_boxes.contains(id) {
+                        return Err(StoreError::Corrupt("undo: spent box missing"));
+                    }
                     if let Some(mut row) = existing {
                         row.spent = None;
                         boxes_t.insert(id.as_slice(), row.encode().as_slice())?;
@@ -268,13 +276,12 @@ impl Store {
             for (tree, prev) in &undo.prev_balances {
                 let mut tb = txn.open_table(TREE_BALANCE)?;
                 let mut rich = txn.open_table(RICH)?;
-                if let Some(cur) = tb
+                let cur = tb
                     .get(tree.as_slice())?
                     .map(|v| BalanceRow::decode(v.value()))
                     .transpose()?
-                {
-                    rich.remove(k_rich(cur.nano, tree).as_slice())?;
-                }
+                    .ok_or(StoreError::Corrupt("undo: balance missing"))?;
+                rich.remove(k_rich(cur.nano, tree).as_slice())?;
                 match prev {
                     Some(p) => {
                         tb.insert(tree.as_slice(), p.encode().as_slice())?;
@@ -343,7 +350,10 @@ impl Store {
                 meta.insert(META_INDEXED_HEIGHT, k_u32(h - 1).as_slice())?;
             }
         }
+        let entries = txn.open_table(REGISTER_IDX)?.len()?;
         txn.commit()?;
+        self.register_entries_cache
+            .store(entries, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

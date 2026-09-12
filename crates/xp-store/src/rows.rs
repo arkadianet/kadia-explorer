@@ -73,17 +73,25 @@ impl W {
 
 /// Cursor reader matching `W`'s encoding. Every read is bounds-checked; truncated input
 /// fails with `StoreError::Corrupt` instead of panicking.
-struct R<'a> {
+struct R<'a, 'b> {
+    check: Option<&'b mut dyn FnMut() -> Result<(), StoreError>>,
     buf: &'a [u8],
     pos: usize,
 }
 
-impl<'a> R<'a> {
+impl<'a, 'b> R<'a, 'b> {
     fn new(buf: &'a [u8]) -> Self {
-        R { buf, pos: 0 }
+        R {
+            buf,
+            pos: 0,
+            check: None,
+        }
     }
 
     fn take(&mut self, n: usize) -> Result<&'a [u8], StoreError> {
+        if let Some(check) = &mut self.check {
+            check()?;
+        }
         let end = self
             .pos
             .checked_add(n)
@@ -120,7 +128,18 @@ impl<'a> R<'a> {
 
     fn bytes(&mut self) -> Result<Vec<u8>, StoreError> {
         let n = self.u32()? as usize;
-        Ok(self.take(n)?.to_vec())
+        if self.check.is_none() {
+            return Ok(self.take(n)?.to_vec());
+        }
+        // Byte vectors can contain large registers/trees/names; check while copying too.
+        let mut result = Vec::new();
+        let mut remaining = n;
+        while remaining > 0 {
+            let count = remaining.min(128);
+            result.extend_from_slice(self.take(count)?);
+            remaining -= count;
+        }
+        Ok(result)
     }
 
     fn str(&mut self) -> Result<String, StoreError> {
@@ -242,7 +261,22 @@ impl TxRow {
     }
 
     pub fn decode(buf: &[u8]) -> Result<Self, StoreError> {
-        let mut r = R::new(buf);
+        Self::decode_reader(&mut R::new(buf))
+    }
+
+    /// Same row encoding, with cooperative checks during decoding.
+    pub fn decode_checked(
+        buf: &[u8],
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Self, StoreError> {
+        Self::decode_reader(&mut R {
+            buf,
+            pos: 0,
+            check: Some(&mut check),
+        })
+    }
+
+    fn decode_reader(r: &mut R<'_, '_>) -> Result<Self, StoreError> {
         Ok(TxRow {
             height: r.u32()?,
             index: r.u16()?,
@@ -293,7 +327,22 @@ impl BoxRow {
     }
 
     pub fn decode(buf: &[u8]) -> Result<Self, StoreError> {
-        let mut r = R::new(buf);
+        Self::decode_reader(&mut R::new(buf))
+    }
+
+    /// Same row encoding, with cooperative checks during decoding.
+    pub fn decode_checked(
+        buf: &[u8],
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Self, StoreError> {
+        Self::decode_reader(&mut R {
+            buf,
+            pos: 0,
+            check: Some(&mut check),
+        })
+    }
+
+    fn decode_reader(r: &mut R<'_, '_>) -> Result<Self, StoreError> {
         let gidx = r.u64()?;
         let value = r.u64()?;
         let tree_hash = r.hash()?;
@@ -342,7 +391,22 @@ impl TreeRow {
     }
 
     pub fn decode(buf: &[u8]) -> Result<Self, StoreError> {
-        let mut r = R::new(buf);
+        Self::decode_reader(&mut R::new(buf))
+    }
+
+    /// Same row encoding, with cooperative checks during decoding.
+    pub fn decode_checked(
+        buf: &[u8],
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Self, StoreError> {
+        Self::decode_reader(&mut R {
+            buf,
+            pos: 0,
+            check: Some(&mut check),
+        })
+    }
+
+    fn decode_reader(r: &mut R<'_, '_>) -> Result<Self, StoreError> {
         Ok(TreeRow {
             tree_bytes: r.bytes()?,
             template_hash: r.hash()?,
@@ -520,6 +584,19 @@ impl TokenRow {
 
     pub fn decode(buf: &[u8]) -> Result<Self, StoreError> {
         let mut r = R::new(buf);
+        Self::decode_from(&mut r)
+    }
+
+    /// Same row encoding, with cooperative checks during decoding.
+    pub fn decode_checked(
+        buf: &[u8],
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Self, StoreError> {
+        let mut r = R {
+            buf,
+            pos: 0,
+            check: Some(&mut check),
+        };
         Self::decode_from(&mut r)
     }
 }
@@ -1010,5 +1087,44 @@ mod tests {
             Err(StoreError::Corrupt(_))
         ));
         assert!(matches!(UndoRow::decode(&[]), Err(StoreError::Corrupt(_))));
+    }
+    #[test]
+    fn cooperative_decode_checks_inside_vectors_and_byte_strings() {
+        for kind in ["inputs", "tokens", "bytes"] {
+            let mut writer = W::new();
+            match kind {
+                "inputs" => writer.hash_vec(&vec![[1; 32]; 300]),
+                "tokens" => writer.token_vec(&vec![([1; 32], 1); 300]),
+                "bytes" => writer.bytes(&vec![1; 128 * 300]),
+                _ => unreachable!(),
+            }
+            let encoded = writer.into_vec();
+            let mut calls = 0;
+            let mut check = || {
+                calls += 1;
+                if calls > 128 {
+                    Err(StoreError::ReadLimit("test_deadline"))
+                } else {
+                    Ok(())
+                }
+            };
+            let mut reader = R {
+                buf: &encoded,
+                pos: 0,
+                check: Some(&mut check),
+            };
+            let result = match kind {
+                "inputs" => reader.hash_vec().map(|_| ()),
+                "tokens" => reader.token_vec().map(|_| ()),
+                "bytes" => reader.bytes().map(|_| ()),
+                _ => unreachable!(),
+            };
+            assert!(matches!(
+                result,
+                Err(StoreError::ReadLimit("test_deadline"))
+            ));
+            assert!(reader.pos < encoded.len(), "must stop inside the row");
+            assert_eq!(calls, 129);
+        }
     }
 }

@@ -73,7 +73,12 @@
 		<Skeleton />
 	{/if}
 
-	{#if pager.error}
+	{#if pager.restartRequired}
+		<div role="alert">
+			<p>The chain changed. Restart to load the updated list.</p>
+			<button type="button" class="load" onclick={() => pager.restart()}>Restart</button>
+		</div>
+	{:else if pager.error}
 		<ErrorState error={pager.error} retry={() => pager.loadMore()} />
 	{:else if showEmpty}
 		<EmptyState message={empty} />

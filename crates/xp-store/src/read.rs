@@ -13,9 +13,18 @@ use std::ops::Bound;
 use xp_types::{Gidx, Hash32};
 
 pub struct Reader {
+    #[cfg(feature = "test-lookup-counts")]
+    pub(crate) lookups: std::sync::Arc<[std::sync::atomic::AtomicU64; 3]>,
     pub(crate) txn: ReadTransaction,
 }
 
+pub enum ExpansionRow {
+    Box,
+    Tree,
+    Token,
+}
+
+#[derive(Clone, Copy)]
 pub enum Dir {
     Asc,
     Desc,
@@ -34,10 +43,127 @@ pub(crate) fn as_hash32(v: &[u8]) -> Result<Hash32, StoreError> {
 }
 
 impl Reader {
+    pub(crate) fn count_lookup(&self, kind: usize, count: u64) {
+        #[cfg(feature = "test-lookup-counts")]
+        self.lookups[kind].fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+        #[cfg(not(feature = "test-lookup-counts"))]
+        let _ = (kind, count);
+    }
+
+    /// Encoded enrichment-row length, for admission BEFORE decoding owned vectors/strings.
+    pub fn expansion_row_len(&self, kind: ExpansionRow, id: &Hash32) -> Result<usize, StoreError> {
+        let (table, index) = match kind {
+            ExpansionRow::Box => (BOXES, 0),
+            ExpansionRow::Tree => (ERGO_TREES, 1),
+            ExpansionRow::Token => (TOKENS, 2),
+        };
+        self.count_lookup(index, 1);
+        Ok(self
+            .txn
+            .open_table(table)?
+            .get(id.as_slice())?
+            .map_or(0, |v| v.value().len()))
+    }
+
+    /// One output id, avoiding allocation of all output rows before API admission.
+    pub fn output_id(&self, tx: &TxRow, index: u16) -> Result<Hash32, StoreError> {
+        self.count_lookup(0, 1);
+        if index >= tx.output_count {
+            return Err(StoreError::Corrupt("output index out of range"));
+        }
+        let gidx = tx
+            .first_out_gidx
+            .checked_add(u64::from(index))
+            .ok_or(StoreError::Corrupt("output range overflow"))?;
+        let table = self.txn.open_table(BOX_BY_GIDX)?;
+        let value = table
+            .get(k_u64(gidx).as_slice())?
+            .ok_or(StoreError::Corrupt("dangling box gidx in tx range"))?;
+        as_hash32(value.value())
+    }
+
+    /// Exclusive gidx cursor within the block's contiguous allocation range.
+    pub fn txs_in_block_page(
+        &self,
+        height: u32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.txs_in_block_page_admitted(height, cursor, limit, dir, |_| Ok(()))
+    }
+
+    /// Like the ordinary range read, with admission before each owned row decode.
+    pub fn txs_in_block_page_admitted(
+        &self,
+        height: u32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        let Some(header) = self.header_at(height)? else {
+            return Ok(Page {
+                items: vec![],
+                next_cursor: None,
+            });
+        };
+        let first = header.first_tx_gidx;
+        let end = first
+            .checked_add(u64::from(header.tx_count))
+            .ok_or(StoreError::Corrupt("block tx range overflow"))?;
+        let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
+        let txs = self.txn.open_table(TXS)?;
+        let mut items = Vec::new();
+        let mut last = None;
+        let mut resolve = |gidx| -> Result<(), StoreError> {
+            let v = by_gidx
+                .get(k_u64(gidx).as_slice())?
+                .ok_or(StoreError::Corrupt("dangling tx gidx in block range"))?;
+            let row = self.resolve_tx_admitted(&txs, as_hash32(v.value())?, &mut admit)?;
+            if row.1.gidx != gidx
+                || row.1.height != height
+                || u64::from(row.1.index) != gidx - first
+            {
+                return Err(StoreError::Corrupt("block tx range mismatch"));
+            }
+            items.push(row);
+            last = Some(gidx);
+            Ok(())
+        };
+        match dir {
+            Dir::Asc => {
+                for gidx in
+                    (cursor.map_or(first, |c| c.saturating_add(1).max(first))..end).take(limit)
+                {
+                    resolve(gidx)?;
+                }
+            }
+            Dir::Desc => {
+                for gidx in (first..cursor.unwrap_or(end).min(end)).rev().take(limit) {
+                    resolve(gidx)?;
+                }
+            }
+        }
+        let next_cursor = last.filter(|gidx| match dir {
+            Dir::Asc => *gidx + 1 < end,
+            Dir::Desc => *gidx > first,
+        });
+        Ok(Page { items, next_cursor })
+    }
+
     pub fn new(store: &Store) -> Result<Reader, StoreError> {
         Ok(Reader {
             txn: store.begin_read()?,
+            #[cfg(feature = "test-lookup-counts")]
+            lookups: store.lookups.clone(),
         })
+    }
+
+    /// Root metadata only; includes spent boxes and genesis.
+    pub fn register_index_entries(&self) -> Result<u64, StoreError> {
+        use redb::ReadableTableMetadata;
+        Ok(self.txn.open_table(REGISTER_IDX)?.len()?)
     }
 
     pub fn indexed_height(&self) -> Result<Option<u32>, StoreError> {
@@ -60,6 +186,20 @@ impl Reader {
     pub fn full_history(&self) -> Result<bool, StoreError> {
         let meta = self.txn.open_table(META)?;
         Ok(meta.get(META_GENESIS_SEEDED)?.is_some() && meta.get(META_PARTIAL_FROM)?.is_none())
+    }
+
+    /// Only an explicit partial marker permits unresolved chain references.
+    pub fn partial_from(&self) -> Result<Option<u32>, StoreError> {
+        self.txn
+            .open_table(META)?
+            .get(META_PARTIAL_FROM)?
+            .map(|v| crate::meta_u32(v.value()))
+            .transpose()
+    }
+
+    pub fn required_tree(&self, tree: &Hash32) -> Result<TreeRow, StoreError> {
+        self.tree_row(tree)?
+            .ok_or(StoreError::Corrupt("missing referenced tree"))
     }
 
     /// Recognize the retained mainnet genesis records, including on a spent genesis.
@@ -86,14 +226,29 @@ impl Reader {
         let table = self.txn.open_table(HEADERS)?;
         match table.get(k_u32(height).as_slice())? {
             Some(v) => Ok(Some(HeaderRow::decode(v.value())?)),
-            None => Ok(None),
+            None => {
+                let start = self.partial_from()?.unwrap_or(1);
+                if height >= start && self.indexed_height()?.is_some_and(|tip| height <= tip) {
+                    return Err(StoreError::Corrupt("missing indexed header"));
+                }
+                Ok(None)
+            }
         }
     }
 
     pub fn height_of_header(&self, id: &Hash32) -> Result<Option<u32>, StoreError> {
         let table = self.txn.open_table(HEADER_BY_ID)?;
         match table.get(id.as_slice())? {
-            Some(v) => Ok(Some(crate::meta_u32(v.value())?)),
+            Some(v) => {
+                let height = crate::meta_u32(v.value())?;
+                let header = self
+                    .header_at(height)?
+                    .ok_or(StoreError::Corrupt("dangling header id"))?;
+                if header.id != *id {
+                    return Err(StoreError::Corrupt("header id mismatch"));
+                }
+                Ok(Some(height))
+            }
             None => Ok(None),
         }
     }
@@ -105,39 +260,40 @@ impl Reader {
         before_height: Option<u32>,
         limit: usize,
     ) -> Result<Vec<(u32, HeaderRow)>, StoreError> {
-        let hi_exclusive = match before_height {
-            Some(h) => h,
-            None => match self.indexed_height()? {
-                Some(tip) => tip + 1,
-                None => return Ok(vec![]),
-            },
-        };
-        if hi_exclusive == 0 {
+        let Some(tip) = self.indexed_height()? else {
             return Ok(vec![]);
-        }
-        let table = self.txn.open_table(HEADERS)?;
+        };
+        let start = self.partial_from()?.unwrap_or(1);
+        let hi_exclusive = before_height
+            .map(u64::from)
+            .unwrap_or(u64::from(tip) + 1)
+            .min(u64::from(tip) + 1);
         let mut out = Vec::new();
-        for item in table
-            .range::<&[u8]>((
-                Bound::Unbounded,
-                Bound::Excluded(k_u32(hi_exclusive).as_slice()),
-            ))?
-            .rev()
-        {
-            if out.len() >= limit {
-                break;
-            }
-            let (k, v) = item?;
-            let height = crate::meta_u32(k.value())?;
-            out.push((height, HeaderRow::decode(v.value())?));
+        for height in (u64::from(start)..hi_exclusive).rev().take(limit) {
+            let height = height as u32;
+            let row = self
+                .header_at(height)?
+                .ok_or(StoreError::Corrupt("missing indexed header"))?;
+            out.push((height, row));
         }
         Ok(out)
     }
 
     pub fn tx_by_id(&self, id: &Hash32) -> Result<Option<TxRow>, StoreError> {
+        self.tx_by_id_admitted(id, |_| Ok(()))
+    }
+
+    pub fn tx_by_id_admitted(
+        &self,
+        id: &Hash32,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Option<TxRow>, StoreError> {
         let table = self.txn.open_table(TXS)?;
         match table.get(id.as_slice())? {
-            Some(v) => Ok(Some(TxRow::decode(v.value())?)),
+            Some(v) => {
+                admit(v.value().len())?;
+                Ok(Some(TxRow::decode_checked(v.value(), || admit(0))?))
+            }
             None => Ok(None),
         }
     }
@@ -147,9 +303,21 @@ impl Reader {
         txs: &impl ReadableTable<&'static [u8], &'static [u8]>,
         tx_id: Hash32,
     ) -> Result<(Hash32, TxRow), StoreError> {
+        self.resolve_tx_admitted(txs, tx_id, &mut |_| Ok(()))
+    }
+
+    fn resolve_tx_admitted(
+        &self,
+        txs: &impl ReadableTable<&'static [u8], &'static [u8]>,
+        tx_id: Hash32,
+        admit: &mut impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<(Hash32, TxRow), StoreError> {
         let row = txs
             .get(tx_id.as_slice())?
-            .map(|v| TxRow::decode(v.value()))
+            .map(|v| {
+                admit(v.value().len())?;
+                TxRow::decode_checked(v.value(), || admit(0))
+            })
             .transpose()?
             .ok_or(StoreError::Corrupt("dangling gidx->tx_id entry"))?;
         Ok((tx_id, row))
@@ -161,41 +329,72 @@ impl Reader {
         limit: usize,
         dir: Dir,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.txs_by_gidx_admitted(cursor, limit, dir, |_| Ok(()))
+    }
+
+    /// Like the ordinary range read, with admission before each owned row decode.
+    pub fn txs_by_gidx_admitted(
+        &self,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.txs_by_gidx_bounded_admitted(cursor, limit, dir, None, admit)
+    }
+
+    /// Immutable summary traversal capped at an exclusive canonical allocation bound.
+    pub fn txs_by_gidx_bounded(
+        &self,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.txs_by_gidx_bounded_admitted(cursor, limit, dir, end, |_| Ok(()))
+    }
+
+    fn txs_by_gidx_bounded_admitted(
+        &self,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        bound: Option<Gidx>,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
         let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
         let txs = self.txn.open_table(TXS)?;
+        let end = match self.txn.open_table(META)?.get(META_NEXT_TX_GIDX)? {
+            Some(v) => crate::meta_u64(v.value())?,
+            None if self.indexed_height()?.is_none() => 0,
+            None => return Err(StoreError::Corrupt("missing tx allocation counter")),
+        };
+        let end = bound.map_or(end, |bound| bound.min(end));
         let mut items = Vec::new();
         let mut last_gidx = None;
+        let mut resolve = |gidx| -> Result<(), StoreError> {
+            let id = by_gidx
+                .get(k_u64(gidx).as_slice())?
+                .ok_or(StoreError::Corrupt("missing allocated tx gidx"))?;
+            let row = self.resolve_tx_admitted(&txs, as_hash32(id.value())?, &mut admit)?;
+            if row.1.gidx != gidx {
+                return Err(StoreError::Corrupt("tx gidx mismatch"));
+            }
+            items.push(row);
+            last_gidx = Some(gidx);
+            Ok(())
+        };
         match dir {
             Dir::Asc => {
-                let lo = k_u64(cursor.map(|c| c.saturating_add(1)).unwrap_or(0));
-                for item in
-                    by_gidx.range::<&[u8]>((Bound::Included(lo.as_slice()), Bound::Unbounded))?
-                {
-                    if items.len() >= limit {
-                        break;
-                    }
-                    let (k, v) = item?;
-                    let gidx = crate::meta_u64(k.value())?;
-                    let tx_id = as_hash32(v.value())?;
-                    items.push(self.resolve_tx(&txs, tx_id)?);
-                    last_gidx = Some(gidx);
+                let start = cursor.map(|c| c.saturating_add(1)).unwrap_or(0);
+                for gidx in (start..end).take(limit) {
+                    resolve(gidx)?;
                 }
             }
             Dir::Desc => {
-                let hi = cursor.map(k_u64);
-                let hi_bound = match &hi {
-                    Some(h) => Bound::Excluded(h.as_slice()),
-                    None => Bound::Unbounded,
-                };
-                for item in by_gidx.range::<&[u8]>((Bound::Unbounded, hi_bound))?.rev() {
-                    if items.len() >= limit {
-                        break;
-                    }
-                    let (k, v) = item?;
-                    let gidx = crate::meta_u64(k.value())?;
-                    let tx_id = as_hash32(v.value())?;
-                    items.push(self.resolve_tx(&txs, tx_id)?);
-                    last_gidx = Some(gidx);
+                let end = cursor.unwrap_or(end).min(end);
+                for gidx in (0..end).rev().take(limit) {
+                    resolve(gidx)?;
                 }
             }
         }
@@ -228,9 +427,18 @@ impl Reader {
     }
 
     pub fn box_by_id(&self, id: &Hash32) -> Result<Option<BoxRow>, StoreError> {
+        self.box_by_id_checked(id, || Ok(()))
+    }
+
+    pub fn box_by_id_checked(
+        &self,
+        id: &Hash32,
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Option<BoxRow>, StoreError> {
+        self.count_lookup(0, 1);
         let table = self.txn.open_table(BOXES)?;
         match table.get(id.as_slice())? {
-            Some(v) => Ok(Some(BoxRow::decode(v.value())?)),
+            Some(v) => Ok(Some(BoxRow::decode_checked(v.value(), &mut check)?)),
             None => Ok(None),
         }
     }
@@ -242,6 +450,7 @@ impl Reader {
         tx: &TxRow,
         tx_id: &Hash32,
     ) -> Result<Vec<(Hash32, BoxRow)>, StoreError> {
+        self.count_lookup(0, tx.output_count as u64);
         let box_by_gidx = self.txn.open_table(BOX_BY_GIDX)?;
         let boxes = self.txn.open_table(BOXES)?;
         let mut out = Vec::with_capacity(tx.output_count as usize);
@@ -267,9 +476,18 @@ impl Reader {
     }
 
     pub fn tree_row(&self, tree: &Hash32) -> Result<Option<TreeRow>, StoreError> {
+        self.tree_row_checked(tree, || Ok(()))
+    }
+
+    pub fn tree_row_checked(
+        &self,
+        tree: &Hash32,
+        mut check: impl FnMut() -> Result<(), StoreError>,
+    ) -> Result<Option<TreeRow>, StoreError> {
+        self.count_lookup(1, 1);
         let table = self.txn.open_table(ERGO_TREES)?;
         match table.get(tree.as_slice())? {
-            Some(v) => Ok(Some(TreeRow::decode(v.value())?)),
+            Some(v) => Ok(Some(TreeRow::decode_checked(v.value(), &mut check)?)),
             None => Ok(None),
         }
     }
@@ -289,6 +507,7 @@ impl Reader {
             return Ok(None);
         };
         let hash = xp_wire::tree_hash(&tree_bytes).0;
+        self.count_lookup(1, 1);
         let table = self.txn.open_table(ERGO_TREES)?;
         Ok(table.get(hash.as_slice())?.map(|_| hash))
     }
@@ -318,8 +537,21 @@ impl Reader {
         cursor: Option<Gidx>,
         limit: usize,
         dir: Dir,
+        resolve: impl FnMut(Gidx) -> Result<T, StoreError>,
+    ) -> Result<Page<T>, StoreError> {
+        self.page_composite_bounded(table, prefix, (cursor, None), limit, dir, resolve)
+    }
+
+    fn page_composite_bounded<T>(
+        &self,
+        table: Tbl,
+        prefix: &[u8],
+        bounds: (Option<Gidx>, Option<Gidx>),
+        limit: usize,
+        dir: Dir,
         mut resolve: impl FnMut(Gidx) -> Result<T, StoreError>,
     ) -> Result<Page<T>, StoreError> {
+        let (cursor, end) = bounds;
         if limit == 0 {
             return Ok(Page {
                 items: vec![],
@@ -328,6 +560,15 @@ impl Reader {
         }
         let index = self.txn.open_table(table)?;
         let (lo, hi) = prefix_range(prefix);
+        let hi = end.map_or(hi, |end| k_prefix_gidx(prefix, end));
+        if end.is_some_and(|end| {
+            end == 0 || matches!(dir, Dir::Asc) && cursor.is_some_and(|c| c >= end - 1)
+        }) {
+            return Ok(Page {
+                items: vec![],
+                next_cursor: None,
+            });
+        }
         let mut items = Vec::new();
         let mut last_gidx = None;
         match dir {
@@ -351,7 +592,7 @@ impl Reader {
             }
             Dir::Desc => {
                 let hi_key = match cursor {
-                    Some(c) => k_prefix_gidx(prefix, c),
+                    Some(c) => k_prefix_gidx(prefix, end.map_or(c, |end| c.min(end))),
                     None => hi,
                 };
                 for item in index
@@ -447,12 +688,31 @@ impl Reader {
         limit: usize,
         dir: Dir,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.tree_txs_bounded(tree, cursor, limit, dir, None)
+    }
+
+    /// Historical address membership capped before resolving rows above the anchor.
+    pub fn tree_txs_bounded(
+        &self,
+        tree: &Hash32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
         let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
         let txs = self.txn.open_table(TXS)?;
-        self.page_composite(TREE_TXS, tree.as_slice(), cursor, limit, dir, |gidx| {
-            let tx_id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
-            self.resolve_tx(&txs, tx_id)
-        })
+        self.page_composite_bounded(
+            TREE_TXS,
+            tree.as_slice(),
+            (cursor, end),
+            limit,
+            dir,
+            |gidx| {
+                let tx_id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
+                self.resolve_tx(&txs, tx_id)
+            },
+        )
     }
 
     /// Richest trees by nano-erg balance, descending, capped at `limit`. With a cursor,
@@ -486,6 +746,13 @@ impl Reader {
                     .map_err(|_| StoreError::Corrupt("bad rich key width"))?,
             );
             let tree = as_hash32(&key[8..])?;
+            let balance = self
+                .balance(&tree)?
+                .ok_or(StoreError::Corrupt("rich entry missing balance"))?;
+            self.required_tree(&tree)?;
+            if balance.nano != nano {
+                return Err(StoreError::Corrupt("rich balance mismatch"));
+            }
             items.push((tree, nano));
             last = Some((nano, tree));
         }
@@ -513,6 +780,8 @@ impl Reader {
             let key = k.value();
             let height = rent_key_height(key)?;
             let id = as_hash32(v.value())?;
+            self.box_by_id(&id)?
+                .ok_or(StoreError::Corrupt("rent entry missing box"))?;
             out.push((height, id));
         }
         Ok(out)
@@ -546,6 +815,8 @@ impl Reader {
             let mature = rent_key_height(key)?;
             let gidx = crate::keys::gidx_of_composite(key)?;
             let id = as_hash32(v.value())?;
+            self.box_by_id(&id)?
+                .ok_or(StoreError::Corrupt("rent entry missing box"))?;
             items.push((mature, id));
             last = Some((mature, gidx));
         }

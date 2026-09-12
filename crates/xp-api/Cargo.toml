@@ -21,8 +21,12 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+xp-store = { workspace = true, features = ["test-lookup-counts"] }
 redb.workspace = true
 tempfile.workspace = true
 http-body-util.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 reqwest.workspace = true
+async-trait.workspace = true
+xp-source.workspace = true
+tokio-util.workspace = true

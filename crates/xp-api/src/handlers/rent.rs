@@ -2,6 +2,7 @@ use crate::dto::{
     box_dto_from_reader, enrich_boxes, format_rent_cursor, parse_limit, parse_rent_cursor,
     parse_u32_param, ListParams, PageDto, RentItemDto, RentUpcomingParams,
 };
+use crate::paging::{Binding, Filter, Order, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
 use axum::Json;
@@ -23,7 +24,7 @@ fn items_of(
         // corruption, not a client-visible condition.
         let row = rd
             .box_by_id(&box_id)?
-            .ok_or_else(|| ApiError::Internal("rent index points at a missing box".into()))?;
+            .ok_or_else(|| ApiError::Integrity("rent index points at a missing box".into()))?;
         out.push(RentItemDto {
             maturity_height,
             box_: box_dto_from_reader(rd, &box_id, &row, tip, emission)?,
@@ -76,13 +77,22 @@ pub async fn eligible(
     let limit = parse_limit(p.limit.as_deref())?;
     let cursor = parse_rent_cursor(p.cursor.as_deref())?;
     let page = blocking(&state, move |rd| {
-        let emission = rd.emission_tree_hash()?;
-        let tip = rd.indexed_height()?;
-        let (rows, next) = rd.rent_eligible(tip.unwrap_or(0), cursor, limit)?;
-        Ok(PageDto {
-            items: items_of(rd, rows, tip, emission.as_ref())?,
-            next_cursor: next.map(|(h, g)| format_rent_cursor(h, g)),
-        })
+        p.paging.read(
+            rd,
+            Binding::new(Route::RentEligible, Order::Asc, Filter::None)?,
+            p.cursor.as_deref(),
+            |ctx| {
+                let rd = ctx.reader();
+                let emission = rd.emission_tree_hash()?;
+                let tip = rd.indexed_height()?;
+                let (rows, next) = rd.rent_eligible(tip.unwrap_or(0), cursor, limit)?;
+                Ok(PageDto {
+                    paging: Default::default(),
+                    items: items_of(rd, rows, tip, emission.as_ref())?,
+                    next_cursor: next.map(|(h, g)| format_rent_cursor(h, g)),
+                })
+            },
+        )
     })
     .await?;
     Ok(Json(page))
