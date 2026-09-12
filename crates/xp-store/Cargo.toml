@@ -26,3 +26,7 @@ serde_json.workspace = true
 [[example]]
 name = "rent-candidates"
 test = true
+
+[[example]]
+name = "integrity-sweep"
+test = true

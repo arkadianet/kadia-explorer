@@ -1,5 +1,7 @@
 //! Offline phase-1 scanner. See docs/rent-candidates.md for the stream contract.
-use redb::{Database, ReadableTable};
+#[cfg(test)]
+use redb::Database;
+use redb::ReadableTable;
 use serde_json::json;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Write};
@@ -11,59 +13,10 @@ use xp_types::rent::RENT_PERIOD;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type Key = [u8; 36];
 const RUN: usize = 4096;
-const CACHE: usize = 8 * 1024 * 1024;
 
-// redb 2.6 marks its header writable even for readers. Keep that bookkeeping
-// in memory only; all data-page writes and resizing are forbidden. The underlying
-// descriptor is O_RDONLY, with an exclusive nonblocking lock for offline use.
-#[derive(Debug)]
-struct ReadOnlySource {
-    file: std::sync::Mutex<File>,
-    header: std::sync::Mutex<Option<Vec<u8>>>,
-}
-impl redb::StorageBackend for ReadOnlySource {
-    fn len(&self) -> std::io::Result<u64> {
-        Ok(self.file.lock().unwrap().metadata()?.len())
-    }
-    fn read(&self, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
-        let mut bytes = vec![0; len];
-        let mut file = self.file.lock().unwrap();
-        file.seek(SeekFrom::Start(offset))?;
-        file.read_exact(&mut bytes)?;
-        if let Some(header) = &*self.header.lock().unwrap() {
-            if offset < header.len() as u64 {
-                let start = offset as usize;
-                let n = len.min(header.len() - start);
-                bytes[..n].copy_from_slice(&header[start..start + n]);
-            }
-        }
-        Ok(bytes)
-    }
-    fn write(&self, offset: u64, data: &[u8]) -> std::io::Result<()> {
-        if offset != 0 || data.len() > 4096 {
-            return Err(std::io::ErrorKind::PermissionDenied.into());
-        }
-        *self.header.lock().unwrap() = Some(data.to_vec());
-        Ok(())
-    }
-    fn set_len(&self, _: u64) -> std::io::Result<()> {
-        Err(std::io::ErrorKind::PermissionDenied.into())
-    }
-    fn sync_data(&self, _: bool) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-fn open_source(path: &Path) -> Result<Database> {
-    let file = File::open(path)?;
-    file.try_lock()?;
-    Ok(Database::builder()
-        .set_cache_size(CACHE)
-        .set_repair_callback(|session| session.abort())
-        .create_with_backend(ReadOnlySource {
-            file: std::sync::Mutex::new(file),
-            header: Default::default(),
-        })?)
-}
+#[path = "support/read_only.rs"]
+mod read_only;
+use read_only::open_source;
 
 fn line(out: &mut impl Write, value: serde_json::Value) -> Result<()> {
     serde_json::to_writer(&mut *out, &value)?;
