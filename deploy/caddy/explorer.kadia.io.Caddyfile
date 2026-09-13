@@ -30,3 +30,60 @@ explorer.kadia.io {
 		file_server
 	}
 }
+# Public Ergo node API for node.kadia.io (Nuremberg, main build 0.7.0, no rent collector).
+#
+# DEFAULT DENY. The node itself stays bound to 127.0.0.1:9063; nothing new listens
+# publicly. Only the routes in @allowed are proxied, everything else gets 403, so a
+# future node release that adds a route does not silently become public.
+#
+# Deliberate denials:
+#   /blockchain/storageRent*  - enumerates eligible rent boxes; would do a competitor's
+#                               research for them. Whole subtree reserved, not just the
+#                               three routes that exist today.
+#   /api/v1/*                 - native tree: accounts/private-key, watch registry,
+#                               mempool reads labelled by producer, host RSS/CPU/disk,
+#                               batch (which can reach those mempool reads), webhooks.
+#   /wallet* /scan* /node* /mining*  - privileged or lets a caller steer the node.
+#   POST /blocks, /peers/connect     - block submission and peer steering.
+#   /metrics                  - operational counters.
+# These are gateway rules, not a claim the node lacks its own auth.
+node.kadia.io {
+	encode zstd gzip
+
+	request_body {
+		max_size 1MB
+	}
+
+	header {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, POST, HEAD, OPTIONS"
+		Access-Control-Allow-Headers "Content-Type"
+		Access-Control-Max-Age "600"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	@preflight method OPTIONS
+
+	# Checked before @allowed, so /blockchain/* cannot leak the rent subtree.
+	@denied path /blockchain/storageRent /blockchain/storageRent/*
+
+	@allowed {
+		path /info
+		path /blocks /blocks/*
+		path /blockchain/*
+		path /transactions /transactions/bytes /transactions/check /transactions/checkBytes
+		path /transactions/getFee /transactions/waitTime /transactions/poolHistogram
+		path /transactions/unconfirmed /transactions/unconfirmed/*
+		path /utxo/*
+		path /peers/status
+	}
+
+	route {
+		respond @preflight 204
+		respond @denied 403
+		reverse_proxy @allowed 127.0.0.1:9063
+		respond 403
+	}
+}
