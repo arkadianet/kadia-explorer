@@ -4,7 +4,25 @@
     "source": "https://api.ergoplatform.com/api/v1/",
     "contract_release": "7.1.1",
     "contract_commit": "a2a6cdf080421820607fccb8381a35bd1068d538",
-    "notes": "Normalized captured mainnet transaction/box facts. indexed_height/confirmations and unrelated rent, box size, tree_hash and tx fee are display-only fixture placeholders; they do not establish historical capture tip or rent/fee calculations."
+    "notes": "Normalized captured mainnet transaction/box facts. indexed_height/confirmations and unrelated rent, box size, tree_hash and tx fee are display-only fixture placeholders; they do not establish historical capture tip or rent/fee calculations.",
+    "supplemental_spend_metadata": [
+      {
+        "verified_at": "2026-09-28",
+        "source": "https://api.ergoplatform.com/api/v1/transactions/0a6ffdc0dc55e88b128ae03be2e59290226d2321d4186e643274763115b9f651",
+        "transaction_id": "0a6ffdc0dc55e88b128ae03be2e59290226d2321d4186e643274763115b9f651",
+        "inclusion_height": 1878804,
+        "block_id": "60d24915e0422012618875ba13b270197bb4a71e22cbf285dea8f17a0d0367c3",
+        "confirmed_input_id": "b044dafe10ecc699f3647bfe3c70a775c66e8986cc8253faaca5122abebdc7f8"
+      },
+      {
+        "verified_at": "2026-09-28",
+        "source": "https://api.ergoplatform.com/api/v1/transactions/58160baab41d222c19b9e3239776cf1da5c4d47c0842dcedb1bb008c913744a0",
+        "transaction_id": "58160baab41d222c19b9e3239776cf1da5c4d47c0842dcedb1bb008c913744a0",
+        "inclusion_height": 1878795,
+        "block_id": "3500d04e7e0b9b3517f20ca7488b43d1f8229fb54058524b44ffd5d71172bc49",
+        "confirmed_input_id": "09a190f01a0ab87b909dd8f0bd9acdcd0d81943c0ba8ab1deddd0e512103c972"
+      }
+    ]
   },
   "deposit": {
     "id": "b044dafe10ecc699f3647bfe3c70a775c66e8986cc8253faaca5122abebdc7f8",
@@ -21,7 +39,7 @@
       "R4": "1a050763617264616e6f67616464723171386e73686835617935376d653763797a6e3677326138383472713476393732726c737a676d75747a39303477766d6776717466336730347a6663727578613968333730387a766367786a36636466346166327568703730306e6c7174637a366a7a0a333133323934323634310b33343936363530323039313339657a71334b6e4145334b4d67795134376a3778655856737151314166666662514b41596d523242624645595934357a595146"
     },
     "spent_by": "0a6ffdc0dc55e88b128ae03be2e59290226d2321d4186e643274763115b9f651",
-    "spent_height": null,
+    "spent_height": 1878804,
     "size": 0,
     "kind": "box",
     "rent": {
@@ -2483,7 +2501,7 @@
           "R4": "1a050763617264616e6f67616464723171386e73686835617935376d653763797a6e3677326138383472713476393732726c737a676d75747a39303477766d6776717466336730347a6663727578613968333730387a766367786a36636466346166327568703730306e6c7174637a366a7a0a333133323934323634310b33343936363530323039313339657a71334b6e4145334b4d67795134376a3778655856737151314166666662514b41596d523242624645595934357a595146"
         },
         "spent_by": "0a6ffdc0dc55e88b128ae03be2e59290226d2321d4186e643274763115b9f651",
-        "spent_height": null,
+        "spent_height": 1878804,
         "size": 0,
         "kind": "box",
         "rent": {
@@ -2550,7 +2568,7 @@
         "tokens": [],
         "registers": {},
         "spent_by": "58160baab41d222c19b9e3239776cf1da5c4d47c0842dcedb1bb008c913744a0",
-        "spent_height": null,
+        "spent_height": 1878795,
         "size": 0,
         "kind": "box",
         "rent": {

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { ApiError } from '../../src/lib/api/client';
 import type { BoxDto, TxDto } from '../../src/lib/api/types';
 import {
@@ -117,6 +118,46 @@ describe('bounded explicit investigation', () => {
 		expect(graph.state.nodes).toHaveLength(3);
 		expect(graph.state.edges).toHaveLength(2);
 		expect(api.tx).toHaveBeenCalledTimes(2);
+	});
+	it('loads the recorded Rosen source and expands its deposit with verified spend heights', async () => {
+		const fixture = JSON.parse(
+			readFileSync(
+				new URL('../../../tests/fixtures/apps/rosen-erg-cardano.json', import.meta.url),
+				'utf8'
+			)
+		) as { sourceTx: TxDto; deposit: BoxDto };
+		const graph = createInvestigation({
+			tx: vi.fn(async () => fixture.sourceTx),
+			box: vi.fn(async () => fixture.deposit),
+			onChange: vi.fn()
+		});
+		const sourceKey = `tx:${fixture.sourceTx.id}`;
+		graph.restore({ nodes: [{ kind: 'tx', id: fixture.sourceTx.id }], edges: [] });
+		await graph.load(sourceKey);
+		expect(graph.state.conflict).toBeNull();
+		expect(graph.state.nodes[0].status).toBe('ready');
+		expect(fixture.sourceTx.outputs[2]).toMatchObject({
+			spent_by: '58160baab41d222c19b9e3239776cf1da5c4d47c0842dcedb1bb008c913744a0',
+			spent_height: 1878795
+		});
+		const deposit = references(graph.state.nodes[0]).find(
+			(reference) =>
+				reference.edge.relation === 'creates' && reference.ref.id === fixture.deposit.id
+		)!;
+		await graph.expand(sourceKey, deposit);
+		expect(graph.state.conflict).toBeNull();
+		expect(graph.state.nodes[1]).toMatchObject({
+			status: 'ready',
+			data: {
+				id: fixture.deposit.id,
+				value: '418527417582',
+				spent_by: '0a6ffdc0dc55e88b128ae03be2e59290226d2321d4186e643274763115b9f651',
+				spent_height: 1878804
+			}
+		});
+		expect(graph.state.edges).toEqual([
+			{ from: sourceKey, to: `box:${fixture.deposit.id}`, relation: 'creates' }
+		]);
 	});
 	it('preserves unresolved input IDs and distinguishes read-only data inputs', async () => {
 		const { graph } = setup();
