@@ -88,6 +88,152 @@ describe('transaction tracking', () => {
 		expect(t.latest().tx?.indexed_height).toBe(102);
 		t.tracker.stop();
 	});
+	it('keeps polling inclusion without retrying rejected expansion at the same anchor', async () => {
+		const t = setup();
+		t.getStatus.mockResolvedValue(observation('confirmed'));
+		t.getTx.mockRejectedValue(
+			new ApiError(422, 'Unprocessable Entity', 'Expansion limit exceeded')
+		);
+		t.tracker.setVisible(true);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(t.getTx).toHaveBeenCalledTimes(1);
+		expect(t.latest().tx).toBeNull();
+		expect(t.latest().error).toContain('expansion limit');
+		const later = observation('confirmed');
+		later.indexed_height = 104;
+		later.inclusion!.confirmations = 5;
+		t.getStatus.mockResolvedValue(later);
+		await vi.advanceTimersByTimeAsync(10000);
+		expect(t.getStatus).toHaveBeenCalledTimes(3);
+		expect(t.getTx).toHaveBeenCalledTimes(1);
+		expect(t.latest().status?.inclusion?.confirmations).toBe(5);
+		expect(t.latest().error).toContain('Check now');
+		expect(t.latest().checking).toBe(false);
+		t.tracker.stop();
+	});
+	it.each(['block', 'height'] as const)(
+		'retries rejected details after the inclusion %s changes',
+		async (change) => {
+			const t = setup();
+			t.getStatus.mockResolvedValue(observation('confirmed'));
+			t.getTx.mockRejectedValueOnce(
+				new ApiError(422, 'Unprocessable Entity', 'Expansion limit exceeded')
+			);
+			await t.tracker.refresh();
+			const next = observation('confirmed');
+			if (change === 'block') next.inclusion!.block_id = 'c'.repeat(64);
+			else next.inclusion!.height = 101;
+			t.getStatus.mockResolvedValue(next);
+			t.getTx.mockResolvedValue({
+				...tx,
+				block_id: next.inclusion!.block_id,
+				height: next.inclusion!.height
+			});
+			await t.tracker.refresh();
+			expect(t.getTx).toHaveBeenCalledTimes(2);
+			expect(t.latest().tx?.block_id).toBe(next.inclusion!.block_id);
+			expect(t.latest().tx?.height).toBe(next.inclusion!.height);
+			expect(t.latest().error).toBeNull();
+			t.tracker.stop();
+		}
+	);
+	it('forgets a rejection when inclusion disappears before the same anchor returns', async () => {
+		const t = setup();
+		t.getStatus.mockResolvedValue(observation('confirmed'));
+		t.getTx.mockRejectedValueOnce(
+			new ApiError(422, 'Unprocessable Entity', 'Expansion limit exceeded')
+		);
+		await t.tracker.refresh();
+		t.getStatus.mockResolvedValue(observation('pending'));
+		await t.tracker.refresh();
+		expect(t.latest().tx).toBeNull();
+		expect(t.latest().error).toBeNull();
+		t.getStatus.mockResolvedValue(observation('confirmed'));
+		await t.tracker.refresh();
+		expect(t.getTx).toHaveBeenCalledTimes(2);
+		expect(t.latest().tx).toEqual(tx);
+		t.tracker.stop();
+	});
+	it('manual refresh bypasses a rejection and keeps the previous receipt marked stale until success', async () => {
+		const t = setup(tx);
+		t.getStatus.mockResolvedValue(observation('confirmed'));
+		t.getTx.mockRejectedValueOnce(
+			new ApiError(422, 'Unprocessable Entity', 'Expansion limit exceeded')
+		);
+		await t.tracker.refresh(true);
+		await t.tracker.refresh();
+		expect(t.getTx).toHaveBeenCalledTimes(1);
+		expect(t.latest().tx).toEqual(tx);
+		expect(t.latest().error).toContain('earlier snapshot');
+		t.getTx.mockResolvedValue({ ...tx, indexed_height: 102 });
+		await t.tracker.refresh(true);
+		expect(t.getTx).toHaveBeenCalledTimes(2);
+		expect(t.latest().tx?.indexed_height).toBe(102);
+		expect(t.latest().error).toBeNull();
+		t.tracker.stop();
+	});
+	it.each([
+		{ label: 'without a receipt', initial: null },
+		{ label: 'with a retained receipt', initial: tx }
+	])(
+		'retries transient failures after a forced rejected-detail retry $label',
+		async ({ initial }) => {
+			const t = setup(initial);
+			t.getStatus.mockResolvedValue(observation('confirmed'));
+			let finish!: (value: TxDto) => void;
+			t.getTx
+				.mockRejectedValueOnce(
+					new ApiError(422, 'Unprocessable Entity', 'Expansion limit exceeded')
+				)
+				.mockRejectedValueOnce(new ApiError(503, 'Service Unavailable', 'Busy'))
+				.mockRejectedValueOnce(new ApiError(503, 'Service Unavailable', 'Still busy'))
+				.mockImplementationOnce(
+					() =>
+						new Promise((resolve) => {
+							finish = resolve;
+						})
+				);
+			await t.tracker.refresh(true);
+			await t.tracker.refresh(true);
+			expect(t.latest().error).not.toBeNull();
+			expect(t.latest().tx).toEqual(initial);
+			await t.tracker.refresh();
+			expect(t.getTx).toHaveBeenCalledTimes(3);
+			expect(t.latest().error).not.toBeNull();
+			expect(t.latest().tx).toEqual(initial);
+			const retry = t.tracker.refresh();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(t.latest().checking).toBe(true);
+			if (initial) expect(t.latest().error).toContain('earlier snapshot');
+			expect(t.latest().tx).toEqual(initial);
+			finish({ ...tx, indexed_height: 105 });
+			await retry;
+			expect(t.getTx).toHaveBeenCalledTimes(4);
+			expect(t.latest().tx?.indexed_height).toBe(105);
+			expect(t.latest().error).toBeNull();
+			await t.tracker.refresh();
+			expect(t.getTx).toHaveBeenCalledTimes(4);
+			t.tracker.stop();
+		}
+	);
+	it.each([
+		new Error('offline'),
+		new ApiError(503, 'Service Unavailable', 'Busy'),
+		new ApiError(429, 'Too Many Requests', 'Retry later'),
+		new ApiError(404, 'Not Found', 'Index changed')
+	])('retries transient detail failures: %s', async (error) => {
+		const t = setup();
+		t.getStatus.mockResolvedValue(observation('confirmed'));
+		t.getTx.mockRejectedValueOnce(error);
+		await t.tracker.refresh();
+		expect(t.latest().tx).toBeNull();
+		expect(t.latest().error).not.toBeNull();
+		await t.tracker.refresh();
+		expect(t.getTx).toHaveBeenCalledTimes(2);
+		expect(t.latest().tx).toEqual(tx);
+		expect(t.latest().error).toBeNull();
+		t.tracker.stop();
+	});
 	it('manual refresh still fetches receipt details from legacy servers', async () => {
 		const t = setup(tx);
 		t.getStatus.mockRejectedValue(new ApiError(404, 'Not Found', ''));

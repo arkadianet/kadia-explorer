@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { error, isRedirect, redirect } from '@sveltejs/kit';
 import { api } from '$lib/api/endpoints';
 import { ApiError } from '$lib/api/client';
 import { classify, routeFor } from '$lib/search/classify';
@@ -65,11 +65,17 @@ export const load: PageLoad = async ({ url, fetch }) => {
 		}
 		throw redirect(302, destinationFor(result.kind, result.id));
 	} catch (e) {
+		if (isRedirect(e)) throw e;
 		if (e instanceof ApiError) {
 			if (e.status === 400)
 				return {
 					q,
-					reason: 'unknown-format' as NotFoundReason,
+					// Short Base58 strings can be ordinary token names. This is only a
+					// notice heuristic; longer names still receive token discovery.
+					reason:
+						classified.kind === 'address' && classified.value.length <= 32
+							? ('empty' as NotFoundReason)
+							: ('unknown-format' as NotFoundReason),
 					registers,
 					tokenQuery,
 					match
@@ -87,8 +93,12 @@ export const load: PageLoad = async ({ url, fetch }) => {
 				}
 				return { q, reason: 'not-found' as NotFoundReason, registers };
 			}
-			throw error(e.status, e.detail);
+			if (classified.kind !== 'address') throw error(e.status, e.detail);
+		} else if (classified.kind !== 'address') {
+			throw e;
 		}
-		throw e;
+		// Failure to resolve an address candidate does not establish whether its
+		// text matches a token name. Name discovery has its own availability state.
+		return { q, reason: 'empty' as NotFoundReason, registers, tokenQuery, match };
 	}
 };

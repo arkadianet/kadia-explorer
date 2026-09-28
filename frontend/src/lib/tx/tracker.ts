@@ -40,6 +40,9 @@ export function createTransactionTracker(options: {
 	let stopped = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let running: Promise<void> | null = null;
+	let rejectedDetails: { inclusion: string; message: string } | null = null;
+	// Retaining an older receipt must not satisfy a failed request for fresh details.
+	let detailsRefreshNeeded = false;
 	const publish = (patch: Partial<TrackingState>) => {
 		if (stopped) return;
 		state = { ...state, ...patch };
@@ -67,22 +70,49 @@ export function createTransactionTracker(options: {
 			// A successful snapshot supersedes any prior inclusion immediately, even when
 			// the mempool could not be checked. Never leave an orphaned receipt on screen.
 			if (status.state !== 'confirmed') {
+				rejectedDetails = null;
+				detailsRefreshNeeded = false;
 				publish({ status, tx: null, error: null, unsupported: false });
 				return;
 			}
+			const inclusion = `${status.inclusion!.block_id}:${status.inclusion!.height}`;
+			if (forceDetails || rejectedDetails?.inclusion !== inclusion) rejectedDetails = null;
 			let tx = state.tx;
-			if (forceDetails || !tx || !sameInclusion(tx, status)) {
+			if (rejectedDetails) {
+				publish({
+					status,
+					tx: tx && sameInclusion(tx, status) ? tx : null,
+					error: rejectedDetails.message,
+					unsupported: false
+				});
+				return;
+			}
+			if (forceDetails || detailsRefreshNeeded || !tx || !sameInclusion(tx, status)) {
 				const retained = tx && sameInclusion(tx, status) ? tx : null;
-				publish({ status, tx: retained, error: null, unsupported: false });
+				detailsRefreshNeeded = true;
+				publish({ status, tx: retained, error: retained ? state.error : null, unsupported: false });
 				failure = retained
 					? 'Receipt refresh failed. Box details are from the earlier snapshot shown below.'
 					: 'Receipt details are unavailable. Live inclusion is shown; checking again shortly.';
-				tx = await options.getTx();
+				try {
+					tx = await options.getTx();
+				} catch (error) {
+					if (error instanceof ApiError && error.status === 422) {
+						// Expansion rejection applies to these details, not live inclusion. Avoid
+						// repeating that work until the anchor changes or the user requests it.
+						failure = retained
+							? 'Receipt expansion limit exceeded. Box details are from the earlier snapshot shown below. Use Check now to retry.'
+							: 'Receipt details exceed this server’s expansion limit. Live inclusion is still checked; use Check now to retry details.';
+						rejectedDetails = { inclusion, message: failure };
+					}
+					throw error;
+				}
 				if (stopped) return;
 				if (!sameInclusion(tx, status)) {
 					publish({ tx: null });
 					throw new Error('Transaction inclusion changed during refresh');
 				}
+				detailsRefreshNeeded = false;
 			}
 			publish({
 				status,
