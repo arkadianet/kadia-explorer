@@ -4,6 +4,7 @@
 	import { formatErg, formatTokenAmount } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
 	import Hash from './Hash.svelte';
+	import { appearance } from '$lib/theme/theme.svelte';
 
 	let {
 		tx,
@@ -25,6 +26,10 @@
 
 	let inputLimit = $state(4);
 	let outputLimit = $state(4);
+	let stage: HTMLDivElement;
+	let beamPaths = $state<string[]>([]);
+	let beamSize = $state({ width: 1, height: 1 });
+	const spatial = $derived(appearance.current === 'prism');
 	const selectable = $derived(new Set(addresses.map((address) => address.tree)));
 	const sides = $derived([
 		{ key: 'input', label: 'Inputs', boxes: tx.inputs, limit: inputLimit },
@@ -42,18 +47,71 @@
 	function signedErg(value: bigint) {
 		return `${value > 0n ? '+' : ''}${formatErg(value)}`;
 	}
+
+	$effect(() => {
+		if (!spatial || !stage) return;
+		void inputLimit;
+		void outputLimit;
+		void tx.id;
+		let frame = 0;
+		function draw() {
+			const bounds = stage.getBoundingClientRect();
+			const hub = stage.querySelector('.crystal')!.getBoundingClientRect();
+			if (!bounds.width || !bounds.height) return;
+			const centerX = hub.x + hub.width / 2 - bounds.x;
+			const centerY = hub.y + hub.height / 2 - bounds.y;
+			beamSize = { width: bounds.width, height: bounds.height };
+			beamPaths = Array.from(stage.querySelectorAll('.flow-box')).map((box) => {
+				const rect = box.getBoundingClientRect();
+				const input = !!box.closest('.inputs');
+				const x = (input ? rect.right : rect.left) - bounds.x;
+				const y = rect.top + rect.height / 2 - bounds.y;
+				const bend = (x + centerX) / 2;
+				return `M${x},${y} C${bend},${y} ${bend},${centerY} ${centerX},${centerY}`;
+			});
+		}
+		function schedule() {
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(draw);
+		}
+		const observer = new ResizeObserver(schedule);
+		observer.observe(stage);
+		for (const box of stage.querySelectorAll('.flow-box, .crystal')) observer.observe(box);
+		schedule();
+		return () => {
+			observer.disconnect();
+			cancelAnimationFrame(frame);
+		};
+	});
 </script>
 
 <section class="transaction-flow" aria-label="Transaction box flow">
 	<header class="flow-intro">
 		<div>
 			<p class="flow-kicker">Follow the boxes</p>
-			<h3>One transaction. Every side.</h3>
+			<h3>
+				{#if spatial}Follow every <span>movement.</span>{:else}One transaction. Every side.{/if}
+			</h3>
 		</div>
 		<p>Select an address to inspect its net change. Lines show transaction topology, not value.</p>
 	</header>
 
-	<div class="flow-stage">
+	<div class="flow-stage" bind:this={stage}>
+		{#if spatial}
+			<svg
+				class="spatial-beams"
+				viewBox={`0 0 ${beamSize.width} ${beamSize.height}`}
+				preserveAspectRatio="none"
+				aria-hidden="true"
+			>
+				<g class="beam-glow"
+					>{#each beamPaths as path, i (i)}<path d={path} />{/each}</g
+				>
+				<g
+					>{#each beamPaths as path, i (i)}<path d={path} />{/each}</g
+				>
+			</svg>
+		{/if}
 		{#each sides as side (side.key)}
 			<section
 				class="flow-side"
@@ -216,25 +274,29 @@
 			</div>
 			<div class="inspector-balances">
 				<p class="net-erg" class:negative={selected.erg < 0n}>
+					<span class="net-label">Net ERG change</span>
 					<strong>{signedErg(selected.erg)}</strong> ERG
 				</p>
-				{#if selected.tokens.length}<ul class="net-tokens">
-						{#each selected.tokens as token (token.id)}
-							<li>
-								<strong class:negative={token.amount < 0n}
-									>{token.amount > 0n ? '+' : ''}{formatTokenAmount(
-										token.amount.toString(),
-										token.decimals
-									)}</strong
-								> <a href={`/token/${token.id}`}>{token.name?.trim() || 'Unnamed token'}</a><small
-									title={token.id}
-									>{truncateMiddle(token.id)}{token.decimals === null
-										? ' · raw units; decimals unknown'
-										: ''}</small
-								>
-							</li>
-						{/each}
-					</ul>{/if}
+				{#if selected.tokens.length}<div class="net-token-group">
+						<p class="net-label">Net token change</p>
+						<ul class="net-tokens">
+							{#each selected.tokens as token (token.id)}
+								<li>
+									<strong class:negative={token.amount < 0n}
+										>{token.amount > 0n ? '+' : ''}{formatTokenAmount(
+											token.amount.toString(),
+											token.decimals
+										)}</strong
+									> <a href={`/token/${token.id}`}>{token.name?.trim() || 'Unnamed token'}</a><small
+										title={token.id}
+										>{truncateMiddle(token.id)}{token.decimals === null
+											? ' · raw units; decimals unknown'
+											: ''}</small
+									>
+								</li>
+							{/each}
+						</ul>
+					</div>{/if}
 			</div>
 			<p class="inspector-note">
 				{selected.inputs} input{selected.inputs === 1 ? '' : 's'} · {selected.outputs} output{selected.outputs ===
@@ -255,6 +317,34 @@
 	.transaction-flow {
 		min-width: 0;
 		padding-top: 8px;
+	}
+	.spatial-beams {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		z-index: 0;
+		fill: none;
+		stroke: var(--accent-ink);
+		stroke-width: 1.5px;
+		opacity: 0.65;
+	}
+	.beam-glow {
+		filter: blur(4px);
+		stroke-width: 7px;
+		opacity: 0.3;
+	}
+	.net-label {
+		display: block;
+		font-size: 11px;
+		color: var(--fg-muted);
+		margin-bottom: 7px;
+		font-family: var(--font-sans);
+		font-weight: 500;
+	}
+	.net-token-group {
+		min-width: 0;
 	}
 	.flow-intro {
 		display: flex;
@@ -637,59 +727,10 @@
 		color: var(--fg-muted);
 		margin-top: 16px;
 	}
-	:global(:root[data-appearance='prism']) .flow-stage {
-		background: linear-gradient(
-			150deg,
-			var(--surface-solid),
-			var(--accent-wash) 65%,
-			var(--bg-sunk)
-		);
-		box-shadow:
-			inset 0 1px 0 var(--surface-solid),
-			var(--shadow-rest);
-	}
-	:global(:root[data-appearance='prism']) .crystal {
-		border-radius: 0;
-		border: none;
-		clip-path: polygon(50% 0, 94% 24%, 94% 76%, 50% 100%, 6% 76%, 6% 24%);
-		width: 96px;
-		height: 110px;
-		margin-top: -17px;
-		background: var(--accent-ink);
-		color: var(--surface-solid);
-	}
-	:global(:root[data-appearance='prism']) .crystal::before {
-		content: '';
-		position: absolute;
-		inset: 0;
-		z-index: -1;
-		clip-path: polygon(0 0, 50% 0, 50% 100%, 0 77%);
-		background: color-mix(in srgb, var(--accent-ink), var(--surface-solid) 22%);
-	}
-	:global(:root[data-appearance='prism']) .crystal::after {
-		content: '';
-		position: absolute;
-		inset: 0;
-		z-index: -1;
-		clip-path: polygon(50% 0, 100% 0, 100% 24%, 50% 50%, 0 24%, 0 0);
-		background: color-mix(in srgb, var(--accent-ink), var(--surface-solid) 42%);
-	}
-	:global(:root[data-appearance='prism']) .crystal-shadow {
-		display: block;
-		position: absolute;
-		top: 92px;
-		width: 76px;
-		height: 14px;
-		left: calc(50% - 38px);
-		background: var(--accent-ink);
-		opacity: 0.18;
-		filter: blur(9px);
-		border-radius: 50%;
-	}
-	:global(:root[data-appearance='prism']) .flow-box {
-		background: linear-gradient(150deg, var(--surface-solid) 65%, var(--surface-hover));
-	}
 	@media (max-width: 760px) {
+		.spatial-beams {
+			display: none;
+		}
 		.flow-intro {
 			display: block;
 		}

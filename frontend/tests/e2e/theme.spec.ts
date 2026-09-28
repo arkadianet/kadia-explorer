@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { block, claimableBox, MOCK_ADDRESS, newestToken, template, tx } from './data';
 
 test('the theme toggle flips the theme and survives a reload', async ({ page }) => {
 	await page.goto('/');
@@ -155,5 +156,74 @@ for (const appearance of ['original', 'aurora', 'atelier', 'prism']) {
 			await page.keyboard.press('Escape');
 			await expect(opener).toBeFocused();
 		});
+	}
+}
+
+// Composition changes affect every route, not only the homepage. These checks guard
+// readable page bounds and content in both modes while manual review judges the design.
+for (const appearance of ['original', 'aurora', 'atelier', 'prism']) {
+	for (const theme of ['light', 'dark']) {
+		for (const width of [320, 1440]) {
+			test(`${appearance} page families remain usable at ${width}, ${theme}`, async ({ page }) => {
+				test.setTimeout(60_000);
+				await page.setViewportSize({ width, height: 900 });
+				await page.addInitScript(
+					({ appearance, theme }) => {
+						localStorage.setItem('xp-appearance', appearance);
+						localStorage.setItem('xp-theme', theme);
+					},
+					{ appearance, theme }
+				);
+				const errors: string[] = [];
+				page.on('pageerror', (error) => errors.push(error.message));
+				const routes = [
+					['/blocks', 'blocks', 'Blocks'],
+					[`/blocks/${block.height}`, 'block', `Block ${block.height}`],
+					['/txs', 'txs', 'Transactions'],
+					[`/tx/${tx.id}`, 'tx', 'Transaction'],
+					[`/address/${MOCK_ADDRESS}`, 'address', 'Address'],
+					[`/box/${claimableBox.id}`, 'box', 'Box'],
+					['/tokens', 'tokens', 'Find the name. Know the identity.'],
+					[`/token/${newestToken.id}`, 'token', newestToken.name!],
+					[`/template/${template.hash}`, 'template', 'Script template'],
+					['/richlist', 'richlist', 'Rich list'],
+					['/rent', 'rent', 'Rent'],
+					['/status', 'status', 'Indexer status'],
+					['/search', 'search', 'Find boxes by register value'],
+					['/page-that-does-not-exist', 'error', '404']
+				];
+				for (const [url, kind, heading] of routes) {
+					await test.step(url, async () => {
+						await page.goto(url);
+						await expect(page.locator('main')).toHaveAttribute('data-page', kind);
+						await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+						await page.evaluate(() => document.fonts.ready);
+						expect(
+							await page.evaluate(() => document.documentElement.scrollWidth),
+							`${appearance} ${theme} ${url} must not scroll the whole page horizontally`
+						).toBe(width);
+						// Closed native dialogs keep their headings in the DOM without a layout box.
+						for (const title of await page.locator('main h1:visible, main h2:visible').all()) {
+							const bounds = await title.boundingBox();
+							expect(bounds!.x).toBeGreaterThanOrEqual(0);
+							expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+						}
+						if (kind === 'address') {
+							const tabs = await page
+								.getByRole('tablist', { name: 'Address sections' })
+								.boundingBox();
+							const table = await page.getByRole('tabpanel').getByRole('table').boundingBox();
+							expect(
+								tabs!.y + tabs!.height <= table!.y + 1 ||
+									tabs!.x + tabs!.width <= table!.x + 1 ||
+									table!.x + table!.width <= tabs!.x + 1,
+								'The activity table must not paint over its tabs'
+							).toBe(true);
+						}
+					});
+				}
+				expect(errors).toEqual([]);
+			});
+		}
 	}
 }

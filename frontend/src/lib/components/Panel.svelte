@@ -42,7 +42,7 @@
 	/* A table is the card's full width; only its cells carry the inset, so column rules line
 	   up with the card edge instead of floating inside a second margin. */
 	.panel-body :global(.table-wrap) {
-		margin: calc(var(--space-4) * -1) calc(var(--space-5) * -1);
+		margin: 0 calc(var(--space-5) * -1);
 	}
 
 	.panel-actions {

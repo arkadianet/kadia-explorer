@@ -15,8 +15,8 @@ for (const width of [320, 768, 1440]) {
 			);
 			await page.goto(`/token/${mainnet.long.id}`);
 			const title = page.locator('h1');
-			for (const appearance of ['Prism', 'Original']) {
-				if (appearance === 'Original') {
+			for (const appearance of ['Prism', 'Original', 'Aurora', 'Atelier']) {
+				if (appearance !== 'Prism') {
 					await page.getByRole('button', { name: 'Appearance', exact: true }).click();
 					const picker = page.getByRole('dialog', { name: 'Choose appearance', exact: true });
 					await picker.getByRole('radio', { name: appearance, exact: true }).check();
@@ -28,7 +28,7 @@ for (const width of [320, 768, 1440]) {
 				expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
 				await expect(title.locator('bdi')).toHaveAttribute('dir', 'auto');
 				const colours = await title.evaluate((element) => {
-					// Original paints the header; Prism lets the page ground show through.
+					// Some designs paint the header; others let the page ground show through.
 					// Its subtle body gradient is checked against the opaque base colour here.
 					let ancestor: Element | null = element.closest('header');
 					while (ancestor) {

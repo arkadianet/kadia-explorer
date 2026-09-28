@@ -408,3 +408,8 @@ h4 {
 .more:focus-visible {
 	color: var(--accent-ink);
 }
+
+/* This table follows status prose; the panel's edge-bleed must not overlap it. */
+.content[data-page='status'] .fields .table-wrap {
+	margin-block: var(--space-4);
+}

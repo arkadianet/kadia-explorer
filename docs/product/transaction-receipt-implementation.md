@@ -116,8 +116,31 @@ Kadia's public node absence response was also checked on 2026-09-28.
 
 ## Selectable appearance and box flow (2026-09-28)
 
-The header's Style control offers Original (forest/lime), Aurora (emerald glass),
-Atelier (paper/copper), and Prism (blue spatial surfaces). Prism is the default.
+The header's Style control offers four complete design presets. Original retains
+the classic sidebar/dashboard; Aurora uses a floating icon rail, an open canvas,
+and layered block architecture; Atelier uses a publication masthead and editorial
+ledger columns; Prism uses a full-width application bar and spatial workspace.
+Prism is the default. Colors, typography, navigation and content composition change
+together, while data and capabilities remain shared.
+
+The layout exposes a `data-page` hook for each route family. Preset styles use
+that hook to compose list pages, entity details, search, rent, status, pending
+transactions and route errors, as well as the home and receipt experiences.
+Original remains the compact dashboard baseline. New presets must differ in
+page structure and information hierarchy, not merely their colors:
+
+| Page family | Aurora | Atelier | Prism |
+| --- | --- | --- | --- |
+| Indexes and lists | Large open headings above inset floating tables | Typographic margin and ruled ledger | Compact toolbar and data workspace |
+| Entity details | Prominent metrics and floating facts | Article heading with catalog facts | Identity inspector beside results |
+| Search and tools | Separated instruments on an open canvas | Editorial forms and section rules | Grouped search and diagnostic workspaces |
+| Pending and errors | Open headline and horizontal observation instruments | Left timeline margin and centered recovery notice | Right observation sequence and horizontal recovery panel |
+
+Tables retain their semantics, exact values and contained scrolling. On narrow
+screens the compositions return to source order without hiding evidence or
+controls. Visual differences must not turn a small dataset into decorative
+filler or imply data that the API does not provide.
+
 The browser saves appearance under `xp-appearance`, separately from the existing
 `xp-theme` light/dark preference. Both are validated and applied before first
 paint; unavailable storage still allows changes for the current session. The
@@ -133,8 +156,25 @@ perspective. The diagram shows transaction topology, never attributed paths or
 value-weighted lines; data inputs are explicitly excluded because they are read,
 not spent. Box amounts remain visible with incomplete inputs, but all exact net
 changes are withheld until every input is resolved. Each side initially shows
-four boxes, expands four at a time, and can collapse independently. The regular
-Receipt remains the default view.
+four boxes, expands four at a time, and can collapse independently. Prism starts
+with Box flow; the other designs start with Receipt. An explicitly selected tab
+is preserved when switching designs during the current transaction visit.
+
+## Design revision validation (2026-09-28)
+
+- All 141 browser cases passed across a 139-pass full run and two targeted passes
+  after fixing Prism's narrow error-page sizing. The new matrix visits 14 route
+  families in four presets, two modes and two widths (320 and 1440), checks page
+  bounds, runtime errors and address-tab/table overlap. Long token titles also
+  retain their bounds and 4.5:1 contrast checks in all four presets.
+- Manual browser review compared every route family in the new desktop layouts,
+  including recorded pending and confirmed storage-rent states, with additional
+  320px and 900px checks. Review corrections include excessive inspector height,
+  undersized primary metrics, narrow description columns, duplicated state-page
+  compositions, and table margins overlapping neighboring content.
+- Frontend checks: 150 unit tests, zero Svelte diagnostics, lint, production build
+  and the 120 KiB home-route JavaScript budget passed (65.96 KiB gzip). The budget
+  measures JavaScript, not the combined transfer size of CSS and fonts.
 
 ## Earlier local validation (2026-09-28)
 

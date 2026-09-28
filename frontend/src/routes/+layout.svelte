@@ -2,6 +2,9 @@
 	import '$lib/styles/tokens.css';
 	import '$lib/styles/base.css';
 	import '$lib/styles/appearances.css';
+	import '$lib/styles/aurora.css';
+	import '$lib/styles/atelier.css';
+	import '$lib/styles/prism.css';
 	import { page } from '$app/state';
 	import { appearance, theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
@@ -22,6 +25,15 @@
 	});
 
 	const h = $derived(status.health);
+	const pageKind = $derived(
+		page.error
+			? 'error'
+			: page.route.id === '/'
+				? 'home'
+				: page.route.id === '/blocks/[id]'
+					? 'block'
+					: (page.route.id?.split('/')[1] ?? 'error')
+	);
 
 	/** The header floats over the page's first section and the lag banner floats under it, so
 	 * both have to be reserved as space: `--banner-h` on the main column is what every page
@@ -111,7 +123,7 @@
 								aria-current={isActive(link.href) ? 'page' : undefined}
 							>
 								<Icon name={link.icon} size={19} />
-								{link.label}
+								<span class="nav-label">{link.label}</span>
 							</a>
 						</li>
 					{/each}
@@ -181,7 +193,7 @@
 			</div>
 		{/if}
 
-		<main class="content">
+		<main class="content" data-page={pageKind}>
 			{@render children()}
 		</main>
 

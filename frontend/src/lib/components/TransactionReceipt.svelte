@@ -11,6 +11,7 @@
 	import Tabs from './Tabs.svelte';
 	import TransactionFlow from './TransactionFlow.svelte';
 	import { status } from '$lib/status/status.svelte';
+	import { appearance } from '$lib/theme/theme.svelte';
 
 	let {
 		tx,
@@ -21,7 +22,8 @@
 		onrefresh: () => void;
 		refreshing?: boolean;
 	} = $props();
-	let active = $state('receipt');
+	let chosenView = $state<string | null>(null);
+	const active = $derived(chosenView ?? (appearance.current === 'prism' ? 'flow' : 'receipt'));
 	let selectedTree = $state('');
 	let evidence = $state<TxEvidence | null>(null);
 	let evidenceState = $state<'loading' | 'ready' | 'unavailable' | 'not-needed'>('not-needed');
@@ -127,7 +129,7 @@
 			{ id: 'evidence', label: 'Evidence' }
 		]}
 		{active}
-		onchange={(id) => (active = id)}
+		onchange={(id) => (chosenView = id)}
 		label="Transaction views"
 	/>
 	<div

@@ -6,7 +6,7 @@ test('home renders the hero and every panel with rows from the mock', async ({ p
 
 	// The hero states the chain's tip, and the panels below it name their own sections.
 	await expect(
-		page.getByRole('heading', { level: 1, name: 'Transparent by design.' })
+		page.getByRole('heading', { level: 1, name: 'Follow the chain. In every dimension.' })
 	).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Live transactions' })).toBeVisible();

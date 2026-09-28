@@ -3,10 +3,10 @@
 	import Icon from './Icon.svelte';
 
 	const choices: { id: Appearance; name: string; description: string }[] = [
-		{ id: 'original', name: 'Original', description: 'Familiar forest and lime.' },
-		{ id: 'aurora', name: 'Aurora', description: 'Luminous emerald and glass.' },
-		{ id: 'atelier', name: 'Atelier', description: 'Warm paper and editorial type.' },
-		{ id: 'prism', name: 'Prism', description: 'Icy blue and spatial depth.' }
+		{ id: 'original', name: 'Original', description: 'Classic sidebar and compact dashboard.' },
+		{ id: 'aurora', name: 'Aurora', description: 'Floating navigation and a luminous canvas.' },
+		{ id: 'atelier', name: 'Atelier', description: 'Editorial masthead and a paper ledger.' },
+		{ id: 'prism', name: 'Prism', description: 'Full-width workspace and spatial transactions.' }
 	];
 	let dialog: HTMLDialogElement;
 	let opener: HTMLButtonElement;
@@ -75,7 +75,7 @@
 		<div>
 			<h2 id="appearance-heading">Choose appearance</h2>
 			<p id="appearance-description">
-				Four ways to see the same chain. Each supports light and dark mode.
+				Choose a layout and visual style. Every design supports light and dark mode.
 			</p>
 		</div>
 		<button type="button" class="close-appearance" onclick={() => dialog.close()}>Close</button>
@@ -334,7 +334,7 @@
 	}
 	.atelier .preview-rail {
 		background: #ded4c3;
-		width: 22px;
+		border-bottom: 2px double #b5a38b;
 	}
 	.atelier .preview-type {
 		font-family: Georgia, serif;
@@ -359,6 +359,24 @@
 	}
 	.prism .preview-rail {
 		background: #d5e4f5;
+	}
+	.atelier,
+	.prism {
+		flex-direction: column;
+	}
+	.atelier .preview-rail,
+	.prism .preview-rail {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		height: 16px;
+		padding: 4px 12px;
+	}
+	.atelier .preview-rail > span,
+	.prism .preview-rail > span {
+		width: 18px;
+		height: 3px;
 	}
 	.prism .preview-type {
 		font-weight: 500;

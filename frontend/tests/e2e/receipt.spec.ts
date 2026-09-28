@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import type { TxDto, TxEvidence, TxStatusDto } from '../../src/lib/api/types.ts';
 
@@ -31,6 +31,11 @@ const evidence: TxEvidence = {
 	)
 };
 
+async function openReceipt(page: Page) {
+	await page.goto(`/tx/${tx.id}`);
+	await page.getByRole('tab', { name: 'Receipt', exact: true }).click();
+}
+
 function expandedFlowTransaction(): TxDto {
 	const expanded = structuredClone(tx);
 	// Four extra input/change pairs keep the original address deltas and fee unchanged.
@@ -54,8 +59,40 @@ test.beforeEach(async ({ page }) => {
 	await page.route(`**/v1/txs/${tx.id}/evidence`, (route) => route.fulfill({ json: evidence }));
 });
 
-test('rent receipt explains exact effects from either address perspective', async ({ page }) => {
+test('Prism opens spatial flow while an explicitly chosen view survives a design switch', async ({
+	page
+}) => {
 	await page.goto(`/tx/${tx.id}`);
+	await expect(page.getByRole('tab', { name: 'Box flow', exact: true })).toHaveAttribute(
+		'aria-selected',
+		'true'
+	);
+	await expect(
+		page.getByRole('region', { name: 'Transaction box flow', exact: true })
+	).toBeVisible();
+	await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+	const picker = page.getByRole('dialog', { name: 'Choose appearance', exact: true });
+	await picker.getByRole('radio', { name: 'Atelier', exact: true }).check();
+	await picker.getByRole('button', { name: 'Close', exact: true }).click();
+	await expect(page.getByRole('tab', { name: 'Receipt', exact: true })).toHaveAttribute(
+		'aria-selected',
+		'true'
+	);
+	await page.getByRole('tab', { name: 'Evidence', exact: true }).click();
+	await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+	await picker.getByRole('radio', { name: 'Prism', exact: true }).check();
+	await picker.getByRole('button', { name: 'Close', exact: true }).click();
+	await expect(page.getByRole('tab', { name: 'Evidence', exact: true })).toHaveAttribute(
+		'aria-selected',
+		'true'
+	);
+	await expect(
+		page.getByRole('heading', { name: 'How this receipt was determined' })
+	).toBeVisible();
+});
+
+test('rent receipt explains exact effects from either address perspective', async ({ page }) => {
+	await openReceipt(page);
 	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
 	await expect(receipt.getByRole('heading', { name: 'Storage rent claim' })).toBeVisible();
 	await expect(receipt.getByText('8 confirmations at last check')).toBeVisible();
@@ -103,7 +140,7 @@ test('a confirmed receipt leads with its net amount and keeps observation detail
 		retention_seconds: 3600
 	};
 	await page.route(`**/v1/txs/${tx.id}/status`, (route) => route.fulfill({ json: status }));
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
 	await expect(receipt.getByRole('heading', { name: 'Storage rent claim' })).toBeVisible();
 	const amount = receipt.getByRole('tabpanel').getByText('+2,000', { exact: true });
@@ -122,7 +159,7 @@ test('source failure preserves exact balances without inventing a claim label', 
 	await page.route(`**/v1/txs/${tx.id}/evidence`, (route) =>
 		route.fulfill({ status: 503, json: { detail: 'Unavailable' } })
 	);
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
 	await expect(
 		receipt.getByText('Spending evidence is unavailable.', { exact: false })
@@ -139,14 +176,14 @@ test('missing historical inputs never turn output values into net receipts', asy
 	const partial = structuredClone(tx);
 	partial.inputs[0].box = null;
 	await page.route(`**/v1/txs/${tx.id}`, (route) => route.fulfill({ json: partial }));
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	await expect(page.getByRole('heading', { name: 'Balance changes unavailable' })).toBeVisible();
 	await expect(page.getByRole('combobox')).toHaveCount(0);
 });
 
 test('mobile receipt and evidence stay within the page', async ({ page }) => {
 	await page.setViewportSize({ width: 320, height: 900 });
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	await expect(page.getByRole('heading', { name: 'Storage rent claim' })).toBeVisible();
 	for (const tab of ['Receipt', 'Box flow', 'Balance changes', 'Evidence']) {
 		await page.getByRole('tab', { name: tab, exact: true }).click();
@@ -160,7 +197,7 @@ test('manual refresh recognizes newly resolved historical inputs', async ({ page
 	let current = structuredClone(tx);
 	current.inputs[0].box = null;
 	await page.route(`**/v1/txs/${tx.id}`, (route) => route.fulfill({ json: current }));
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	await expect(page.getByRole('heading', { name: 'Balance changes unavailable' })).toBeVisible();
 	current = tx;
 	await page.getByRole('button', { name: 'Refresh', exact: true }).click();
@@ -171,7 +208,7 @@ test('manual refresh recognizes newly resolved historical inputs', async ({ page
 test('selecting an input in Box flow changes the existing address receipt exactly', async ({
 	page
 }) => {
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
 	const summary = receipt.getByRole('tabpanel', { name: 'Receipt', exact: true });
 	const flow = receipt.getByRole('tabpanel', { name: 'Box flow', exact: true });
@@ -202,7 +239,7 @@ test('Box flow keeps known box values separate from unavailable net changes', as
 	const partial = structuredClone(tx);
 	partial.inputs[0].box = null;
 	await page.route(`**/v1/txs/${tx.id}`, (route) => route.fulfill({ json: partial }));
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
 	await receipt.getByRole('tab', { name: 'Box flow', exact: true }).click();
 	const flow = receipt.getByRole('tabpanel', { name: 'Box flow', exact: true });
@@ -250,7 +287,7 @@ test('Box flow expands both sides independently and fits a 320px screen', async 
 			}
 		})
 	);
-	await page.goto(`/tx/${tx.id}`);
+	await openReceipt(page);
 	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
 	await receipt.getByRole('tab', { name: 'Box flow', exact: true }).click();
 	const flow = receipt.getByRole('tabpanel', { name: 'Box flow', exact: true });

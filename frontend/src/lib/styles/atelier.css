@@ -1,0 +1,1734 @@
+/* Atelier is an editorial layout: masthead, column rules, and a paper ledger.
+   Scope every rule so changing appearance restores the other compositions. */
+:root[data-appearance='atelier'] {
+	--atelier-rule: 4px double var(--fg);
+	--atelier-paper-shadow:
+		1px 1px 0 var(--hairline), 5px 5px 0 -2px var(--surface), 6px 6px 0 -2px var(--hairline),
+		0 18px 30px -18px light-dark(#57402650, #000000a0);
+}
+
+:root[data-appearance='atelier'] body {
+	background: var(--bg);
+}
+
+:root[data-appearance='atelier'] .rail {
+	background: transparent;
+	color: var(--fg);
+	border-bottom: var(--atelier-rule);
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .rail .brand {
+	color: var(--fg);
+}
+
+:root[data-appearance='atelier'] .brand .name {
+	font-family: var(--font-display);
+	font-weight: 600;
+	letter-spacing: -0.065em;
+}
+
+:root[data-appearance='atelier'] .brand .mark {
+	background: transparent;
+	color: var(--accent-ink);
+	border: 3px double currentColor;
+	border-radius: 50%;
+	font-family: Georgia, serif;
+	font-weight: 400;
+}
+
+:root[data-appearance='atelier'] .brand .sub {
+	color: var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+}
+
+:root[data-appearance='atelier'] .chain,
+:root[data-appearance='atelier'] .chain:hover,
+:root[data-appearance='atelier'] .chain-head,
+:root[data-appearance='atelier'] .chain-row b,
+:root[data-appearance='atelier'] .note {
+	color: var(--fg-muted);
+}
+
+:root[data-appearance='atelier'] .chain .tone-ok {
+	color: var(--ok-ink);
+}
+
+:root[data-appearance='atelier'] .topbar {
+	background: var(--bg);
+	box-shadow: none;
+	border-bottom: var(--rule);
+}
+
+:root[data-appearance='atelier'] .content {
+	gap: 30px;
+}
+
+:root[data-appearance='atelier'] .page-head,
+:root[data-appearance='atelier'] .page-head.identified {
+	padding: 24px 0 20px;
+	border: 0;
+	border-bottom: var(--atelier-rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .page-head h1 {
+	font-size: clamp(38px, 5vw, 68px);
+	line-height: 1;
+	letter-spacing: -0.045em;
+}
+
+:root[data-appearance='atelier'] .content .panel.card,
+:root[data-appearance='atelier'] .content .results.card {
+	border: 0;
+	border-top: var(--atelier-rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .card-head,
+:root[data-appearance='atelier'] .panel-head {
+	padding: 14px 0;
+	background: transparent;
+	border-bottom: var(--rule);
+}
+
+:root[data-appearance='atelier'] .card-title {
+	font-size: 28px;
+	line-height: 1.05;
+}
+
+:root[data-appearance='atelier'] .hero {
+	margin: 0;
+	border: 0;
+	border-bottom: var(--atelier-rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	overflow: visible;
+}
+
+:root[data-appearance='atelier'] .hero-in {
+	padding: 24px 0 36px;
+	margin: 0;
+	border: 0;
+}
+
+:root[data-appearance='atelier'] .hero h1 {
+	font-size: clamp(54px, 7.5vw, 102px);
+	font-weight: 500;
+	letter-spacing: -0.055em;
+	line-height: 0.91;
+	margin-top: 26px;
+}
+
+:root[data-appearance='atelier'] .hero h1 span {
+	font-style: italic;
+	color: var(--accent-ink);
+}
+
+:root[data-appearance='atelier'] .hero .kicker {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.15em;
+}
+
+:root[data-appearance='atelier'] .hero .lede {
+	font-size: 15px;
+	line-height: 1.8;
+	max-width: 35ch;
+	margin-top: 26px;
+}
+
+:root[data-appearance='atelier'] .hero .cta {
+	gap: 10px;
+	margin-top: 28px;
+}
+
+:root[data-appearance='atelier'] .btn,
+:root[data-appearance='atelier'] .seg,
+:root[data-appearance='atelier'] .seg-btn {
+	border-radius: 2px;
+}
+
+:root[data-appearance='atelier'] .hero .btn {
+	font-size: 12px;
+	height: 43px;
+	padding: 0 17px;
+}
+
+:root[data-appearance='atelier'] .tipcard {
+	width: 100%;
+	border: var(--rule);
+	border-top: var(--atelier-rule);
+	border-radius: 0;
+	padding: 24px;
+	background: var(--surface-solid);
+	box-shadow: var(--atelier-paper-shadow);
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+:root[data-appearance='atelier'] .tipcard-head,
+:root[data-appearance='atelier'] .tipcard-foot {
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+:root[data-appearance='atelier'] .tipcard-height {
+	font-size: clamp(40px, 4.8vw, 62px);
+	font-weight: 500;
+	line-height: 1;
+	margin: 16px 0 8px;
+}
+
+:root[data-appearance='atelier'] .home-chain-scene {
+	display: grid;
+	gap: 0;
+	min-width: 0;
+	border-top: 1px solid var(--fg);
+	border-bottom: 1px solid var(--fg);
+	padding: 3px 0;
+}
+
+:root[data-appearance='atelier'] .scene-block {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 4px 12px;
+	align-items: center;
+	padding: 11px 4px;
+	color: var(--fg);
+	border-bottom: var(--rule);
+	text-decoration: none;
+}
+
+:root[data-appearance='atelier'] .scene-block:last-child {
+	border-bottom: 0;
+}
+
+:root[data-appearance='atelier'] .scene-block:hover,
+:root[data-appearance='atelier'] .scene-block:focus-visible {
+	background: var(--surface-hover);
+}
+
+:root[data-appearance='atelier'] .scene-index {
+	grid-column: 1 / -1;
+	grid-row: 1;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	color: var(--accent-ink);
+}
+
+:root[data-appearance='atelier'] .scene-height {
+	grid-column: 1;
+	grid-row: 2;
+	font-family: var(--font-mono);
+	font-size: 13px;
+	font-weight: 500;
+}
+
+:root[data-appearance='atelier'] .scene-count,
+:root[data-appearance='atelier'] .scene-id {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--fg-muted);
+}
+
+:root[data-appearance='atelier'] .scene-count {
+	grid-column: 2;
+	grid-row: 2;
+	text-align: right;
+}
+
+:root[data-appearance='atelier'] .scene-id {
+	grid-column: 1;
+	grid-row: 3;
+	overflow-wrap: anywhere;
+}
+
+:root[data-appearance='atelier'] .scene-block > svg {
+	grid-column: 2;
+	grid-row: 3;
+	justify-self: end;
+	width: 13px;
+	height: 13px;
+}
+
+:root[data-appearance='atelier'] .stats {
+	gap: 0;
+	border-top: var(--atelier-rule);
+}
+
+:root[data-appearance='atelier'] .stat.glass {
+	border: 0;
+	border-bottom: var(--rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	padding: 16px 0;
+}
+
+:root[data-appearance='atelier'] .stat-label {
+	font: 11px var(--font-mono);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+:root[data-appearance='atelier'] .stat-value {
+	font-size: 35px;
+	line-height: 1.2;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+:root[data-appearance='atelier'] .panels {
+	gap: 30px;
+}
+
+:root[data-appearance='atelier'] .live {
+	--ink-fg: var(--fg);
+	--ink-fg-muted: var(--fg-muted);
+	--ink-hairline: var(--hairline);
+	border-top: var(--atelier-rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .live .live-pill {
+	background: var(--accent-wash);
+	color: var(--accent-ink);
+}
+
+:root[data-appearance='atelier'] .live .txlist > li > a {
+	padding-inline: 0;
+}
+
+:root[data-appearance='atelier'] .live .kind {
+	border: var(--rule);
+	border-radius: 50%;
+	color: var(--accent-ink);
+	background: var(--surface-solid);
+}
+
+:root[data-appearance='atelier'] .live a:hover,
+:root[data-appearance='atelier'] .live a:focus-visible {
+	color: var(--accent-ink);
+}
+
+:root[data-appearance='atelier'] .deeper {
+	margin: 0;
+	border-top: var(--atelier-rule);
+	background: transparent;
+	color: var(--fg);
+	border-radius: 0;
+}
+
+:root[data-appearance='atelier'] .deeper-in {
+	padding: 20px 0;
+}
+
+:root[data-appearance='atelier'] .deeper-head h2 {
+	font-size: 40px;
+}
+
+:root[data-appearance='atelier'] .deeper-head p,
+:root[data-appearance='atelier'] .tool-sub {
+	color: var(--fg-muted);
+}
+
+:root[data-appearance='atelier'] .tool {
+	border: 0;
+	border-left: var(--rule);
+	border-radius: 0;
+	background: transparent;
+	color: var(--fg);
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .tool:hover {
+	background: var(--surface-hover);
+	color: var(--fg);
+}
+
+:root[data-appearance='atelier'] .tool-icon {
+	color: var(--accent-ink);
+}
+
+:root[data-appearance='atelier'] .foot {
+	border-top: var(--atelier-rule);
+	max-width: none;
+}
+
+/* The receipt is a sheet in the ledger, while the metadata remains in the margin. */
+:root[data-appearance='atelier'] .receipt {
+	padding: 30px;
+	border: var(--rule);
+	border-top: var(--atelier-rule);
+	border-left: var(--rule);
+	border-radius: 0;
+	background: var(--surface-solid);
+	box-shadow: var(--atelier-paper-shadow);
+}
+
+:root[data-appearance='atelier'] .receipt::before {
+	inset: 0;
+	width: auto;
+	height: auto;
+	transform: none;
+	background: linear-gradient(105deg, transparent 46%, var(--hairline) 50%, transparent 53%);
+	mask-image: none;
+	opacity: 0.17;
+}
+
+:root[data-appearance='atelier'] .receipt-heading h2 {
+	font-size: clamp(38px, 4.4vw, 60px);
+	line-height: 0.98;
+	letter-spacing: -0.04em;
+}
+
+:root[data-appearance='atelier'] .receipt-section .confirmation {
+	padding: 10px 0;
+	border-top: var(--rule);
+	border-bottom: var(--rule);
+	border-radius: 0;
+	background: transparent;
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+:root[data-appearance='atelier'] .receipt .asset-icon {
+	width: 62px;
+	height: 62px;
+	border: 4px double var(--accent-ink);
+	border-radius: 50%;
+	background: transparent;
+	color: var(--accent-ink);
+	box-shadow: none;
+	transform: rotate(-9deg);
+}
+
+:root[data-appearance='atelier'] .receipt .amount {
+	font-size: clamp(40px, 5.5vw, 76px);
+	line-height: 1;
+	font-weight: 500;
+}
+
+:root[data-appearance='atelier'] .receipt .asset-name {
+	font-family: var(--font-display);
+	font-size: 28px;
+}
+
+:root[data-appearance='atelier'] .receipt-facts {
+	grid-template-columns: minmax(0, 1fr);
+	gap: 12px;
+}
+
+:root[data-appearance='atelier'] .receipt-facts > div {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 4px 16px;
+}
+
+:root[data-appearance='atelier'] .receipt-facts strong {
+	font-family: var(--font-mono);
+	font-size: 14px;
+}
+
+:root[data-appearance='atelier'] .receipt-section .eyebrow,
+:root[data-appearance='atelier'] .receipt-section .token-id {
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+:root[data-appearance='atelier'] .receipt-section .perspective {
+	display: block;
+	margin-bottom: 18px;
+}
+
+:root[data-appearance='atelier'] .perspective select {
+	display: block;
+	width: 100%;
+	margin-top: 8px;
+	border-radius: 0;
+}
+
+:root[data-appearance='atelier'] .transaction-flow .flow-stage {
+	border: 0;
+	border-top: var(--atelier-rule);
+	border-bottom: var(--rule);
+	border-radius: 0;
+	background: transparent;
+	padding-inline: 0;
+}
+
+:root[data-appearance='atelier'] .transaction-flow .flow-box,
+:root[data-appearance='atelier'] .transaction-flow .flow-inspector {
+	border-radius: 0;
+	box-shadow: var(--atelier-paper-shadow);
+}
+
+:root[data-appearance='atelier'] .transaction-flow .crystal {
+	border: 4px double var(--accent-ink);
+	border-radius: 50%;
+	background: var(--bg);
+	box-shadow: none;
+}
+
+/* Token names read as an index of records, not interchangeable product cards. */
+:root[data-appearance='atelier'] .discovery {
+	border: 0;
+	border-top: var(--atelier-rule);
+	border-bottom: var(--rule);
+	border-radius: 0;
+	padding: 26px 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .discovery h1 {
+	font-size: clamp(46px, 5.4vw, 76px);
+	line-height: 0.96;
+	letter-spacing: -0.045em;
+}
+
+:root[data-appearance='atelier'] .discovery h1 span {
+	font-style: italic;
+}
+
+:root[data-appearance='atelier'] .discovery .intro {
+	border-left: var(--rule);
+	padding-left: 16px;
+	margin-top: 22px;
+}
+
+:root[data-appearance='atelier'] .discovery .token-search {
+	border: var(--rule);
+	border-top: 3px double var(--fg);
+	border-radius: 0;
+	background: var(--surface-solid);
+	box-shadow: var(--atelier-paper-shadow);
+}
+
+:root[data-appearance='atelier'] .discovery .search-submit,
+:root[data-appearance='atelier'] .results .inspect {
+	border-radius: 0;
+}
+
+:root[data-appearance='atelier'] .discovery .eyebrow,
+:root[data-appearance='atelier'] .token-search label,
+:root[data-appearance='atelier'] .results .identity-label,
+:root[data-appearance='atelier'] .results .holders span {
+	font-size: 11px;
+}
+
+:root[data-appearance='atelier'] .results-heading {
+	padding: 20px 0;
+	align-items: baseline;
+}
+
+:root[data-appearance='atelier'] .results-heading h2 {
+	font-family: var(--font-display);
+	font-size: 42px;
+	font-weight: 500;
+}
+
+:root[data-appearance='atelier'] .token-result {
+	padding: 24px 0;
+	grid-template-columns: 44px minmax(0, 1fr) auto auto;
+}
+
+:root[data-appearance='atelier'] .token-symbol {
+	width: 40px;
+	height: 40px;
+	border: 3px double var(--accent-ink);
+	border-radius: 50%;
+	background: transparent;
+	font-family: var(--font-display);
+	font-weight: 500;
+}
+
+:root[data-appearance='atelier'] .results .name-line > a {
+	font-family: var(--font-display);
+	font-size: 32px;
+	font-weight: 600;
+}
+
+@media (min-width: 900px) {
+	:root[data-appearance='atelier'] .shell {
+		display: block;
+		max-width: 1460px;
+		margin: 0 auto;
+		padding: 22px 40px 0;
+	}
+
+	:root[data-appearance='atelier'] .rail {
+		border-top: 5px solid var(--fg);
+	}
+
+	:root[data-appearance='atelier'] .rail-in {
+		position: static;
+		display: grid;
+		grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1fr);
+		gap: 16px 36px;
+		height: auto;
+		padding: 22px 0 0;
+	}
+
+	:root[data-appearance='atelier'] .rail .brand {
+		padding: 0;
+		align-self: start;
+		gap: 20px;
+	}
+
+	:root[data-appearance='atelier'] .rail .brand .name {
+		font-size: 80px;
+		line-height: 0.84;
+	}
+
+	:root[data-appearance='atelier'] .rail .brand .sub {
+		margin-top: 13px;
+	}
+
+	:root[data-appearance='atelier'] .rail .mark {
+		width: 52px;
+		height: 52px;
+		font-size: 33px;
+	}
+
+	:root[data-appearance='atelier'] .rail-foot {
+		grid-column: 2;
+		grid-row: 1;
+		margin: 0;
+		gap: 8px;
+	}
+
+	:root[data-appearance='atelier'] .rail-foot .chain {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px 20px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+	}
+
+	:root[data-appearance='atelier'] .chain-head {
+		grid-column: 1 / -1;
+		font: 11px var(--font-mono);
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+
+	:root[data-appearance='atelier'] .chain-row {
+		display: block;
+		font-size: 11px;
+	}
+
+	:root[data-appearance='atelier'] .chain-row b {
+		display: block;
+		margin-top: 3px;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--fg);
+	}
+
+	:root[data-appearance='atelier'] .rail-foot .note {
+		padding: 0;
+		font-size: 11px;
+	}
+
+	:root[data-appearance='atelier'] .nav {
+		grid-column: 1 / -1;
+		border-top: var(--rule);
+	}
+
+	:root[data-appearance='atelier'] .nav ul {
+		flex-direction: row;
+		justify-content: space-between;
+		gap: 6px;
+	}
+
+	:root[data-appearance='atelier'] .nav a {
+		height: 46px;
+		padding: 0 6px;
+		border-radius: 0;
+		font-size: 12px;
+		color: var(--fg-muted);
+		background: transparent;
+		border-bottom: 3px solid transparent;
+	}
+
+	:root[data-appearance='atelier'] .nav a > svg {
+		display: none;
+	}
+
+	:root[data-appearance='atelier'] .nav a.current,
+	:root[data-appearance='atelier'] .nav a:hover {
+		color: var(--fg);
+		background: transparent;
+		border-bottom-color: var(--accent-ink);
+	}
+
+	:root[data-appearance='atelier'] .nav :focus-visible {
+		outline-color: var(--accent-ink);
+	}
+
+	:root[data-appearance='atelier'] .topbar {
+		position: relative;
+		padding: 0;
+		height: var(--topbar-h);
+	}
+
+	:root[data-appearance='atelier'] .content {
+		padding: calc(26px + var(--banner-h, 0px)) 0 54px;
+		max-width: none;
+	}
+
+	:root[data-appearance='atelier'] .banner {
+		left: 0;
+		right: 0;
+	}
+
+	:root[data-appearance='atelier'] .home-dashboard {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(210px, 0.32fr);
+		gap: 34px;
+		align-items: start;
+	}
+
+	:root[data-appearance='atelier'] .home-dashboard > .hero {
+		grid-column: 1 / -1;
+	}
+
+	:root[data-appearance='atelier'] .hero-in {
+		display: grid;
+		grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.85fr);
+		gap: 28px 70px;
+		align-items: start;
+		padding: 26px 24px 48px 0;
+	}
+
+	:root[data-appearance='atelier'] .hero-copy {
+		grid-row: 1 / 3;
+		max-width: none;
+		align-self: center;
+	}
+
+	:root[data-appearance='atelier'] .tipcard {
+		grid-column: 2;
+		grid-row: 1;
+		transform: rotate(-2deg);
+	}
+
+	:root[data-appearance='atelier'] .home-chain-scene {
+		grid-column: 2;
+		grid-row: 2;
+		margin: 0 8px;
+	}
+
+	:root[data-appearance='atelier'] .home-dashboard > .stats {
+		grid-column: 2;
+		grid-row: 2;
+		grid-template-columns: minmax(0, 1fr);
+		padding-left: 24px;
+		border-left: var(--rule);
+	}
+
+	:root[data-appearance='atelier'] .home-dashboard > .panels:not(.three) {
+		grid-column: 1;
+		grid-row: 2;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 30px;
+	}
+
+	:root[data-appearance='atelier'] .home-dashboard > .panels.three {
+		grid-column: 1 / -1;
+		grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+	}
+
+	:root[data-appearance='atelier'] .home-dashboard > .deeper {
+		grid-column: 1 / -1;
+	}
+
+	:root[data-appearance='atelier'] .receipt-section {
+		display: grid;
+		grid-template-columns: minmax(0, 0.5fr) minmax(0, 1fr);
+		gap: 18px 44px;
+	}
+
+	:root[data-appearance='atelier'] .receipt-heading {
+		grid-column: 1;
+		grid-row: 1;
+		display: block;
+	}
+
+	:root[data-appearance='atelier'] .receipt-section .confirmation {
+		margin-top: 24px;
+	}
+
+	:root[data-appearance='atelier'] .receipt-section > .snapshot {
+		grid-column: 1;
+		grid-row: 2;
+		display: block;
+		align-self: start;
+		line-height: 1.8;
+	}
+
+	:root[data-appearance='atelier'] .snapshot .refresh {
+		padding-left: 0;
+	}
+
+	:root[data-appearance='atelier'] .receipt-section > .tabs {
+		grid-column: 2;
+		grid-row: 1;
+		align-self: end;
+	}
+
+	:root[data-appearance='atelier'] .receipt-section > [role='tabpanel'] {
+		grid-column: 2;
+		grid-row: 2 / 5;
+		min-width: 0;
+	}
+
+	:root[data-appearance='atelier'] .receipt-section > #panel-flow {
+		grid-column: 1 / -1;
+		grid-row: 3;
+	}
+
+	:root[data-appearance='atelier'] .discovery {
+		display: grid;
+		grid-template-columns: minmax(0, 1.3fr) minmax(270px, 0.8fr);
+		gap: 20px 50px;
+	}
+
+	:root[data-appearance='atelier'] .discovery-head {
+		grid-column: 1;
+		grid-row: 1 / 4;
+		display: block;
+	}
+
+	:root[data-appearance='atelier'] .discovery .token-search {
+		grid-column: 2;
+		display: grid;
+		gap: 20px;
+		padding: 26px;
+		margin: 10px 0 0;
+	}
+
+	:root[data-appearance='atelier'] .token-search .query-field,
+	:root[data-appearance='atelier'] .token-search .match-field {
+		width: 100%;
+		padding: 0 0 12px;
+		border: 0;
+		border-bottom: var(--rule);
+	}
+
+	:root[data-appearance='atelier'] .discovery > .search-note {
+		grid-column: 2;
+		margin: 0;
+	}
+
+	:root[data-appearance='atelier'] .foot {
+		padding-inline: 0;
+	}
+}
+
+@media (min-width: 900px) and (max-width: 1100px) {
+	:root[data-appearance='atelier'] .shell {
+		padding-inline: 26px;
+	}
+
+	:root[data-appearance='atelier'] .hero-in {
+		column-gap: 30px;
+		padding-right: 8px;
+	}
+
+	:root[data-appearance='atelier'] .hero h1 {
+		font-size: 70px;
+	}
+
+	:root[data-appearance='atelier'] .receipt-section {
+		column-gap: 24px;
+	}
+
+	:root[data-appearance='atelier'] .panels.three {
+		gap: 18px;
+	}
+}
+
+@media (max-width: 899px) {
+	:root[data-appearance='atelier'] .rail .name {
+		font-size: 38px;
+	}
+
+	:root[data-appearance='atelier'] .rail .sub {
+		font-size: 11px;
+		letter-spacing: 0;
+	}
+
+	:root[data-appearance='atelier'] .hero-in {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 26px;
+	}
+
+	:root[data-appearance='atelier'] .hero-copy {
+		max-width: none;
+	}
+
+	:root[data-appearance='atelier'] .hero .lede {
+		max-width: 44ch;
+	}
+
+	:root[data-appearance='atelier'] .tipcard {
+		max-width: none;
+		padding: 22px;
+	}
+
+	:root[data-appearance='atelier'] .home-chain-scene {
+		margin: 0 0 10px;
+	}
+
+	:root[data-appearance='atelier'] .stats {
+		gap: 0 24px;
+	}
+
+	:root[data-appearance='atelier'] .receipt .asset-icon {
+		width: 44px;
+		height: 44px;
+	}
+
+	:root[data-appearance='atelier'] .receipt {
+		padding: 24px 18px;
+	}
+
+	:root[data-appearance='atelier'] .discovery {
+		padding-block: 22px;
+	}
+
+	:root[data-appearance='atelier'] .discovery-head {
+		display: block;
+	}
+
+	:root[data-appearance='atelier'] .token-result {
+		grid-template-columns: 40px minmax(0, 1fr);
+		gap: 12px;
+	}
+
+	:root[data-appearance='atelier'] .token-result .holders {
+		grid-column: 2;
+		text-align: left;
+	}
+
+	:root[data-appearance='atelier'] .result-actions {
+		grid-column: 2;
+		display: flex;
+		flex-wrap: wrap;
+	}
+
+	:root[data-appearance='atelier'] .results .name-line > a {
+		font-size: 27px;
+	}
+}
+
+@media (max-width: 480px) {
+	:root[data-appearance='atelier'] .hero h1 {
+		font-size: 56px;
+	}
+
+	:root[data-appearance='atelier'] .hero .cta {
+		gap: 8px;
+	}
+
+	:root[data-appearance='atelier'] .hero .btn {
+		padding-inline: 12px;
+	}
+
+	:root[data-appearance='atelier'] .discovery h1 {
+		font-size: 46px;
+	}
+
+	:root[data-appearance='atelier'] .token-result .token-identity .hash {
+		max-width: 100%;
+		font-size: 11px;
+	}
+}
+
+/* Inner routes use the same publication grammar, with a composition chosen for the
+   information: index ledger, entity catalog, observation report, or lookup form. */
+:root[data-appearance='atelier'] .content:not([data-page='home']) .facts {
+	padding: 0;
+	border: 0;
+	border-top: var(--atelier-rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .fact {
+	padding: 14px 0;
+	border-bottom: var(--rule);
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .fact .label {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.035em;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .panel-body {
+	padding: 20px 0;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .panel-body .table-wrap {
+	margin: 0;
+	max-width: 100%;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .table thead th {
+	background: var(--bg);
+	border-bottom: 2px solid var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	font-weight: 500;
+	height: 38px;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .table th:first-child,
+:root[data-appearance='atelier'] .content:not([data-page='home']) .table td:first-child {
+	padding-left: 8px;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .table th:last-child,
+:root[data-appearance='atelier'] .content:not([data-page='home']) .table td:last-child {
+	padding-right: 8px;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .table tbody tr {
+	height: 42px;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .table tbody td {
+	border-bottom: var(--rule);
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .load {
+	border-radius: 0;
+	height: 36px;
+	padding-inline: 18px;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .tabs {
+	gap: 24px;
+	border-bottom: 1px solid var(--fg-muted);
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .tab {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	padding-block: 13px;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .box {
+	padding: 18px 0 18px 18px;
+	border: 0;
+	border-left: 3px solid var(--hairline);
+	border-bottom: var(--rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .box.live {
+	border-left-color: var(--ok-ink);
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .box > header {
+	margin-bottom: 14px;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .box > header .amount {
+	font-family: var(--font-display);
+	font-size: 28px;
+	font-weight: 500;
+}
+
+:root[data-appearance='atelier'] .content:not([data-page='home']) .box .section-title {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	letter-spacing: 0.05em;
+}
+
+:root[data-appearance='atelier'] .content .error[role='alert'] {
+	padding: 16px 18px;
+	border-left: 3px solid var(--danger-ink);
+	border-bottom: var(--rule);
+	background: transparent;
+	max-width: none;
+}
+
+:root[data-appearance='atelier'] .content .error[role='alert'] .title {
+	font-family: var(--font-display);
+	font-size: 30px;
+	font-weight: 600;
+}
+
+:root[data-appearance='atelier'] .content .error[role='alert'] .detail {
+	overflow-wrap: anywhere;
+}
+
+:root[data-appearance='atelier'] .content .empty {
+	padding: 24px 0;
+	font-family: var(--font-display);
+	font-size: 24px;
+	line-height: 1.35;
+	max-width: 42ch;
+	overflow-wrap: anywhere;
+}
+
+:root[data-appearance='atelier'] .content[data-page='richlist'] .note {
+	display: block;
+	padding: 0 0 20px;
+	font-size: 14px;
+	line-height: 1.7;
+}
+
+:root[data-appearance='atelier'] .content[data-page='richlist'] tbody td:first-child {
+	font-family: var(--font-display);
+	font-size: 24px;
+	color: var(--accent-ink);
+}
+
+:root[data-appearance='atelier'] .content[data-page='rent'] .sum {
+	padding: 18px 0;
+	font-size: 15px;
+	border-top: var(--rule);
+	line-height: 1.6;
+}
+
+:root[data-appearance='atelier'] .content[data-page='rent'] .sum .note {
+	display: block;
+	padding: 8px 0 0;
+	font-family: var(--font-sans);
+	font-size: 12px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='rent'] .controls {
+	padding: 18px 0;
+	flex-wrap: wrap;
+	gap: 12px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='address'] .balance {
+	display: block;
+	padding-top: 20px;
+	border-top: var(--rule);
+	margin-top: 20px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='address'] .balance .amount {
+	font-family: var(--font-display);
+	font-size: clamp(34px, 4vw, 56px);
+	font-weight: 500;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+:root[data-appearance='atelier'] .content[data-page='box'] .ergo-tree {
+	padding: 14px 0;
+	border-top: var(--rule);
+	border-bottom: var(--rule);
+}
+
+:root[data-appearance='atelier'] .content[data-page='box'] .hex {
+	border-radius: 0;
+	border-left: 3px double var(--hairline);
+	background: var(--surface);
+	line-height: 1.65;
+}
+
+:root[data-appearance='atelier'] .content[data-page='template'] .head > .lede {
+	font-size: 17px;
+	line-height: 1.65;
+	max-width: 38ch;
+}
+
+:root[data-appearance='atelier'] .content[data-page='token'] .head .fact:has(.desc) {
+	grid-column: 1 / -1;
+}
+
+:root[data-appearance='atelier'] .content[data-page='token'] .desc {
+	max-width: none;
+	line-height: 1.7;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking {
+	border: 0;
+	border-top: var(--atelier-rule);
+	border-bottom: var(--rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	padding: 22px 0;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking.confirmed {
+	border-top: var(--rule);
+	padding: 12px 0;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking .eyebrow {
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking button {
+	border-radius: 0;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking:not(.confirmed) h2 {
+	font-size: clamp(38px, 5vw, 66px);
+	line-height: 1;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking .steps {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	border-left: 4px double var(--hairline);
+	padding-left: 20px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking .steps > div {
+	display: grid;
+	grid-template-columns: 34px minmax(0, 1fr);
+	gap: 12px;
+	align-items: baseline;
+	padding: 16px 0;
+	border: 0;
+	border-bottom: var(--rule);
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking .steps span {
+	font-family: var(--font-display);
+	font-size: 28px;
+	line-height: 1;
+	margin: 0;
+}
+
+:root[data-appearance='atelier'] .content[data-page='tx'] .tracking .pending-facts {
+	gap: 18px;
+	border-top: var(--rule);
+	padding-top: 18px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='search'] .reg-form .field.grow {
+	min-width: 0;
+	flex-basis: 220px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='search'] .control {
+	border-radius: 0;
+}
+
+:root[data-appearance='atelier'] .content[data-page='search'] .found {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	padding-bottom: 16px;
+	border-bottom: var(--rule);
+}
+
+:root[data-appearance='atelier'] .content[data-page='status'] .fields {
+	max-width: none;
+	border-top: var(--atelier-rule);
+}
+
+:root[data-appearance='atelier'] .content[data-page='status'] .panel-body > p:first-child {
+	font-family: var(--font-display);
+	font-size: clamp(36px, 5vw, 64px);
+	line-height: 1;
+	margin-bottom: 12px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='status'] .panel-body > p:nth-child(2) {
+	font-size: 15px;
+	line-height: 1.75;
+	color: var(--fg-muted);
+	max-width: 36ch;
+	margin-bottom: 24px;
+}
+
+:root[data-appearance='atelier'] .content[data-page='error'] > .error {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	max-width: 720px;
+	width: 100%;
+	margin-inline: auto;
+	padding: 36px 0;
+	border: 0;
+	border-top: var(--atelier-rule);
+	border-bottom: var(--atelier-rule);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	gap: 18px;
+	text-align: center;
+}
+
+:root[data-appearance='atelier'] .content[data-page='error'] > .error .search {
+	width: 100%;
+	max-width: 520px;
+	margin-block: 6px;
+	text-align: left;
+}
+
+:root[data-appearance='atelier'] .content[data-page='error'] > .error h1 {
+	font-family: var(--font-display);
+	font-size: clamp(80px, 12vw, 160px);
+	font-weight: 500;
+	line-height: 0.9;
+}
+
+:root[data-appearance='atelier'] .content[data-page='error'] .message {
+	font-family: var(--font-display);
+	font-size: clamp(28px, 3vw, 42px);
+	font-weight: 500;
+	line-height: 1.1;
+	overflow-wrap: anywhere;
+}
+
+@media (min-width: 900px) {
+	/* A labeled margin beside the running register; table semantics remain intact. */
+	:root[data-appearance='atelier']
+		.content:is([data-page='blocks'], [data-page='txs'], [data-page='richlist'], [data-page='rent'])
+		> .panel {
+		display: grid;
+		grid-template-columns: minmax(175px, 0.27fr) minmax(0, 1fr);
+		gap: 0 30px;
+		border-top: 0;
+		overflow: visible;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is([data-page='blocks'], [data-page='txs'], [data-page='richlist'], [data-page='rent'])
+		> .panel
+		> .panel-head {
+		grid-column: 1;
+		grid-row: 1;
+		align-self: start;
+		border-top: var(--atelier-rule);
+		border-bottom: var(--rule);
+		padding: 20px 0;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is([data-page='blocks'], [data-page='txs'], [data-page='richlist'], [data-page='rent'])
+		> .panel
+		.panel-title {
+		font-size: clamp(32px, 3.5vw, 50px);
+		line-height: 1;
+		overflow-wrap: anywhere;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is([data-page='blocks'], [data-page='txs'], [data-page='rent'])
+		> .panel
+		> .panel-body {
+		grid-column: 2;
+		grid-row: 1;
+		padding: 0;
+		border-top: var(--atelier-rule);
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='richlist'] > .panel > .panel-body {
+		display: contents;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='richlist'] > .panel {
+		grid-template-rows: min-content min-content 1fr;
+		align-items: start;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='richlist'] .panel-body > .note {
+		grid-column: 1;
+		grid-row: 2;
+		padding: 20px 0;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='richlist'] .panel-body > .table-wrap {
+		grid-column: 2;
+		grid-row: 1 / 4;
+		border-top: var(--atelier-rule);
+	}
+
+	/* Entity titles and identity occupy the margin, opposite an unboxed facts ledger. */
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		> .head {
+		display: grid;
+		grid-template-columns: minmax(0, 0.6fr) minmax(0, 1fr);
+		grid-template-rows: min-content 1fr;
+		gap: 24px 42px;
+		align-items: start;
+		padding-bottom: 22px;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		> .head
+		> .page-head {
+		grid-column: 1;
+		grid-row: 1;
+		border-top: var(--atelier-rule);
+		border-bottom: 0;
+		padding: 22px 0 0;
+		gap: 24px;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		.page-head
+		.row {
+		display: block;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		.page-head
+		h1 {
+		font-size: clamp(40px, 4.6vw, 66px);
+	}
+
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		> .head
+		> .facts {
+		grid-column: 2;
+		grid-row: 1 / 3;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0 28px;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		> .head
+		> .facts
+		.fact {
+		display: block;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		> .head
+		> .facts
+		.value {
+		text-align: left;
+		margin-top: 7px;
+		line-height: 1.55;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='block'] .pager,
+	:root[data-appearance='atelier'] .content[data-page='template'] .head > .lede {
+		grid-column: 1;
+		grid-row: 2;
+		align-self: start;
+		padding-top: 18px;
+		border-top: var(--rule);
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='box'] .ergo-tree {
+		grid-column: 2;
+		grid-row: 3;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is([data-page='address'], [data-page='token'], [data-page='template'])
+		.head
+		> .empty {
+		grid-column: 2;
+		grid-row: 1;
+		border-top: var(--atelier-rule);
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='token'] .page-head .aside {
+		margin-top: 18px;
+	}
+
+	/* An inventory reads down one ledger. Each box's value is its margin heading. */
+	:root[data-appearance='atelier']
+		.content:is([data-page='token'], [data-page='template'], [data-page='search'])
+		.box {
+		display: grid;
+		grid-template-columns: minmax(160px, 0.45fr) minmax(0, 1fr);
+		gap: 12px 30px;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is([data-page='token'], [data-page='template'], [data-page='search'])
+		.box
+		> header {
+		grid-column: 1;
+		grid-row: 1;
+		align-self: start;
+		align-items: start;
+		flex-direction: column;
+		gap: 12px;
+		margin: 0;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is([data-page='token'], [data-page='template'], [data-page='search'])
+		.box
+		> :is(dl, .section) {
+		grid-column: 2;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='status'] > .panel > .panel-body {
+		display: grid;
+		grid-template-columns: minmax(0, 0.6fr) minmax(0, 1fr);
+		gap: 0 44px;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='status'] .panel-body > p:first-child {
+		grid-column: 1;
+		grid-row: 1;
+		align-self: end;
+		margin-bottom: 20px;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='status'] .panel-body > p:nth-child(2) {
+		grid-column: 1;
+		grid-row: 2;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='status'] .fields,
+	:root[data-appearance='atelier'] .content[data-page='status'] .panel-body > .error {
+		grid-column: 2;
+		grid-row: 1 / 4;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='status'] .raw {
+		grid-column: 1;
+		grid-row: 3;
+		align-self: start;
+		padding-top: 18px;
+		border-top: var(--rule);
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='status'] .stalled {
+		grid-column: 1 / -1;
+		margin-top: 28px;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='search'] > .panel:has(.reg-form) {
+		display: grid;
+		grid-template-columns: minmax(175px, 0.35fr) minmax(0, 1fr);
+		gap: 18px 38px;
+		padding-top: 24px;
+	}
+
+	:root[data-appearance='atelier']
+		.content[data-page='search']
+		> .panel:has(.reg-form)
+		> .panel-head {
+		grid-column: 1;
+		grid-row: 1 / 3;
+		padding: 0 0 20px;
+		align-self: start;
+		align-items: start;
+	}
+
+	:root[data-appearance='atelier']
+		.content[data-page='search']
+		> .panel:has(.reg-form)
+		.panel-title {
+		font-size: 37px;
+		line-height: 1.05;
+	}
+
+	:root[data-appearance='atelier']
+		.content[data-page='search']
+		> .panel:has(.reg-form)
+		> .panel-body {
+		display: contents;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='search'] .reg-form {
+		grid-column: 2;
+		grid-row: 1;
+		align-self: start;
+	}
+
+	:root[data-appearance='atelier']
+		.content[data-page='search']
+		.panel-body
+		> :is(.help, #reg-error) {
+		grid-column: 2;
+		grid-row: 2;
+		margin-top: 0;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='search'] .panel-body > .results {
+		grid-column: 1 / -1;
+		grid-row: 3;
+		margin-top: 16px;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='tx'] .tracking:not(.confirmed) {
+		display: grid;
+		grid-template-columns: minmax(190px, 0.35fr) minmax(0, 1fr);
+		gap: 18px 50px;
+	}
+
+	:root[data-appearance='atelier']
+		.content[data-page='tx']
+		.tracking:not(.confirmed)
+		.tracking-top {
+		grid-column: 1 / -1;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='tx'] .tracking:not(.confirmed) h2 {
+		grid-column: 2;
+		grid-row: 2;
+		margin-top: 0;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='tx'] .tracking:not(.confirmed) .description {
+		grid-column: 2;
+		grid-row: 3;
+		margin: 0;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='tx'] .tracking:not(.confirmed) .steps {
+		grid-column: 1;
+		grid-row: 2 / 5;
+		margin: 0;
+		align-self: start;
+	}
+
+	:root[data-appearance='atelier']
+		.content[data-page='tx']
+		.tracking:not(.confirmed)
+		.pending-facts {
+		grid-column: 2;
+		grid-row: 4;
+		margin: 0;
+	}
+
+	:root[data-appearance='atelier']
+		.content[data-page='tx']
+		.tracking:not(.confirmed)
+		> :is(.warning, .conflicts, .observation-note) {
+		grid-column: 1 / -1;
+	}
+}
+
+@media (min-width: 900px) and (max-width: 1080px) {
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		> .head {
+		grid-template-columns: minmax(0, 0.48fr) minmax(0, 1fr);
+		column-gap: 26px;
+	}
+
+	:root[data-appearance='atelier']
+		.content:is(
+			[data-page='block'],
+			[data-page='address'],
+			[data-page='box'],
+			[data-page='token'],
+			[data-page='template']
+		)
+		> .head
+		> .facts {
+		column-gap: 18px;
+	}
+}
+
+@media (max-width: 600px) {
+	:root[data-appearance='atelier'] .content:not([data-page='home']) .fact {
+		display: block;
+	}
+
+	:root[data-appearance='atelier'] .content:not([data-page='home']) .fact .value {
+		text-align: left;
+		margin-top: 6px;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='search'] .reg-form {
+		align-items: stretch;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='search'] .reg-form .field.grow {
+		flex-basis: 100%;
+	}
+
+	:root[data-appearance='atelier'] .content[data-page='search'] .reg-form .btn {
+		height: 42px;
+	}
+
+	:root[data-appearance='atelier'] .content:not([data-page='home']) .box > header .amount {
+		font-size: 25px;
+		max-width: 100%;
+		overflow-wrap: anywhere;
+		white-space: normal;
+	}
+}
