@@ -171,7 +171,13 @@ is preserved when switching designs during the current transaction visit.
   including recorded pending and confirmed storage-rent states, with additional
   320px and 900px checks. Review corrections include excessive inspector height,
   undersized primary metrics, narrow description columns, duplicated state-page
-  compositions, and table margins overlapping neighboring content.
+  compositions, table margins overlapping neighboring content, and layered
+  home-scene cards obscuring block labels. Prism's cards now occupy separate
+  columns on wide screens and compact rows below 1200px.
+- Linux CI exposed an Original recovery-form intrinsic-width overflow at 320px.
+  Shared error-card children and the search form now fit the available width
+  without clipping; the follow-up home and appearance suite passed all 32 cases
+  locally, including the full route-family matrix.
 - Frontend checks: 150 unit tests, zero Svelte diagnostics, lint, production build
   and the 120 KiB home-route JavaScript budget passed (65.96 KiB gzip). The budget
   measures JavaScript, not the combined transfer size of CSS and fonts.

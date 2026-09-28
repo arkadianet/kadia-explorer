@@ -413,3 +413,23 @@ h4 {
 .content[data-page='status'] .fields .table-wrap {
 	margin-block: var(--space-4);
 }
+
+/* A flex-start recovery form must fit the card, regardless of input/font metrics. */
+.content[data-page='error'] > .error {
+	min-width: 0;
+	width: 100%;
+}
+
+.content[data-page='error'] > .error > * {
+	min-width: 0;
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+
+.content[data-page='error'] > .error > .search {
+	width: 100%;
+}
+
+.content[data-page='error'] .search .go {
+	flex-shrink: 0;
+}

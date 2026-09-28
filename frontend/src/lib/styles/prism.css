@@ -642,7 +642,11 @@
 	font-size: 30px;
 }
 :root[data-appearance='prism'] .home-chain-scene {
-	display: block;
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	align-items: start;
+	gap: 16px;
+	padding: 70px 12px 30px;
 	position: relative;
 	isolation: isolate;
 	width: 100%;
@@ -673,14 +677,13 @@
 	opacity: 0.6;
 }
 :root[data-appearance='prism'] .scene-block {
-	position: absolute;
-	left: calc(2% + var(--scene-order) * 28%);
-	top: calc(188px - var(--scene-order) * 60px);
+	position: relative;
 	display: grid;
 	gap: 6px;
-	width: 40%;
-	max-width: 218px;
-	padding: 20px;
+	width: 100%;
+	min-width: 0;
+	margin-top: calc(var(--scene-order) * 34px);
+	padding: 16px;
 	border: 1px solid var(--hairline);
 	border-top-color: var(--surface-solid);
 	border-radius: 13px;
@@ -688,7 +691,7 @@
 	box-shadow:
 		0 18px 24px -8px light-dark(#1e407c38, #0008),
 		inset 0 1px var(--surface-solid);
-	transform: perspective(800px) rotateY(-12deg) rotateX(6deg);
+	transform: perspective(800px) rotateY(-6deg) rotateX(5deg);
 	color: var(--fg);
 	text-decoration: none;
 	z-index: calc(4 - var(--scene-order));
@@ -1213,9 +1216,7 @@
 		width: 100%;
 	}
 	:root[data-appearance='prism'] .scene-block {
-		width: 40%;
 		padding: 12px;
-		top: calc(168px - var(--scene-order) * 56px);
 	}
 	:root[data-appearance='prism'] .scene-height {
 		font-size: clamp(16px, 4vw, 26px);
@@ -1298,5 +1299,40 @@
 	}
 	:root[data-appearance='prism'] .receipt-section > .tabs {
 		gap: 12px;
+	}
+}
+
+/* A narrower scene uses naturally sized rows: projected cards must never obscure
+   another block's height, transaction count or displayed identifier. */
+@media (max-width: 1199px) {
+	:root[data-appearance='prism'] .home-chain-scene {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 12px;
+		height: auto;
+		padding: 16px 10px;
+	}
+	:root[data-appearance='prism'] .scene-block {
+		grid-template-columns: minmax(0, 1fr) auto;
+		column-gap: 12px;
+		width: calc(100% - 6px);
+		margin-top: 0;
+		margin-left: calc(var(--scene-order) * 3px);
+		padding: 12px 16px;
+		transform: perspective(800px) rotateY(-4deg) rotateX(1deg);
+	}
+	:root[data-appearance='prism'] .scene-index,
+	:root[data-appearance='prism'] .scene-id {
+		grid-column: 1 / -1;
+	}
+	:root[data-appearance='prism'] .scene-height {
+		font-size: clamp(20px, 3vw, 25px);
+		line-height: 1.1;
+	}
+	:root[data-appearance='prism'] .scene-count {
+		grid-column: 2;
+		grid-row: 2;
+		align-self: center;
+		text-align: right;
+		max-width: 11ch;
 	}
 }
