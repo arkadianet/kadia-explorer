@@ -119,8 +119,8 @@ Kadia's public node absence response was also checked on 2026-09-28.
 - Frontend: 148 unit tests and 94 Playwright tests passed; Svelte check reported no
   errors or warnings; lint passed. Desktop, mobile, and dark-mode browser review
   found no layout problems or console errors.
-- A clean Windows `npm ci` followed by the production build passed. Home-route
-  JavaScript was 49.54 KiB gzipped against the existing 120 KiB budget.
+- A clean Windows `npm ci` followed by the production build passed. Linux CI's
+  home-route JavaScript budget check reported 60.33 KiB gzipped against 120 KiB.
 - Rust: workspace check, formatting, Clippy with warnings denied, and the complete
   workspace test run passed. Tests used a local temporary directory and four test
   threads. Existing ignored tests that require external services or snapshots were

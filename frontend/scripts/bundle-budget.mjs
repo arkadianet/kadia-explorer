@@ -6,7 +6,7 @@
 // node 1 is the universal +error fallback). We gzip all of those and sum.
 import { gzipSync } from 'node:zlib';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 const BUDGET_BYTES = 120 * 1024;
 const IMMUTABLE_DIR = join('build', '_app', 'immutable');
@@ -29,7 +29,7 @@ function matchesHomeNode(filename) {
 const entryFiles = listJsFiles(join(IMMUTABLE_DIR, 'entry'));
 const chunkFiles = listJsFiles(join(IMMUTABLE_DIR, 'chunks'));
 const nodeFiles = listJsFiles(join(IMMUTABLE_DIR, 'nodes')).filter((f) =>
-	matchesHomeNode(f.split('/').pop() ?? '')
+	matchesHomeNode(basename(f))
 );
 
 const files = [...entryFiles, ...chunkFiles, ...nodeFiles];
