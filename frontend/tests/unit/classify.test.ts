@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { classify, routeFor } from '$lib/search/classify';
+import p2s from '../../../tests/fixtures/receipts/p2s-address.txt?raw';
 
 describe('classify', () => {
+	it('passes long H-prefix and short script addresses to the validator', () => {
+		expect(classify(p2s).kind).toBe('address');
+		expect(classify('4MQyML64GnzMxZgm').kind).toBe('address');
+		expect(routeFor(classify(p2s))).toBeNull();
+	});
 	it('height', () => expect(classify(' 1866000 ')).toEqual({ kind: 'height', value: 1866000 }));
 	it('hex32 lowercased', () =>
 		expect(classify('AA44EF6A6C08D0B198D65B762ABB0181E6AD995654116FBEDAA1D3D3EB95A4D6')).toEqual({
@@ -22,10 +28,10 @@ describe('routeFor', () => {
 		expect(routeFor({ kind: 'height', value: 1866000 })).toBe('/blocks/1866000');
 	});
 
-	it('address routes straight to the address page', () => {
+	it('address candidates require checksum and network validation by the API', () => {
 		expect(
 			routeFor({ kind: 'address', value: '9i5FJNkbtZH8kcS129ny71wLBK7cKhJ7ixLpLTZoirjXRFhfvs' })
-		).toBe('/address/9i5FJNkbtZH8kcS129ny71wLBK7cKhJ7ixLpLTZoirjXRFhfvs');
+		).toBeNull();
 	});
 
 	it('hex32 needs the API to disambiguate block/tx/box', () => {

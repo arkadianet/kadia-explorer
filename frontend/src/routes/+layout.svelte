@@ -1,11 +1,16 @@
 <script lang="ts">
 	import '$lib/styles/tokens.css';
 	import '$lib/styles/base.css';
+	import '$lib/styles/appearances.css';
+	import '$lib/styles/aurora.css';
+	import '$lib/styles/atelier.css';
+	import '$lib/styles/prism.css';
 	import { page } from '$app/state';
-	import { theme } from '$lib/theme/theme.svelte';
+	import { appearance, theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import SearchBox from '$lib/components/SearchBox.svelte';
+	import AppearancePicker from '$lib/components/AppearancePicker.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import { onMount } from 'svelte';
 
@@ -20,6 +25,15 @@
 	});
 
 	const h = $derived(status.health);
+	const pageKind = $derived(
+		page.error
+			? 'error'
+			: page.route.id === '/'
+				? 'home'
+				: page.route.id === '/blocks/[id]'
+					? 'block'
+					: (page.route.id?.split('/')[1] ?? 'error')
+	);
 
 	/** The header floats over the page's first section and the lag banner floats under it, so
 	 * both have to be reserved as space: `--banner-h` on the main column is what every page
@@ -80,6 +94,7 @@
 
 	onMount(() => {
 		theme.init();
+		appearance.init();
 		status.start();
 		return () => status.stop();
 	});
@@ -108,7 +123,7 @@
 								aria-current={isActive(link.href) ? 'page' : undefined}
 							>
 								<Icon name={link.icon} size={19} />
-								{link.label}
+								<span class="nav-label">{link.label}</span>
 							</a>
 						</li>
 					{/each}
@@ -152,6 +167,7 @@
 			<div class="status-slot" data-testid="status-slot">
 				<StatusBadge />
 			</div>
+			<AppearancePicker />
 			<button
 				type="button"
 				class="theme-toggle"
@@ -177,7 +193,7 @@
 			</div>
 		{/if}
 
-		<main class="content">
+		<main class="content" data-page={pageKind}>
 			{@render children()}
 		</main>
 
@@ -286,7 +302,7 @@
 		height: 34px;
 		flex: none;
 		border-radius: 11px;
-		background: var(--ink-fg);
+		background: var(--accent);
 		color: var(--ink-panel);
 		font-size: 19px;
 		font-weight: 700;
@@ -301,7 +317,7 @@
 	}
 
 	.name {
-		font-size: var(--fs-title);
+		font-size: 25px;
 		font-weight: 700;
 		letter-spacing: -0.02em;
 	}
@@ -339,7 +355,7 @@
 	/* The active item is a filled pill, the only light shape in a dark column. */
 	.nav a.current {
 		color: var(--ink-panel);
-		background: var(--ink-fg);
+		background: var(--accent);
 		font-weight: 600;
 	}
 
@@ -431,6 +447,8 @@
 		gap: var(--space-3);
 		height: var(--topbar-h);
 		padding: 0 var(--gutter);
+		background: var(--bg);
+		border-bottom: var(--rule);
 	}
 
 	.search-slot {
@@ -506,12 +524,12 @@
 		flex: 1;
 		min-width: 0;
 		width: 100%;
-		max-width: 1240px;
+		max-width: 1480px;
 		padding: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-2)) var(--gutter)
 			var(--space-16);
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-10);
+		gap: var(--space-8);
 	}
 
 	.content > :global(*) {
@@ -646,6 +664,10 @@
 
 	.more-links a:hover {
 		background: var(--ink-hairline);
+	}
+	.nav :focus-visible,
+	.tabbar :focus-visible {
+		outline-color: var(--accent);
 	}
 
 	@media (min-width: 900px) {

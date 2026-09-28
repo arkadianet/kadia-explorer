@@ -54,6 +54,7 @@ impl Store {
             return Ok(());
         }
         let mut txn = self.db.begin_write()?;
+        crate::token_search::prepare_write(&txn)?;
         txn.set_durability(Durability::Immediate);
         self.check_register_capacity(&txn, boxes.iter())?;
         {
@@ -158,6 +159,7 @@ impl Store {
             meta.insert(META_GENESIS_SEEDED, &[1u8][..])?;
         }
         let entries = txn.open_table(REGISTER_IDX)?.len()?;
+        crate::token_search::finish_write(&txn)?;
         txn.commit()?;
         self.register_entries_cache
             .store(entries, std::sync::atomic::Ordering::Relaxed);

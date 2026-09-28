@@ -1,59 +1,131 @@
-import type { TxDto } from '$lib/api/types';
+import type { TxDto, TxEvidence } from '$lib/api/types';
 
-/** Ergo's storage-rent period: a box becomes rent-claimable 1,051,200 blocks (≈ 4 years)
- * after the height it was created at. */
 export const RENT_PERIOD = 1_051_200;
-
-export type TxKind = 'rent' | 'token' | 'payment';
-
+export type TxKind = 'rent' | 'token' | 'payment' | 'emission' | 'fee' | 'unknown';
 export interface TxKindInfo {
 	kind: TxKind;
-	/** The words shown in the list. */
 	label: string;
-	/** How the label was decided — rendered as the row's `title`, so no classification on
-	 * screen is unexplained. */
 	why: string;
 }
 
-/**
- * What a transaction is, decided only from the transaction the API returned.
- *
- * A storage-rent claim is recognisable without any privileged knowledge: the miner spends a
- * box old enough to be claimable and hands the remainder straight back to the script it came
- * from, so an input's creation height is at least a rent period below the block and one of
- * the outputs is locked by the same tree. Anything moving a token is a token transfer;
- * everything else is a payment.
- *
- * Inputs whose box the indexer could not resolve are simply not evidence either way, so a
- * transaction with no resolved inputs falls through to the value-based branches.
- */
-export function txKind(tx: TxDto): TxKindInfo {
-	const outputTrees = new Set(tx.outputs.map((o) => o.tree_hash));
-
-	for (const input of tx.inputs) {
-		const box = input.box;
-		if (!box) continue;
-		if (box.creation_height <= tx.height - RENT_PERIOD && outputTrees.has(box.tree_hash)) {
-			return {
-				kind: 'rent',
-				label: 'Storage rent claim',
-				why: `An input created at height ${box.creation_height} is at least ${RENT_PERIOD.toLocaleString('en-US')} blocks below block ${tx.height}, and an output returns to the same script.`
-			};
-		}
+/** Canonical serialized SShort: type 03 followed by zigzag VLQ. Reject negative,
+ * overlong, trailing and unsupported typed constants rather than guessing an index. */
+export function rentPointer(hex: string | null): number | null {
+	if (!hex || !/^03(?:[0-9a-fA-F]{2}){1,3}$/.test(hex)) return null;
+	const bytes = hex
+		.slice(2)
+		.match(/../g)!
+		.map((b) => parseInt(b, 16));
+	let encoded = 0;
+	for (let i = 0; i < bytes.length; i++) {
+		const byte = bytes[i];
+		if ((i === bytes.length - 1) !== byte < 128) return null;
+		if (i > 0 && i === bytes.length - 1 && byte === 0) return null;
+		encoded += (byte & 127) * 2 ** (7 * i);
 	}
+	if (encoded > 65535 || encoded % 2 !== 0) return null;
+	return encoded / 2;
+}
 
-	const tokensOut = tx.outputs.reduce((n, o) => n + o.tokens.length, 0);
-	if (tokensOut > 0) {
+export function matchedEvidence(tx: TxDto, evidence?: TxEvidence | null): TxEvidence | null {
+	if (
+		!evidence ||
+		evidence.tx_id !== tx.id ||
+		evidence.height !== tx.height ||
+		!tx.block_id ||
+		evidence.block_id !== tx.block_id ||
+		evidence.assurance !== 'trusted_node_response' ||
+		evidence.inputs.length !== tx.inputs.length ||
+		evidence.inputs.some((input, i) => input.id !== tx.inputs[i].id)
+	)
+		return null;
+	return evidence;
+}
+
+export function rentInputs(tx: TxDto, evidence?: TxEvidence | null) {
+	const checked = matchedEvidence(tx, evidence);
+	if (!checked) return [];
+	return tx.inputs.filter((input, i) => {
+		const box = input.box;
+		const proof = checked.inputs[i];
+		const pointer = rentPointer(proof.extension_127);
+		// A confirmed standard P2PK input cannot pass ordinary script validation with an
+		// empty proof. Together with maturity + selector, this identifies the rent path
+		// without assuming today's fee factor applied at every historical height.
+		// Arbitrary scripts can succeed with empty proofs: deliberately abstain for them.
+		return (
+			box &&
+			/^0008cd(?:02|03)[0-9a-f]{64}$/i.test(box.ergo_tree ?? '') &&
+			tx.height - box.creation_height >= RENT_PERIOD &&
+			proof.proof === 'empty' &&
+			pointer !== null &&
+			pointer < tx.outputs.length
+		);
+	});
+}
+
+/** Shared conservative interpretation. Neither old age, change outputs, token presence,
+ * nor a fee-paying claim proves payment intent, automation, or operator identity. */
+export function txKind(tx: TxDto, evidence?: TxEvidence | null): TxKindInfo {
+	const rent = rentInputs(tx, evidence);
+	if (rent.length)
 		return {
-			kind: 'token',
-			label: 'Token transfer',
-			why: `${tokensOut} token entr${tokensOut === 1 ? 'y' : 'ies'} appear in the outputs.`
+			kind: 'rent',
+			label: 'Storage rent claim',
+			why: `${rent.length} mature P2PK input${rent.length === 1 ? '' : 's'} spent with an empty proof and a valid rent selector in the node-reported confirmed transaction.`
+		};
+	if (!tx.inputs.length || tx.inputs.some((i) => !i.box))
+		return {
+			kind: 'unknown',
+			label: 'Transaction',
+			why: 'Input evidence is incomplete. The transaction type is not established.'
+		};
+	if (tx.inputs.some((i) => i.box?.kind === 'emission'))
+		return {
+			kind: 'emission',
+			label: 'Emission',
+			why: 'Spends the indexed genesis emission contract.'
+		};
+	if (tx.inputs.every((i) => i.box?.kind === 'fee'))
+		return {
+			kind: 'fee',
+			label: 'Fee collection',
+			why: 'Every input spends the standard miner-fee contract.'
+		};
+	const checked = matchedEvidence(tx, evidence);
+	if (
+		tx.inputs.some(
+			(i, index) =>
+				tx.height - i.box!.creation_height >= RENT_PERIOD &&
+				checked?.inputs[index].proof !== 'nonempty'
+		)
+	)
+		return {
+			kind: 'unknown',
+			label: 'Transaction',
+			why: 'An input has reached rent age. Available evidence does not establish its spending path.'
+		};
+	if (tx.inputs.some((i) => !/^0008cd(?:02|03)[0-9a-f]{64}$/i.test(i.box!.ergo_tree ?? ''))) {
+		return {
+			kind: 'unknown',
+			label: 'Contract interaction',
+			why: 'A script input needs a supported contract decoder to explain its purpose.'
 		};
 	}
-
+	if (
+		[...tx.inputs.flatMap((i) => (i.box ? [i.box] : [])), ...tx.outputs].some(
+			(b) => b.tokens.length
+		)
+	) {
+		return {
+			kind: 'token',
+			label: 'Token activity',
+			why: 'Tokens are present in the resolved inputs or outputs. Balance changes show movement; supply changes show minting or burning.'
+		};
+	}
 	return {
 		kind: 'payment',
-		label: 'Payment',
-		why: 'No claimable input returns to its own script and no token moves, so this is a plain transfer of ERG.'
+		label: 'ERG transfer',
+		why: 'Resolved P2PK inputs and ERG-only outputs. Address deltas include change; ownership and payment intent are not inferred.'
 	};
 }

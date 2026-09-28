@@ -27,7 +27,11 @@ function formatFixedPoint(n: bigint, decimals: number, maxFrac?: number): string
 	if (frac === 0n) return `${sign}${wholeStr}`;
 
 	let fracStr = frac.toString().padStart(decimals, '0');
-	if (maxFrac !== undefined) fracStr = fracStr.slice(0, maxFrac);
+	if (maxFrac !== undefined) {
+		const shortened = fracStr.slice(0, maxFrac);
+		// Never display a nonzero balance or transfer as zero just to meet a visual cap.
+		if (whole !== 0n || /[1-9]/.test(shortened)) fracStr = shortened;
+	}
 	fracStr = fracStr.replace(/0+$/, '');
 
 	return fracStr === '' ? `${sign}${wholeStr}` : `${sign}${wholeStr}.${fracStr}`;

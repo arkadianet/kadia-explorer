@@ -7,9 +7,10 @@
 		head?: number;
 		tail?: number;
 		copy?: boolean;
+		copyLabel?: string;
 	}
 
-	let { value, href, head = 8, tail = 6, copy = true }: Props = $props();
+	let { value, href, head = 8, tail = 6, copy = true, copyLabel = 'Copy' }: Props = $props();
 
 	const short = $derived(truncateMiddle(value, head, tail));
 
@@ -38,7 +39,7 @@
 		<span class="mono" title={value}>{short}</span>
 	{/if}
 	{#if copy}
-		<button type="button" class="copy" aria-label="Copy" onclick={doCopy}>
+		<button type="button" class="copy" aria-label={copyLabel} onclick={doCopy}>
 			{copied ? '✓' : '⧉'}
 		</button>
 		{#if copied}<span class="copied" role="status">Copied</span>{/if}

@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { error, isRedirect, redirect } from '@sveltejs/kit';
 import { api } from '$lib/api/endpoints';
 import { ApiError } from '$lib/api/client';
 import { classify, routeFor } from '$lib/search/classify';
@@ -30,23 +30,26 @@ function destinationFor(
 export const load: PageLoad = async ({ url, fetch }) => {
 	const q = url.searchParams.get('q') ?? '';
 	const trimmed = q.trim();
+	const tokenQuery = q.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
+	const match =
+		url.searchParams.get('match') === 'exact' ? ('exact' as const) : ('prefix' as const);
 
 	// The register lookup lives in the query string beside `q`, so a result list survives a
 	// reload and can be linked to. It is read on every path: a lookup and a failed `q` search
 	// can be on screen at the same time.
 	const registers = parseRegisterQuery(url.searchParams.get('reg'), url.searchParams.get('value'));
 
-	if (!trimmed) return { q, reason: 'empty' as NotFoundReason, registers };
+	if (!tokenQuery) return { q, reason: 'empty' as NotFoundReason, registers };
 
 	const classified = classify(trimmed);
 	const direct = routeFor(classified);
 	if (direct) throw redirect(302, direct);
 
-	if (classified.kind !== 'hex32') {
-		return { q, reason: 'unknown-format' as NotFoundReason, registers };
+	if (classified.kind !== 'hex32' && classified.kind !== 'address') {
+		return { q, reason: 'empty' as NotFoundReason, registers, tokenQuery, match };
 	}
 
-	// hex32 — ambiguous between block/tx/box, ask the API.
+	// Resolve IDs and validate address candidates on the server.
 	try {
 		const result = await api.search(classified.value, fetch);
 		if (result.matches && result.matches.length > 1) {
@@ -62,10 +65,40 @@ export const load: PageLoad = async ({ url, fetch }) => {
 		}
 		throw redirect(302, destinationFor(result.kind, result.id));
 	} catch (e) {
+		if (isRedirect(e)) throw e;
 		if (e instanceof ApiError) {
-			if (e.status === 404) return { q, reason: 'not-found' as NotFoundReason, registers };
-			throw error(e.status, e.detail);
+			if (e.status === 400)
+				return {
+					q,
+					// Short Base58 strings can be ordinary token names. This is only a
+					// notice heuristic; longer names still receive token discovery.
+					reason:
+						classified.kind === 'address' && classified.value.length <= 32
+							? ('empty' as NotFoundReason)
+							: ('unknown-format' as NotFoundReason),
+					registers,
+					tokenQuery,
+					match
+				};
+			if (e.status === 404) {
+				if (classified.kind === 'hex32') {
+					let pending = false;
+					try {
+						pending = (await api.txStatus(classified.value, fetch)).state === 'pending';
+					} catch {
+						/* Search still offers an explicit tracking link during an outage. */
+					}
+					if (pending) throw redirect(302, `/tx/${classified.value}`);
+					return { q, reason: 'not-found' as NotFoundReason, registers, trackId: classified.value };
+				}
+				return { q, reason: 'not-found' as NotFoundReason, registers };
+			}
+			if (classified.kind !== 'address') throw error(e.status, e.detail);
+		} else if (classified.kind !== 'address') {
+			throw e;
 		}
-		throw e;
+		// Failure to resolve an address candidate does not establish whether its
+		// text matches a token name. Name discovery has its own availability state.
+		return { q, reason: 'empty' as NotFoundReason, registers, tokenQuery, match };
 	}
 };

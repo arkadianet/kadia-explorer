@@ -1,0 +1,131 @@
+{
+  "id": "a474884a8a6ae615fd230cd177177c7436afc74f3d9a3506489800ccab749814",
+  "height": 1882687,
+  "index": 1,
+  "timestamp": 1790562931615,
+  "size": 325,
+  "fee": "1100000",
+  "inputs": [
+    {
+      "id": "eed1b9092dbbf9c67a1fb7e77bcd03612cfe945c755bd446455f8bf5c3f1bf6c",
+      "box": {
+        "id": "eed1b9092dbbf9c67a1fb7e77bcd03612cfe945c755bd446455f8bf5c3f1bf6c",
+        "tx_id": "ee3960ef314e549baed0af9d2d4f90136c4377708e0d0cbf85af15cea682c784",
+        "index": 1,
+        "value": "110800",
+        "creation_height": 831485,
+        "ergo_tree": "0008cd03a5b9ae24950ee854694a9832914324a6b69121fcd468bcc7c4023b5874f353cf",
+        "address": "9hinvSLfqSUQcsDeo1tjvxFz6uXd8caKsPLExaLTeBKiytVXySm",
+        "template_hash": "b40862311c22242c6ea4f7fc93684f43f3622fffba454675187e7e4e63b15b58",
+        "tree_hash": "9b74220851b6fd07573293c697c71013d3d7b89de4306288ff0ea98b4a93fd66",
+        "tokens": [
+          {
+            "id": "0779ec04f2fae64e87418a1ad917639d4668f78484f45df962b0dec14a2591d2",
+            "amount": "2000",
+            "name": "Mi Goreng ",
+            "decimals": 0
+          }
+        ],
+        "registers": {},
+        "size": 111,
+        "spent_by": "a474884a8a6ae615fd230cd177177c7436afc74f3d9a3506489800ccab749814",
+        "spent_height": 1882687,
+        "rent": {
+          "maturity_height": 1882685,
+          "due_nano": "110800",
+          "claimable_at_tip": false,
+          "consensus_fee_nano": "138750000",
+          "collectible": true
+        },
+        "kind": "box"
+      }
+    },
+    {
+      "id": "7b334baaab377c7083e6e75f3317fc31e0c3edb44ceb123f9add2a1b346aa0a8",
+      "box": {
+        "id": "7b334baaab377c7083e6e75f3317fc31e0c3edb44ceb123f9add2a1b346aa0a8",
+        "tx_id": "0b577ef8663156352f504796a89f1011b4a393996cc19c1bab2a81780304dc31",
+        "index": 2,
+        "value": "1000000000",
+        "creation_height": 1882515,
+        "ergo_tree": "0008cd032254e3436a79c94ead9a85b393258571c654ea9e44254b82a88f466f53275598",
+        "address": "9giveR3jEGvQS61H2SDQpPdLbpVT1T9JYpvW5yTmocs4ZpUEQ7z",
+        "template_hash": "8df48932dda6997cf8598c456bd995b67e0d413eac5b6c60aac5aa6a079f1d0c",
+        "tree_hash": "529b507d94c86443174efbcb7a17fb144bb45e9b6f730bfc917b26e00bc86a1e",
+        "tokens": [],
+        "registers": {},
+        "size": 79,
+        "spent_by": "a474884a8a6ae615fd230cd177177c7436afc74f3d9a3506489800ccab749814",
+        "spent_height": 1882687,
+        "rent": {
+          "maturity_height": 2933715,
+          "due_nano": "98750000",
+          "claimable_at_tip": false,
+          "consensus_fee_nano": "98750000",
+          "collectible": true
+        },
+        "kind": "box"
+      }
+    }
+  ],
+  "data_inputs": [],
+  "outputs": [
+    {
+      "id": "a835aa0fd227fca0bc2222739b115e6661e912077b51f50b39363c611fb54558",
+      "tx_id": "a474884a8a6ae615fd230cd177177c7436afc74f3d9a3506489800ccab749814",
+      "index": 0,
+      "value": "999010800",
+      "creation_height": 1882684,
+      "ergo_tree": "0008cd032254e3436a79c94ead9a85b393258571c654ea9e44254b82a88f466f53275598",
+      "address": "9giveR3jEGvQS61H2SDQpPdLbpVT1T9JYpvW5yTmocs4ZpUEQ7z",
+      "template_hash": "8df48932dda6997cf8598c456bd995b67e0d413eac5b6c60aac5aa6a079f1d0c",
+      "tree_hash": "529b507d94c86443174efbcb7a17fb144bb45e9b6f730bfc917b26e00bc86a1e",
+      "tokens": [
+        {
+          "id": "0779ec04f2fae64e87418a1ad917639d4668f78484f45df962b0dec14a2591d2",
+          "amount": "2000",
+          "name": "Mi Goreng ",
+          "decimals": 0
+        }
+      ],
+      "registers": {},
+      "size": 113,
+      "spent_by": "5dc5edd90c9fe66b35000d1e3b514737ad36e78cc11a3cb13282db727042bbef",
+      "spent_height": 1882691,
+      "rent": {
+        "maturity_height": 2933884,
+        "due_nano": "141250000",
+        "claimable_at_tip": false,
+        "consensus_fee_nano": "141250000",
+        "collectible": true
+      },
+      "kind": "box"
+    },
+    {
+      "id": "16f98013d5c1493f95ce03777b9ce3dc3dc3d190099efd69e397bcbd87033861",
+      "tx_id": "a474884a8a6ae615fd230cd177177c7436afc74f3d9a3506489800ccab749814",
+      "index": 1,
+      "value": "1100000",
+      "creation_height": 1882684,
+      "ergo_tree": "1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a57304",
+      "address": "2iHkR7CWvD1R4j1yZg5bkeDRQavjAaVPeTDFGGLZduHyfWMuYpmhHocX8GJoaieTx78FntzJbCBVL6rf96ocJoZdmWBL2fci7NqWgAirppPQmZ7fN9V6z13Ay6brPriBKYqLp1bT2Fk4FkFLCfdPpe",
+      "template_hash": "922e50aa537eacdad7f0584dd703426d8f376d7623422afc3b212bd2f674e2b2",
+      "tree_hash": "e540cceffd3b8dd0f401193576cc413467039695969427df94454193dddfb375",
+      "tokens": [],
+      "registers": {},
+      "size": 146,
+      "spent_by": "f1c7aa86cf4ae7bd36d97cd5a5e6517953bc4b0246e27e4c981ade085e32d57b",
+      "spent_height": 1882687,
+      "rent": {
+        "maturity_height": 2933884,
+        "due_nano": "1100000",
+        "claimable_at_tip": false,
+        "consensus_fee_nano": "182500000",
+        "collectible": true
+      },
+      "kind": "fee"
+    }
+  ],
+  "block_id": "f874382423e88b927a92425dac4e01262899d2692212caafcb7d222b95053e04",
+  "indexed_height": 1882694
+}

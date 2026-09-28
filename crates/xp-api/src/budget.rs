@@ -54,7 +54,12 @@ impl Budget {
             .ok_or_else(|| limit("expansion_work_limit"))?;
         Ok(())
     }
-    fn admit_row(&mut self, rd: &Reader, kind: ExpansionRow, id: &Hash32) -> Result<(), ApiError> {
+    pub(crate) fn admit_row(
+        &mut self,
+        rd: &Reader,
+        kind: ExpansionRow,
+        id: &Hash32,
+    ) -> Result<(), ApiError> {
         self.work(1)?;
         let bytes = rd.expansion_row_len(kind, id)?;
         self.admit_bytes(bytes)

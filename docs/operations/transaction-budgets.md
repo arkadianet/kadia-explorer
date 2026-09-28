@@ -26,7 +26,10 @@ A blocked redb call or allocator is not preemptible; the deadline is cooperative
 wall-clock bound. Reader permits and inflight guards stay inside `spawn_blocking`,
 through final serialization, even after cancellation/HTTP timeout.
 
-Only `/v1/txs`, `/v1/txs/{id}`, and `/v1/blocks/{height_or_id}/txs` use this new budget.
+`/v1/txs`, `/v1/txs/{id}`, and `/v1/blocks/{height_or_id}/txs` use this budget.
+The optional `/v1/txs/{id}/evidence` route also uses its expansion limits before
+fetching node evidence; its separate network/body/concurrency bounds are described
+in [the receipt implementation](../product/transaction-receipt-implementation.md).
 Existing historical readers retain their independent, stricter limits (including
 250 ms for historical pages), admission semaphore, and response accounting.
 
@@ -89,6 +92,9 @@ step 6, outside this task.
   The preexisting address summary route retains its previous conversion behavior.
 - Legacy successful JSON is compared against the original full DTO/enrichment path
   for every fixture transaction and block, including all fields and nulls.
+  Transaction detail adds a block ID, indexed-height snapshot and confirmation count;
+  those are checked separately before comparing the original fields. Lists keep
+  their existing response shape.
 - Store-scoped test-only counters count box/tree/token enrichment access. All new
   summary route walks assert `[0, 0, 0]`; the full DTO path increments all three.
   The feature is enabled by an API dev-dependency, not an operator metrics endpoint.

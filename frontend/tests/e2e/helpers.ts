@@ -37,6 +37,9 @@ export async function scrollUntilCount(
 ): Promise<void> {
 	const rows = page.locator(selector);
 	const until = Date.now() + deadlineMs;
+	// The list may not have mounted after navigation yet. Its absent sentinel then means
+	// "not started", not "complete"; wait for the first item before deciding whether to scroll.
+	if (expected > 0) await expect(rows.first()).toBeAttached({ timeout: deadlineMs });
 	let count = await rows.count();
 
 	while (count < expected) {

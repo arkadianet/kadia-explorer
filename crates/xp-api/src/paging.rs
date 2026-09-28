@@ -20,6 +20,7 @@ pub enum Route {
     TemplateBoxes,
     TokensNewest,
     TokensHolders,
+    TokensSearch,
     Holders,
     Richlist,
     RegisterBoxes,
@@ -39,6 +40,7 @@ impl Route {
             | Self::TemplateBoxes
             | Self::TokensNewest
             | Self::TokensHolders
+            | Self::TokensSearch
             | Self::Holders
             | Self::Richlist
             | Self::RegisterBoxes
@@ -67,6 +69,7 @@ mod policy_tests {
             Route::TemplateBoxes,
             Route::TokensNewest,
             Route::TokensHolders,
+            Route::TokensSearch,
             Route::Holders,
             Route::Richlist,
             Route::RegisterBoxes,
@@ -92,7 +95,7 @@ mod policy_tests {
         }
         assert_eq!(
             doc.lines().filter(|line| line.starts_with("| `")).count(),
-            14
+            15
         );
     }
 }
@@ -120,8 +123,19 @@ pub enum Order {
 pub enum Filter {
     None,
     Entity(Hash32),
-    Boxes { entity: Hash32, unspent: bool },
-    Register { number: u8, value_hash: Hash32 },
+    Boxes {
+        entity: Hash32,
+        unspent: bool,
+    },
+    Register {
+        number: u8,
+        value_hash: Hash32,
+    },
+    TokenNames {
+        query_hash: Hash32,
+        exact: bool,
+        index_version: u32,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -140,10 +154,11 @@ impl Binding {
             BlockSummaries | AddressSummaries | Holders => matches!(filter, Filter::Entity(_)),
             AddressBoxes | TokenBoxes | TemplateBoxes => matches!(filter, Filter::Boxes { .. }),
             RegisterBoxes => matches!(filter, Filter::Register { number: 4..=9, .. }),
+            TokensSearch => matches!(filter, Filter::TokenNames { .. }),
         };
         let valid_order = match route {
             Blocks | TokensNewest | TokensHolders | Holders | Richlist => order == Order::Desc,
-            RentEligible => order == Order::Asc,
+            RentEligible | TokensSearch => order == Order::Asc,
             _ => true,
         };
         if !valid_filter || !valid_order {

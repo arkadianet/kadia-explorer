@@ -1,8 +1,22 @@
 type Mode = 'dark' | 'light';
+export type Appearance = 'original' | 'aurora' | 'atelier' | 'prism';
 
 const KEY = 'xp-theme';
+const APPEARANCE_KEY = 'xp-appearance';
 
 let current = $state<Mode>('light');
+let currentAppearance = $state<Appearance>('prism');
+
+function appearanceOrDefault(value: string | null): Appearance {
+	return value === 'original' || value === 'aurora' || value === 'atelier' || value === 'prism'
+		? value
+		: 'prism';
+}
+
+function applyAppearance(value: Appearance) {
+	currentAppearance = value;
+	document.documentElement.dataset.appearance = value;
+}
 
 function apply(m: Mode) {
 	current = m;
@@ -39,6 +53,31 @@ export const theme = {
 			localStorage.setItem(KEY, m);
 		} catch {
 			// ignore persistence failures
+		}
+	}
+};
+
+export const appearance = {
+	get current() {
+		return currentAppearance;
+	},
+	init() {
+		let saved: string | null = null;
+		try {
+			saved = localStorage.getItem(APPEARANCE_KEY);
+		} catch {
+			// The default still works when browser storage is unavailable.
+		}
+		// Keep validation and the default in step with app.html's pre-paint script.
+		applyAppearance(appearanceOrDefault(saved));
+	},
+	set(value: Appearance) {
+		const selected = appearanceOrDefault(value);
+		applyAppearance(selected);
+		try {
+			localStorage.setItem(APPEARANCE_KEY, selected);
+		} catch {
+			// The current session can still use the selected appearance.
 		}
 	}
 };

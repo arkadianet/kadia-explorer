@@ -13,7 +13,7 @@
 	let { title, id, aside }: Props = $props();
 </script>
 
-<header class="page-head">
+<header class="page-head" class:identified={!!id}>
 	<div class="row">
 		<h1><bdi dir="auto">{title}</bdi></h1>
 		{#if aside}<div class="aside">{@render aside()}</div>{/if}
@@ -30,11 +30,14 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-2);
-		padding: var(--space-5) var(--space-5) var(--space-4);
+		padding: var(--space-6);
 		background: var(--surface-solid);
 		border: var(--rule);
 		border-radius: var(--radius-card);
-		box-shadow: var(--shadow-rest);
+		border-top: 4px solid var(--accent-ink);
+	}
+	.page-head.identified {
+		padding: 16px 20px;
 	}
 
 	.row {
@@ -50,8 +53,9 @@
 		max-width: 100%;
 		overflow-wrap: anywhere;
 		font-size: var(--fs-page);
-		font-weight: 600;
-		letter-spacing: -0.02em;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 800);
+		letter-spacing: -0.045em;
 	}
 
 	.id {

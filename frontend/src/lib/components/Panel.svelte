@@ -31,17 +31,18 @@
 
 	.panel-head {
 		flex-wrap: wrap;
+		background: linear-gradient(100deg, var(--surface-solid), var(--surface-hover));
 	}
 
 	.panel-body {
 		min-width: 0;
-		padding: var(--space-4) var(--space-5);
+		padding: var(--space-5);
 	}
 
 	/* A table is the card's full width; only its cells carry the inset, so column rules line
 	   up with the card edge instead of floating inside a second margin. */
 	.panel-body :global(.table-wrap) {
-		margin: calc(var(--space-4) * -1) calc(var(--space-5) * -1);
+		margin: 0 calc(var(--space-5) * -1);
 	}
 
 	.panel-actions {

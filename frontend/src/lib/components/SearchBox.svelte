@@ -20,7 +20,7 @@
 
 	function submit(e: SubmitEvent) {
 		e.preventDefault();
-		const trimmed = q.trim();
+		const trimmed = q.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
 		if (!trimmed) return;
 		goto(`/search?q=${encodeURIComponent(trimmed)}`);
 	}
@@ -71,7 +71,7 @@
 			type="search"
 			bind:value={q}
 			bind:this={inputEl}
-			placeholder="Search anything…"
+			placeholder="Search IDs, addresses or token names…"
 			autocomplete="off"
 			spellcheck="false"
 			onkeydown={onInputKeydown}
@@ -97,13 +97,16 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-3);
-		height: 46px;
+		height: 48px;
 		padding: 0 var(--space-2) 0 var(--space-4);
-		border-radius: var(--radius-pill);
+		border-radius: var(--radius-control);
+		border-color: var(--hairline);
 	}
 
 	.field:focus-within {
-		border-color: var(--accent);
+		border-color: var(--accent-ink);
+		outline: 2px solid var(--accent-ink);
+		outline-offset: 2px;
 		box-shadow:
 			var(--shadow-lift),
 			0 0 0 3px var(--accent-wash);

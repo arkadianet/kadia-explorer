@@ -64,6 +64,7 @@ export interface RentDto {
 }
 
 export interface BoxDto {
+	kind?: 'box' | 'fee' | 'emission';
 	id: string;
 	tx_id: string;
 	index: number;
@@ -87,6 +88,10 @@ export interface InputDto {
 }
 
 export interface TxDto {
+	/** Snapshot fields on the detail route; older servers and list routes omit these. */
+	block_id?: string;
+	indexed_height?: number | null;
+	confirmations?: number | null;
 	id: string;
 	height: number;
 	index: number;
@@ -96,6 +101,42 @@ export interface TxDto {
 	inputs: InputDto[];
 	data_inputs: string[];
 	outputs: BoxDto[];
+}
+
+export interface TxEvidence {
+	tx_id: string;
+	block_id: string;
+	height: number;
+	assurance: 'trusted_node_response';
+	inputs: { id: string; proof: 'empty' | 'nonempty'; extension_127: string | null }[];
+}
+
+/** A single local-index and configured-node observation, not network-wide acceptance. */
+export interface TxStatusDto {
+	id: string;
+	state:
+		'confirmed' | 'pending' | 'not_observed' | 'no_longer_observed' | 'unavailable' | 'conflicted';
+	checked_at_ms: number;
+	indexed_height: number | null;
+	inclusion: { block_id: string; height: number; confirmations: number } | null;
+	previous_inclusion: { block_id: string; height: number } | null;
+	mempool: {
+		observation: 'present' | 'absent' | 'unavailable' | 'not_checked';
+		checked_at_ms: number | null;
+		first_seen_at_ms: number | null;
+		last_seen_at_ms: number | null;
+		error: 'unsupported' | 'unavailable' | 'busy' | null;
+	};
+	pending: {
+		input_count: number;
+		output_count: number;
+		data_input_count: number;
+		size: number | null;
+		fee: string | null;
+	} | null;
+	conflicts: { input_id: string; tx_id: string; height: number }[];
+	history_scope: 'process_local_requested_transactions';
+	retention_seconds: number;
 }
 
 /** Transaction summary routes and address history: counts without expanded inputs/outputs. */
@@ -172,6 +213,20 @@ export interface TokenInfoDto {
 	mint_tx: string;
 	mint_box: string;
 	mint_height: number;
+}
+
+export interface TokenSearchDto extends PageDto<TokenInfoDto> {
+	search: {
+		query: string;
+		normalized_query: string;
+		match: 'prefix' | 'exact';
+		index_version: 1;
+		coverage: 'complete' | 'partial';
+		partial_from: number | null;
+		indexed_names: number;
+		total_tokens: number;
+		unindexed_tokens: number;
+	};
 }
 
 export interface TokenHolderDto {

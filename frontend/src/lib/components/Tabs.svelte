@@ -65,7 +65,8 @@
 <style>
 	.tabs {
 		display: flex;
-		gap: var(--space-4);
+		flex-wrap: wrap;
+		gap: 0 var(--space-4);
 		border-bottom: var(--rule);
 	}
 	.tab {
@@ -81,7 +82,7 @@
 	}
 	.selected {
 		color: var(--fg);
-		border-bottom-color: var(--accent);
+		border-bottom-color: var(--accent-ink);
 	}
 	.count {
 		margin-left: var(--space-1);

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Backdrop from '$lib/components/Backdrop.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
 	import Table from '$lib/components/Table.svelte';
@@ -15,6 +14,7 @@
 	import { truncateMiddle } from '$lib/format/hash';
 	import { api } from '$lib/api/endpoints';
 	import { status as statusStore } from '$lib/status/status.svelte';
+	import { appearance } from '$lib/theme/theme.svelte';
 	import { txKind } from '$lib/tx/kind';
 	import {
 		buckets,
@@ -43,6 +43,14 @@
 
 	const blocks = $derived(data.blocks.data ?? []);
 	const latest = $derived(blocks[0] ?? null);
+	const opening = $derived(
+		{
+			original: ['Transparent', 'by design.'],
+			aurora: ['Every move.', 'In full light.'],
+			atelier: ['Everything.', 'Accounted for.'],
+			prism: ['Follow the chain.', 'In every dimension.']
+		}[appearance.current]
+	);
 
 	let now = $state(Date.now());
 	$effect(() => {
@@ -148,393 +156,421 @@
 	/>
 </svelte:head>
 
-<!-- ------------------------------------------------------------------------------- hero -->
-<section class="hero">
-	<Backdrop variant="hero" />
-	<div class="hero-in">
-		<div class="hero-copy">
-			<h1>Transparent<br />by design.</h1>
-			<p class="lede">Explore, understand, and build on Ergo.</p>
-			<div class="cta">
-				<a class="btn btn-fill" href="/blocks">
-					Explore blocks
-					<Icon name="arrow-right" size={18} />
-				</a>
-				<a class="btn btn-ghost" href="/rent">
-					Storage rent
-					<Icon name="arrow-right" size={18} />
-				</a>
-			</div>
-		</div>
-
-		{#if latest}
-			<div class="tipcard">
-				<div class="tipcard-head">
-					<Icon name="box" size={20} />
-					<span>Snapshot indexed height</span>
+<div class="home-dashboard">
+	<!-- ------------------------------------------------------------------------------- hero -->
+	<section class="hero">
+		<div class="hero-in">
+			<div class="hero-copy">
+				<p class="kicker">KADIA / ERGO MAINNET</p>
+				<h1>{opening[0]}<br /><span>{opening[1]}</span></h1>
+				<p class="lede">Explore, understand, and build on Ergo.</p>
+				<div class="cta">
+					<a class="btn btn-fill" href="/blocks">
+						Explore blocks
+						<Icon name="arrow-right" size={18} />
+					</a>
+					<a class="btn btn-ghost" href="/rent">
+						Storage rent
+						<Icon name="arrow-right" size={18} />
+					</a>
 				</div>
-				<p class="tipcard-height">{latest.height.toLocaleString('en-US')}</p>
-				<p class="tipcard-age">{latestAge}</p>
-				<Sparkline
-					values={heroSeries}
-					kind="bars"
-					color="var(--accent)"
-					height={40}
-					title="Blocks per 10-minute bucket over the six hours of chain below the indexed tip, counted from the loaded block timestamps."
-				/>
-				<p
-					class="tipcard-foot"
-					title={`Difficulty ${latest.difficulty} divided by Ergo's ${TARGET_BLOCK_SECONDS} s target block time — the hashrate that would produce this difficulty on average.`}
-				>
-					<span>blocks per 10 min, 6 h</span>
-					<b>{hashrate}</b>
-				</p>
 			</div>
-		{/if}
-	</div>
-</section>
 
-<!-- ------------------------------------------------------------------------------ stats -->
-<section class="stats" aria-label="Chain in the last 24 hours">
-	<div class="stat glass">
-		<p class="stat-label"><Icon name="txs" size={16} />Transactions</p>
-		<p
-			class="stat-value"
-			title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
-		>
-			{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')}
-		</p>
-		<Sparkline
-			values={txPerHour}
-			kind="bars"
-			title="Transactions per hour across the last 24 hours of indexed chain."
-		/>
-		<p class="stat-foot">
-			{data.blocks.error
-				? 'Window unavailable'
-				: dayPartial
-					? 'Partial chain window'
-					: 'last 24 h of chain'}
-		</p>
-	</div>
-
-	<div class="stat glass">
-		<p class="stat-label"><Icon name="blocks" size={16} />Blocks</p>
-		<p
-			class="stat-value"
-			title={`Blocks whose timestamp falls in the 24 hours below the indexed tip. ${dayNote}`}
-		>
-			{data.blocks.error ? 'Unavailable' : day.length.toLocaleString('en-US')}
-		</p>
-		<Sparkline
-			values={blocksPerHour}
-			kind="line"
-			title="Blocks per hour across the last 24 hours of indexed chain."
-		/>
-		<p class="stat-foot" title="Ergo targets one block every 120 seconds.">
-			{dayPartial ? 'Partial chain window' : '720 at target'}
-		</p>
-	</div>
-
-	<div class="stat glass">
-		<p class="stat-label"><Icon name="spark" size={16} />Miner rewards</p>
-		<p
-			class="stat-value"
-			title={`Sum of the reward field over the ${day.length} indexed blocks in this window. ${dayNote}`}
-		>
-			{data.blocks.error ? 'Unavailable' : formatErg(dayReward, { maxFrac: 0 })}<span class="unit"
-				>ERG</span
-			>
-		</p>
-		<Sparkline
-			values={rewardPerHour}
-			kind="line"
-			title="Reward paid per hour, in ERG, across the last 24 hours of indexed chain."
-		/>
-		<p class="stat-foot">{dayPartial ? 'Partial chain window' : 'paid to miners'}</p>
-	</div>
-
-	<div class="stat glass">
-		<p class="stat-label"><Icon name="rent-coin" size={16} />Storage rent</p>
-		<p
-			class="stat-value"
-			title="Boxes whose storage-rent maturity falls within the next 720 blocks, from /v1/rent/upcoming."
-		>
-			{data.rent.error
-				? 'Unavailable'
-				: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}
-		</p>
-		<p class="stat-sub">
-			{#if data.rent.error}Unavailable{:else}{data.rent.data?.complete === true ? '' : '≥ '}<Amount
-					nano={rentDue.toString()}
-					maxFrac={3}
-				/> due{/if}
-		</p>
-		<p class="stat-foot">
-			maturing in 720 blocks{data.rent.data?.complete === true ? '' : ' · incomplete'}
-		</p>
-	</div>
-
-	<div class="stat glass">
-		<p class="stat-label"><Icon name="status" size={16} />Indexer</p>
-		<p class="stat-value tone-{h.tone}" title={h.detail}>{h.label}</p>
-		<p class="stat-sub">
-			{status ? `${status.lag_blocks.toLocaleString('en-US')} blocks behind` : '—'}
-		</p>
-		<p class="stat-foot">{status ? `${status.mode} mode` : ''}</p>
-	</div>
-</section>
-
-<!-- ----------------------------------------------------------------------------- panels -->
-<div class="panels">
-	<section class="panel card">
-		<div class="card-head">
-			<h2 class="card-title">Recent blocks</h2>
-			<a class="more" href="/blocks">View all<Icon name="chevron-right" size={14} /></a>
-		</div>
-		{#if data.blocks.error}
-			<div class="pad"><ErrorState error={data.blocks.error} /></div>
-		{:else if recentBlocks.length === 0}
-			<div class="pad">
-				<EmptyState message="Blocks will appear here as the indexer catches up with the node." />
-			</div>
-		{:else}
-			<Table>
-				{#snippet head()}
-					<tr>
-						<th>Height</th>
-						<th>Age</th>
-						<th class="num">Txs</th>
-						<th class="num">Reward</th>
-						<th>Miner</th>
-					</tr>
-				{/snippet}
-				{#each recentBlocks as block (block.id)}
-					<tr>
-						<td><a class="height" href={`/blocks/${block.height}`}>{block.height}</a></td>
-						<td class="muted"><Age ms={block.timestamp} /></td>
-						<td class="num mono">{block.tx_count}</td>
-						<td class="num"><Amount nano={block.reward} maxFrac={3} /></td>
-						<td><MinerChip minerPk={block.miner_pk} /></td>
-					</tr>
-				{/each}
-			</Table>
-		{/if}
-	</section>
-
-	<section class="panel live ink">
-		<div class="card-head">
-			<h2 class="card-title">Live transactions</h2>
-			<span class="pill live-pill tone-{h.tone}"><span class="dot"></span>{h.live}</span>
-		</div>
-		{#if data.txs.error}
-			<div class="pad"><ErrorState error={data.txs.error} /></div>
-		{:else if shownTxs.length === 0}
-			<div class="pad">
-				<EmptyState message="Transactions will appear here as the indexer catches up." />
-			</div>
-		{:else}
-			<ul class="txlist">
-				{#each shownTxs as tx (tx.id)}
-					{@const kind = txKind(tx)}
-					<li>
-						<a href={`/tx/${tx.id}`}>
-							<span class="kind {kind.kind}" title={kind.why}>
-								<Icon
-									name={kind.kind === 'rent'
-										? 'rent-coin'
-										: kind.kind === 'token'
-											? 'layers'
-											: 'txs'}
-									size={18}
-								/>
-							</span>
-							<span class="tx-main">
-								<span class="tx-kind">{kind.label}</span>
-								<span class="tx-id mono">{truncateMiddle(tx.id)}</span>
-							</span>
-							<span class="tx-age"><Age ms={tx.timestamp} /></span>
-							<span class="tx-value">
-								{formatErg(
-									tx.outputs.reduce((t, o) => t + BigInt(o.value), 0n),
-									{ maxFrac: 2 }
-								)}<span class="unit">ERG</span>
-							</span>
-						</a>
-					</li>
-				{/each}
-			</ul>
-			<div class="live-foot">
-				<span
-					title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
-				>
-					{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')} transactions · {dayPartial
-						? 'partial chain window'
-						: 'last 24 hours of chain'}
-				</span>
-				<span class="live-spark">
+			{#if latest}
+				<div class="tipcard">
+					<div class="tipcard-head">
+						<Icon name="box" size={20} />
+						<span>Snapshot indexed height</span>
+					</div>
+					<p class="tipcard-height">{latest.height.toLocaleString('en-US')}</p>
+					<p class="tipcard-age">{latestAge}</p>
 					<Sparkline
-						values={txPerHour}
+						values={heroSeries}
 						kind="bars"
-						height={26}
-						color="var(--accent)"
-						title="Transactions per hour across the last 24 hours of indexed chain."
+						color="var(--hero-chart, var(--accent))"
+						height={40}
+						title="Blocks per 10-minute bucket over the six hours of chain below the indexed tip, counted from the loaded block timestamps."
 					/>
-				</span>
+					<p
+						class="tipcard-foot"
+						title={`Difficulty ${latest.difficulty} divided by Ergo's ${TARGET_BLOCK_SECONDS} s target block time — the hashrate that would produce this difficulty on average.`}
+					>
+						<span>blocks per 10 min, 6 h</span>
+						<b>{hashrate}</b>
+					</p>
+				</div>
+			{/if}
+			<div class="home-chain-scene" aria-label="Recent indexed blocks">
+				{#each recentBlocks.slice(0, 3) as block, index (block.id)}
+					<a class="scene-block" href={`/blocks/${block.height}`} style={`--scene-order: ${index}`}>
+						<span class="scene-index">Indexed block / 0{index + 1}</span>
+						<strong class="scene-height">{block.height.toLocaleString('en-US')}</strong>
+						<span class="scene-count"
+							>{block.tx_count} transaction{block.tx_count === 1 ? '' : 's'}</span
+						>
+						<span class="scene-id mono">{truncateMiddle(block.id, 8, 6)}</span>
+						<Icon name="arrow-right" size={18} />
+					</a>
+				{/each}
 			</div>
-		{/if}
-	</section>
-</div>
-
-<!-- ----------------------------------------------------------- rent, tokens and holders -->
-<div class="panels three">
-	<section class="panel card">
-		<div class="card-head">
-			<h2 class="card-title">Rent maturing soon</h2>
-			<a class="more" href="/rent">All rent<Icon name="chevron-right" size={14} /></a>
 		</div>
-		{#if data.rent.error}
-			<div class="pad"><ErrorState error={data.rent.error} /></div>
-		{:else if rentItems.length === 0}
-			<div class="pad">
-				<EmptyState message="No box reaches its storage-rent maturity in the next 720 blocks." />
-			</div>
-		{:else}
-			<p class="summary">
-				<b
-					>{data.rent.error
-						? 'Unavailable'
-						: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}</b
-				>
-				boxes mature in the next 720 blocks, owing at least
-				<b><Amount nano={rentDue.toString()} maxFrac={3} /></b> between them.
+	</section>
+
+	<!-- ------------------------------------------------------------------------------ stats -->
+	<section class="stats" aria-label="Chain in the last 24 hours">
+		<div class="stat glass">
+			<p class="stat-label"><Icon name="txs" size={16} />Transactions</p>
+			<p
+				class="stat-value"
+				title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
+			>
+				{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')}
 			</p>
-			<Table dense>
-				{#snippet head()}
-					<tr>
-						<th class="num">Value</th>
-						<th class="num">Due</th>
-						<th>Matures in</th>
-						<th class="rent-addr">Address</th>
-					</tr>
-				{/snippet}
-				{#each rentItems.slice(0, 5) as item (item.box.id)}
-					<tr>
-						<!-- The value is the row's link to the box it belongs to: without it a rent row
-						     names an amount and nothing that carries it. -->
-						<td class="num">
-							<a href={`/box/${item.box.id}`} title={item.box.id}>
-								<Amount nano={item.box.value} maxFrac={3} />
-							</a>
-						</td>
-						<td class="num"><Amount nano={item.box.rent.due_nano} maxFrac={3} /></td>
-						<td class="mono muted">
-							{tip !== null ? `${item.maturity_height - tip} blocks` : `at ${item.maturity_height}`}
-						</td>
-						<td class="rent-addr">
-							{#if item.box.address}
-								<Hash value={item.box.address} href={`/address/${item.box.address}`} copy={false} />
-							{:else}
-								<span class="muted" title="No P2PK/P2S address for this box">—</span>
-							{/if}
-						</td>
-					</tr>
-				{/each}
-			</Table>
-		{/if}
+			<Sparkline
+				values={txPerHour}
+				color="var(--accent-ink)"
+				kind="bars"
+				title="Transactions per hour across the last 24 hours of indexed chain."
+			/>
+			<p class="stat-foot">
+				{data.blocks.error
+					? 'Window unavailable'
+					: dayPartial
+						? 'Partial chain window'
+						: 'last 24 h of chain'}
+			</p>
+		</div>
+
+		<div class="stat glass">
+			<p class="stat-label"><Icon name="blocks" size={16} />Blocks</p>
+			<p
+				class="stat-value"
+				title={`Blocks whose timestamp falls in the 24 hours below the indexed tip. ${dayNote}`}
+			>
+				{data.blocks.error ? 'Unavailable' : day.length.toLocaleString('en-US')}
+			</p>
+			<Sparkline
+				values={blocksPerHour}
+				color="var(--accent-ink)"
+				kind="line"
+				title="Blocks per hour across the last 24 hours of indexed chain."
+			/>
+			<p class="stat-foot" title="Ergo targets one block every 120 seconds.">
+				{dayPartial ? 'Partial chain window' : '720 at target'}
+			</p>
+		</div>
+
+		<div class="stat glass">
+			<p class="stat-label"><Icon name="spark" size={16} />Miner rewards</p>
+			<p
+				class="stat-value"
+				title={`Sum of the reward field over the ${day.length} indexed blocks in this window. ${dayNote}`}
+			>
+				{data.blocks.error ? 'Unavailable' : formatErg(dayReward, { maxFrac: 0 })}<span class="unit"
+					>ERG</span
+				>
+			</p>
+			<Sparkline
+				values={rewardPerHour}
+				color="var(--accent-ink)"
+				kind="line"
+				title="Reward paid per hour, in ERG, across the last 24 hours of indexed chain."
+			/>
+			<p class="stat-foot">{dayPartial ? 'Partial chain window' : 'paid to miners'}</p>
+		</div>
+
+		<div class="stat glass">
+			<p class="stat-label"><Icon name="rent-coin" size={16} />Storage rent</p>
+			<p
+				class="stat-value"
+				title="Boxes whose storage-rent maturity falls within the next 720 blocks, from /v1/rent/upcoming."
+			>
+				{data.rent.error
+					? 'Unavailable'
+					: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}
+			</p>
+			<p class="stat-sub">
+				{#if data.rent.error}Unavailable{:else}{data.rent.data?.complete === true
+						? ''
+						: '≥ '}<Amount nano={rentDue.toString()} maxFrac={3} /> due{/if}
+			</p>
+			<p class="stat-foot">
+				maturing in 720 blocks{data.rent.data?.complete === true ? '' : ' · incomplete'}
+			</p>
+		</div>
+
+		<div class="stat glass">
+			<p class="stat-label"><Icon name="status" size={16} />Indexer</p>
+			<p class="stat-value tone-{h.tone}" title={h.detail}>{h.label}</p>
+			<p class="stat-sub">
+				{status ? `${status.lag_blocks.toLocaleString('en-US')} blocks behind` : '—'}
+			</p>
+			<p class="stat-foot">{status ? `${status.mode} mode` : ''}</p>
+		</div>
 	</section>
 
-	<section class="panel card">
-		<div class="card-head">
-			<h2 class="card-title">Top tokens</h2>
-			<a class="more" href="/tokens">All tokens<Icon name="chevron-right" size={14} /></a>
-		</div>
-		{#if data.tokens.error}
-			<div class="pad"><ErrorState error={data.tokens.error} /></div>
-		{:else if (data.tokens.data ?? []).length === 0}
-			<div class="pad">
-				<EmptyState
-					message="No tokens indexed yet — they appear as the indexer reaches the blocks that mint them."
-				/>
+	<!-- ----------------------------------------------------------------------------- panels -->
+	<div class="panels">
+		<section class="panel card">
+			<div class="card-head">
+				<h2 class="card-title">Recent blocks</h2>
+				<a class="more" href="/blocks">View all<Icon name="chevron-right" size={14} /></a>
 			</div>
-		{:else}
-			<ol class="tokens">
-				{#each data.tokens.data ?? [] as token, i (token.id)}
-					<li>
-						<span class="rank">{i + 1}</span>
-						{#if token.name.trim()}
-							<a class="token-name" href={`/token/${token.id}`} title={token.name.trim()}>
-								{token.name.trim()}
-							</a>
-						{:else}
-							<!-- No minted name: the id stands in, in the mono face ids always take, and
-							     short enough that the cell never ellipsises an already-elided hash. -->
-							<a class="mono token-id" href={`/token/${token.id}`} title={token.id}>
-								{truncateMiddle(token.id, 4, 4)}
-							</a>
-						{/if}
-						<TokenBadge kind={token.kind} />
-						<span class="token-holders" title="Addresses holding this token">
-							{token.holder_count.toLocaleString('en-US')}<span class="unit">holders</span>
-						</span>
-					</li>
-				{/each}
-			</ol>
-		{/if}
-	</section>
+			{#if data.blocks.error}
+				<div class="pad"><ErrorState error={data.blocks.error} /></div>
+			{:else if recentBlocks.length === 0}
+				<div class="pad">
+					<EmptyState message="Blocks will appear here as the indexer catches up with the node." />
+				</div>
+			{:else}
+				<Table>
+					{#snippet head()}
+						<tr>
+							<th>Height</th>
+							<th>Age</th>
+							<th class="num">Txs</th>
+							<th class="num">Reward</th>
+							<th>Miner</th>
+						</tr>
+					{/snippet}
+					{#each recentBlocks as block (block.id)}
+						<tr>
+							<td><a class="height" href={`/blocks/${block.height}`}>{block.height}</a></td>
+							<td class="muted"><Age ms={block.timestamp} /></td>
+							<td class="num mono">{block.tx_count}</td>
+							<td class="num"><Amount nano={block.reward} maxFrac={3} /></td>
+							<td><MinerChip minerPk={block.miner_pk} /></td>
+						</tr>
+					{/each}
+				</Table>
+			{/if}
+		</section>
 
-	<section class="panel card">
-		<div class="card-head">
-			<h2 class="card-title">Largest holders</h2>
-			<a class="more" href="/richlist">Rich list<Icon name="chevron-right" size={14} /></a>
-		</div>
-		{#if data.richlist.error}
-			<div class="pad"><ErrorState error={data.richlist.error} /></div>
-		{:else if (data.richlist.data ?? []).length === 0}
-			<div class="pad"><EmptyState message="The richlist is still being built." /></div>
-		{:else}
-			<ol class="holders">
-				{#each data.richlist.data ?? [] as item, i (item.tree_hash)}
-					<li>
-						<span class="rank">{i + 1}</span>
-						{#if item.address}
-							<a class="mono holder-id" href={`/address/${item.address}`}>
-								{truncateMiddle(item.address)}
+		<section class="panel live ink">
+			<div class="card-head">
+				<h2 class="card-title">Live transactions</h2>
+				<span class="pill live-pill tone-{h.tone}"><span class="dot"></span>{h.live}</span>
+			</div>
+			{#if data.txs.error}
+				<div class="pad"><ErrorState error={data.txs.error} /></div>
+			{:else if shownTxs.length === 0}
+				<div class="pad">
+					<EmptyState message="Transactions will appear here as the indexer catches up." />
+				</div>
+			{:else}
+				<ul class="txlist">
+					{#each shownTxs as tx (tx.id)}
+						{@const kind = txKind(tx)}
+						<li>
+							<a href={`/tx/${tx.id}`}>
+								<span class="kind {kind.kind}" title={kind.why}>
+									<Icon
+										name={kind.kind === 'rent'
+											? 'rent-coin'
+											: kind.kind === 'token'
+												? 'layers'
+												: 'txs'}
+										size={18}
+									/>
+								</span>
+								<span class="tx-main">
+									<span class="tx-kind">{kind.label}</span>
+									<span class="tx-id mono">{truncateMiddle(tx.id)}</span>
+								</span>
+								<span class="tx-age"><Age ms={tx.timestamp} /></span>
+								<span class="tx-value">
+									{formatErg(
+										tx.outputs.reduce((t, o) => t + BigInt(o.value), 0n),
+										{ maxFrac: 2 }
+									)}<span class="unit">ERG</span>
+								</span>
 							</a>
-						{:else}
-							<span class="mono holder-id" title={item.tree_hash}>
-								{truncateMiddle(item.tree_hash)}
+						</li>
+					{/each}
+				</ul>
+				<div class="live-foot">
+					<span
+						title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
+					>
+						{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')} transactions · {dayPartial
+							? 'partial chain window'
+							: 'last 24 hours of chain'}
+					</span>
+					<span class="live-spark">
+						<Sparkline
+							values={txPerHour}
+							kind="bars"
+							height={26}
+							color="var(--accent)"
+							title="Transactions per hour across the last 24 hours of indexed chain."
+						/>
+					</span>
+				</div>
+			{/if}
+		</section>
+	</div>
+
+	<!-- ----------------------------------------------------------- rent, tokens and holders -->
+	<div class="panels three">
+		<section class="panel card">
+			<div class="card-head">
+				<h2 class="card-title">Rent maturing soon</h2>
+				<a class="more" href="/rent">All rent<Icon name="chevron-right" size={14} /></a>
+			</div>
+			{#if data.rent.error}
+				<div class="pad"><ErrorState error={data.rent.error} /></div>
+			{:else if rentItems.length === 0}
+				<div class="pad">
+					<EmptyState message="No box reaches its storage-rent maturity in the next 720 blocks." />
+				</div>
+			{:else}
+				<p class="summary">
+					<b
+						>{data.rent.error
+							? 'Unavailable'
+							: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}</b
+					>
+					boxes mature in the next 720 blocks, owing at least
+					<b><Amount nano={rentDue.toString()} maxFrac={3} /></b> between them.
+				</p>
+				<Table dense>
+					{#snippet head()}
+						<tr>
+							<th class="num">Value</th>
+							<th class="num">Due</th>
+							<th>Matures in</th>
+							<th class="rent-addr">Address</th>
+						</tr>
+					{/snippet}
+					{#each rentItems.slice(0, 5) as item (item.box.id)}
+						<tr>
+							<!-- The value is the row's link to the box it belongs to: without it a rent row
+						     names an amount and nothing that carries it. -->
+							<td class="num">
+								<a href={`/box/${item.box.id}`} title={item.box.id}>
+									<Amount nano={item.box.value} maxFrac={3} />
+								</a>
+							</td>
+							<td class="num"><Amount nano={item.box.rent.due_nano} maxFrac={3} /></td>
+							<td class="mono muted">
+								{tip !== null
+									? `${item.maturity_height - tip} blocks`
+									: `at ${item.maturity_height}`}
+							</td>
+							<td class="rent-addr">
+								{#if item.box.address}
+									<Hash
+										value={item.box.address}
+										href={`/address/${item.box.address}`}
+										copy={false}
+									/>
+								{:else}
+									<span class="muted" title="No P2PK/P2S address for this box">—</span>
+								{/if}
+							</td>
+						</tr>
+					{/each}
+				</Table>
+			{/if}
+		</section>
+
+		<section class="panel card">
+			<div class="card-head">
+				<h2 class="card-title">Top tokens</h2>
+				<a class="more" href="/tokens">All tokens<Icon name="chevron-right" size={14} /></a>
+			</div>
+			{#if data.tokens.error}
+				<div class="pad"><ErrorState error={data.tokens.error} /></div>
+			{:else if (data.tokens.data ?? []).length === 0}
+				<div class="pad">
+					<EmptyState
+						message="No tokens indexed yet — they appear as the indexer reaches the blocks that mint them."
+					/>
+				</div>
+			{:else}
+				<ol class="tokens">
+					{#each data.tokens.data ?? [] as token, i (token.id)}
+						<li>
+							<span class="rank">{i + 1}</span>
+							{#if token.name.trim()}
+								<a class="token-name" href={`/token/${token.id}`} title={token.name.trim()}>
+									{token.name.trim()}
+								</a>
+							{:else}
+								<!-- No minted name: the id stands in, in the mono face ids always take, and
+							     short enough that the cell never ellipsises an already-elided hash. -->
+								<a class="mono token-id" href={`/token/${token.id}`} title={token.id}>
+									{truncateMiddle(token.id, 4, 4)}
+								</a>
+							{/if}
+							<TokenBadge kind={token.kind} />
+							<span class="token-holders" title="Addresses holding this token">
+								{token.holder_count.toLocaleString('en-US')}<span class="unit">holders</span>
 							</span>
-						{/if}
-						<span class="holder-bal"><Amount nano={item.nano} maxFrac={0} /></span>
-					</li>
+						</li>
+					{/each}
+				</ol>
+			{/if}
+		</section>
+
+		<section class="panel card">
+			<div class="card-head">
+				<h2 class="card-title">Largest holders</h2>
+				<a class="more" href="/richlist">Rich list<Icon name="chevron-right" size={14} /></a>
+			</div>
+			{#if data.richlist.error}
+				<div class="pad"><ErrorState error={data.richlist.error} /></div>
+			{:else if (data.richlist.data ?? []).length === 0}
+				<div class="pad"><EmptyState message="The richlist is still being built." /></div>
+			{:else}
+				<ol class="holders">
+					{#each data.richlist.data ?? [] as item, i (item.tree_hash)}
+						<li>
+							<span class="rank">{i + 1}</span>
+							{#if item.address}
+								<a class="mono holder-id" href={`/address/${item.address}`}>
+									{truncateMiddle(item.address)}
+								</a>
+							{:else}
+								<span class="mono holder-id" title={item.tree_hash}>
+									{truncateMiddle(item.tree_hash)}
+								</span>
+							{/if}
+							<span class="holder-bal"><Amount nano={item.nano} maxFrac={0} /></span>
+						</li>
+					{/each}
+				</ol>
+			{/if}
+		</section>
+	</div>
+
+	<!-- -------------------------------------------------------------------------- go deeper -->
+	<section class="deeper">
+		<div class="deeper-in">
+			<div class="deeper-head">
+				<h2>Go deeper</h2>
+				<p>Five ways into the same chain, depending on what you already know.</p>
+			</div>
+			<div class="tools">
+				{#each tools as tool (tool.href)}
+					<a class="tool" href={tool.href}>
+						<span class="tool-icon"><Icon name={tool.icon} size={22} /></span>
+						<span class="tool-title">{tool.title}</span>
+						<span class="tool-sub">{tool.sub}</span>
+					</a>
 				{/each}
-			</ol>
-		{/if}
+			</div>
+		</div>
 	</section>
 </div>
-
-<!-- -------------------------------------------------------------------------- go deeper -->
-<section class="deeper">
-	<Backdrop variant="band" uid="band" />
-	<div class="deeper-in">
-		<div class="deeper-head">
-			<h2>Go deeper</h2>
-			<p>Five ways into the same chain, depending on what you already know.</p>
-		</div>
-		<div class="tools">
-			{#each tools as tool (tool.href)}
-				<a class="tool" href={tool.href}>
-					<span class="tool-icon"><Icon name={tool.icon} size={22} /></span>
-					<span class="tool-title">{tool.title}</span>
-					<span class="tool-sub">{tool.sub}</span>
-				</a>
-			{/each}
-		</div>
-	</div>
-</section>
 
 <style>
+	.home-dashboard {
+		display: contents;
+	}
+	.home-chain-scene {
+		display: none;
+	}
 	/* Full-bleed sections cancel the content column's gutter and, for the hero, its top
 	   padding as well — the landscape has to run under the floating header. */
 	.hero,
@@ -546,8 +582,10 @@
 	}
 
 	.hero {
-		margin-top: calc((var(--topbar-h) + var(--banner-h, 0px) + var(--space-2)) * -1);
-		border-radius: 0 0 var(--radius-card) var(--radius-card);
+		margin: 8px 0 0;
+		border-radius: 20px;
+		background: var(--hero-bg, #103a28);
+		color: var(--hero-fg, #eef8e8);
 	}
 
 	.hero-in {
@@ -556,9 +594,8 @@
 		align-items: flex-end;
 		justify-content: space-between;
 		gap: var(--space-8);
-		padding: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-12)) var(--gutter)
-			var(--space-10);
-		min-height: 420px;
+		padding: 36px;
+		min-height: 280px;
 	}
 
 	.hero-copy {
@@ -569,24 +606,25 @@
 	   competes with it, which is why the buttons underneath are small and quiet. */
 	h1 {
 		font-size: var(--fs-display);
-		font-weight: 300;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 800);
 		line-height: 1.02;
 		letter-spacing: -0.028em;
-		color: #14201b;
+		color: var(--hero-fg, #e7ffc7);
 	}
 
 	.lede {
 		margin-top: var(--space-4);
 		font-size: 18px;
-		color: #2f4038;
+		color: var(--hero-muted, #c9dccd);
 	}
 
 	:global(:root[data-theme='dark']) .hero h1 {
-		color: #f2f6f3;
+		color: var(--hero-fg, #f2f6f3);
 	}
 
 	:global(:root[data-theme='dark']) .hero .lede {
-		color: #c3d0c8;
+		color: var(--hero-muted, #c3d0c8);
 	}
 
 	.cta {
@@ -602,15 +640,15 @@
 		width: 250px;
 		/* The stat row rises 68 px into the hero; this keeps a clear 28 px of sky between the
 		   card's bottom edge and the top of those cards at every desktop width. */
-		margin-bottom: 56px;
+		margin-bottom: 0;
 		padding: var(--space-4) var(--space-5) var(--space-5);
 		border-radius: var(--radius-card);
-		background: var(--ink-panel-soft);
+		background: var(--hero-tip-bg, #071f16);
 		backdrop-filter: blur(16px) saturate(1.2);
 		-webkit-backdrop-filter: blur(16px) saturate(1.2);
-		border: 1px solid rgba(233, 238, 234, 0.16);
+		border: 1px solid var(--hero-hairline, rgba(233, 238, 234, 0.16));
 		box-shadow: var(--shadow-lift);
-		color: var(--ink-fg);
+		color: var(--hero-tip-fg, var(--ink-fg));
 	}
 
 	.tipcard-head {
@@ -619,20 +657,21 @@
 		gap: var(--space-2);
 		font-size: var(--fs-micro);
 		font-weight: 600;
-		color: var(--ink-fg-muted);
+		color: var(--hero-tip-muted, var(--ink-fg-muted));
 	}
 
 	.tipcard-height {
 		margin-top: var(--space-2);
 		font-size: var(--fs-key);
-		font-weight: 700;
+		font-family: var(--font-number, var(--font-sans));
+		font-weight: var(--weight-number, 700);
 		letter-spacing: -0.03em;
 		line-height: 1.1;
 	}
 
 	.tipcard-age {
 		font-size: var(--fs-micro);
-		color: var(--ink-fg-muted);
+		color: var(--hero-tip-muted, var(--ink-fg-muted));
 		margin-bottom: var(--space-3);
 	}
 
@@ -642,11 +681,11 @@
 		justify-content: space-between;
 		margin-top: var(--space-2);
 		font-size: var(--fs-micro);
-		color: var(--ink-fg-muted);
+		color: var(--hero-tip-muted, var(--ink-fg-muted));
 	}
 
 	.tipcard-foot b {
-		color: var(--ink-fg);
+		color: var(--hero-tip-fg, var(--ink-fg));
 		font-weight: 600;
 	}
 
@@ -655,7 +694,7 @@
 		display: grid;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: var(--space-6);
-		margin-top: calc(var(--space-10) * -1 - 28px);
+		margin-top: 0;
 		position: relative;
 		z-index: 5;
 	}
@@ -679,7 +718,8 @@
 
 	.stat-value {
 		font-size: 26px;
-		font-weight: 600;
+		font-family: var(--font-number, var(--font-sans));
+		font-weight: var(--weight-number, 600);
 		letter-spacing: -0.03em;
 		line-height: 1.2;
 		white-space: nowrap;
@@ -973,7 +1013,8 @@
 
 	.deeper-head h2 {
 		font-size: 34px;
-		font-weight: 300;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 300);
 		letter-spacing: -0.025em;
 	}
 
@@ -997,7 +1038,7 @@
 		gap: 6px;
 		padding: var(--space-5) var(--space-4);
 		border-radius: var(--radius-card);
-		background: rgba(12, 20, 15, 0.55);
+		background: var(--tool-bg, rgba(12, 20, 15, 0.55));
 		backdrop-filter: blur(12px);
 		-webkit-backdrop-filter: blur(12px);
 		border: 1px solid rgba(233, 238, 234, 0.13);
@@ -1009,7 +1050,7 @@
 	.tool:focus-visible {
 		color: var(--ink-fg);
 		border-color: var(--accent);
-		background: rgba(12, 20, 15, 0.72);
+		background: var(--tool-hover, rgba(12, 20, 15, 0.72));
 	}
 
 	.tool-icon {
@@ -1064,7 +1105,7 @@
 			flex-direction: column;
 			align-items: stretch;
 			gap: var(--space-8);
-			padding-top: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-8));
+			padding: 24px;
 			min-height: 0;
 		}
 		.tipcard {
@@ -1080,7 +1121,32 @@
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 		.hero {
-			border-radius: 0;
+			border-radius: 16px;
 		}
+	}
+	.kicker {
+		font: 11px var(--font-mono);
+		letter-spacing: 0.12em;
+		color: var(--hero-highlight, #b7f25f);
+		margin-bottom: 18px;
+	}
+	.hero .btn-fill {
+		background: var(--hero-btn-fill, #b7f25f);
+		color: var(--hero-btn-fg, #10291e);
+	}
+	.hero :global(:focus-visible) {
+		outline-color: var(--hero-focus, #b7f25f);
+	}
+	.deeper :global(:focus-visible) {
+		outline-color: var(--accent);
+	}
+	.hero .btn-ghost {
+		background: transparent;
+		color: var(--hero-fg, #eef8e8);
+		border-color: var(--hero-hairline, #6a8a73);
+	}
+	.deeper {
+		background: var(--ink-panel);
+		border-top: 3px solid var(--accent);
 	}
 </style>

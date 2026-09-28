@@ -14,6 +14,7 @@ tracing.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
+futures.workspace = true
 xp-wire.workspace = true
 axum.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

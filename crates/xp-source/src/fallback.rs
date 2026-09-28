@@ -6,8 +6,8 @@ use xp_types::Hash32;
 /// A [`BlockSource`] that reads the chain from a primary source but will fetch a *block body*
 /// from a second source when the primary cannot produce it.
 ///
-/// Only [`BlockSource::full_block_json`] is doubled up. `best_height`, `header_id_at` and
-/// `genesis_boxes_json` delegate to the primary alone, so the chain the index follows — which
+/// Only block-body lookups are doubled up. `best_height`, `header_id_at`, pending transactions
+/// and `genesis_boxes_json` delegate to the primary alone, so the chain the index follows — which
 /// height holds which header, and how far it goes — is still decided entirely by the primary.
 /// The fallback can never move the index onto its own chain.
 ///
@@ -31,28 +31,24 @@ impl Fallback {
             name,
         }
     }
-}
 
-#[async_trait::async_trait]
-impl BlockSource for Fallback {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    async fn best_height(&self) -> Result<u32, SourceError> {
-        self.primary.best_height().await
-    }
-
-    async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError> {
-        self.primary.header_id_at(height).await
-    }
-
-    async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError> {
-        let primary = self.primary.full_block_json(id).await;
+    async fn fetch_block_json(
+        &self,
+        id: &Hash32,
+        max_bytes: Option<usize>,
+    ) -> Result<Option<String>, SourceError> {
+        let primary = match max_bytes {
+            Some(max) => self.primary.full_block_json_bounded(id, max).await,
+            None => self.primary.full_block_json(id).await,
+        };
         if let Ok(Some(json)) = primary {
             return Ok(Some(json));
         }
-        match self.fallback.full_block_json(id).await {
+        let fallback = match max_bytes {
+            Some(max) => self.fallback.full_block_json_bounded(id, max).await,
+            None => self.fallback.full_block_json(id).await,
+        };
+        match fallback {
             Ok(Some(json)) => {
                 // The height is only in the body; parsing it here costs one extra JSON pass on
                 // a path that is rare by construction, and makes the log line usable against
@@ -81,6 +77,42 @@ impl BlockSource for Fallback {
                 primary
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl BlockSource for Fallback {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn best_height(&self) -> Result<u32, SourceError> {
+        self.primary.best_height().await
+    }
+
+    async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError> {
+        self.primary.header_id_at(height).await
+    }
+
+    async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError> {
+        self.fetch_block_json(id, None).await
+    }
+
+    async fn full_block_json_bounded(
+        &self,
+        id: &Hash32,
+        max_bytes: usize,
+    ) -> Result<Option<String>, SourceError> {
+        self.fetch_block_json(id, Some(max_bytes)).await
+    }
+
+    async fn unconfirmed_transaction_json(
+        &self,
+        id: &Hash32,
+    ) -> Result<Option<String>, SourceError> {
+        // Mempools differ across nodes. A fallback observation could hide a primary outage
+        // or make a transaction appear to re-enter this node's pool when it never did.
+        self.primary.unconfirmed_transaction_json(id).await
     }
 
     async fn genesis_boxes_json(&self) -> Result<String, SourceError> {

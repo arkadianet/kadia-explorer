@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { MOCK_ADDRESS, UNKNOWN_HEX, block, claimableBox, tx } from './data.ts';
+import { readFileSync } from 'node:fs';
 
 /** Types a query into the header search box and submits it. */
 async function search(page: import('@playwright/test').Page, q: string) {
@@ -43,12 +44,111 @@ test('an address goes straight to the address page', async ({ page }) => {
 	await expect(page.getByRole('heading', { name: 'Address' })).toBeVisible();
 });
 
-test('an unparseable query lands on the search page with a format hint', async ({ page }) => {
+test('a long H-prefix address reaches server validation', async ({ page }) => {
+	const address = readFileSync(
+		new URL('../../../tests/fixtures/receipts/p2s-address.txt', import.meta.url),
+		'utf8'
+	).trim();
+	let requested = '';
+	await page.route('**/v1/search?*', (route) => {
+		requested = new URL(route.request().url()).searchParams.get('q')!;
+		return route.fulfill({ json: { kind: 'address', id: MOCK_ADDRESS } });
+	});
+	await page.goto(`/search?q=${address}`);
+	await expect(page).toHaveURL(`/address/${MOCK_ADDRESS}`);
+	expect(requested).toBe(address);
+});
+
+test('an invalid address checksum receives a format hint', async ({ page }) => {
+	await page.route('**/v1/search?*', (route) =>
+		route.fulfill({ status: 400, json: { detail: 'Invalid address' } })
+	);
+	await page.goto(`/search?q=${MOCK_ADDRESS.slice(0, -1)}1`);
+	await expect(
+		page.getByText('This is not a valid indexed address or ID.', { exact: false })
+	).toBeVisible();
+});
+
+for (const failure of [400, 429, 503, 'network'] as const) {
+	test(`an address-shaped token name still searches names after ${failure}`, async ({ page }) => {
+		await page.route('**/v1/search?*', (route) =>
+			failure === 'network'
+				? route.abort('failed')
+				: route.fulfill({ status: failure, json: { detail: 'Address lookup failed' } })
+		);
+		const names = page.waitForResponse((response) =>
+			new URL(response.url()).pathname.endsWith('/v1/tokens/search')
+		);
+		await page.goto('/search?q=ErgoPad&match=exact');
+		const response = await names;
+		expect(response.ok()).toBe(true);
+		expect(new URL(response.url()).searchParams.get('q')).toBe('ErgoPad');
+		expect(new URL(response.url()).searchParams.get('match')).toBe('exact');
+		await expect(page.getByRole('textbox', { name: 'Token name', exact: true })).toHaveValue(
+			'ErgoPad'
+		);
+		await expect(
+			page.getByText('This is not a valid indexed address or ID.', { exact: false })
+		).toHaveCount(0);
+	});
+}
+
+test('the invalid-address notice starts above the short-name threshold without blocking names', async ({
+	page
+}) => {
+	await page.route('**/v1/search?*', (route) =>
+		route.fulfill({ status: 400, json: { detail: 'Invalid address' } })
+	);
+	for (const length of [32, 33]) {
+		const query = 'N'.repeat(length);
+		await page.goto(`/search?q=${query}`);
+		await expect(page.getByRole('textbox', { name: 'Token name', exact: true })).toHaveValue(query);
+		await expect(page.getByRole('heading', { name: 'No indexed name matches' })).toBeVisible();
+		await expect(
+			page.getByText('This is not a valid indexed address or ID.', { exact: false })
+		).toHaveCount(length > 32 ? 1 : 0);
+	}
+});
+
+test('an address-shaped query retains not-found behavior after a 404', async ({ page }) => {
+	let nameRequests = 0;
+	await page.route('**/v1/search?*', (route) =>
+		route.fulfill({ status: 404, json: { detail: 'Not found' } })
+	);
+	page.on('request', (request) => {
+		if (new URL(request.url()).pathname.endsWith('/v1/tokens/search')) nameRequests++;
+	});
+	await page.goto('/search?q=ErgoPad');
+	await expect(page.getByText('No match for "ErgoPad".', { exact: false })).toBeVisible();
+	await expect(page.getByRole('region', { name: 'Token discovery' })).toHaveCount(0);
+	expect(nameRequests).toBe(0);
+});
+
+for (const failure of [503, 'network'] as const) {
+	test(`an ID lookup still reports ${failure} instead of searching token names`, async ({
+		page
+	}) => {
+		await page.route('**/v1/search?*', (route) =>
+			failure === 'network'
+				? route.abort('failed')
+				: route.fulfill({ status: failure, json: { detail: 'ID lookup failed' } })
+		);
+		await page.goto(`/search?q=${UNKNOWN_HEX}`);
+		await expect(
+			page.getByRole('heading', { name: failure === 'network' ? '500' : '503', exact: true })
+		).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Token discovery' })).toHaveCount(0);
+	});
+}
+
+test('ordinary text searches minted token names without claiming a match', async ({ page }) => {
 	await page.goto('/');
 	await search(page, 'not a real query!');
 	await expect(page).toHaveURL(/\/search\?q=/);
-	await expect(page.getByText(/No match for "not a real query!"/)).toBeVisible();
-	await expect(page.getByText(/Enter a block height, an id or an address\./)).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'No indexed name matches' })).toBeVisible();
+	await expect(page.getByRole('textbox', { name: 'Token name', exact: true })).toHaveValue(
+		'not a real query!'
+	);
 });
 
 test('a well-formed but unknown id reports not found', async ({ page }) => {

@@ -6,7 +6,7 @@ test('home renders the hero and every panel with rows from the mock', async ({ p
 
 	// The hero states the chain's tip, and the panels below it name their own sections.
 	await expect(
-		page.getByRole('heading', { level: 1, name: 'Transparent by design.' })
+		page.getByRole('heading', { level: 1, name: 'Follow the chain. In every dimension.' })
 	).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Live transactions' })).toBeVisible();
@@ -31,9 +31,9 @@ test('home renders the hero and every panel with rows from the mock', async ({ p
 		has: page.getByRole('heading', { name: 'Live transactions' })
 	});
 	await expect(txs.locator('.txlist li')).toHaveCount(5);
-	await expect(txs.locator('.tx-kind').first()).toHaveText(
-		/Storage rent claim|Token transfer|Payment/
-	);
+	// This fixture spends a contract script without a supported decoder; no payment intent
+	// or rent claim is inferred from token presence or box age.
+	await expect(txs.locator('.tx-kind').first()).toHaveText('Contract interaction');
 
 	const rent = page.locator('section.panel', {
 		has: page.getByRole('heading', { name: 'Rent maturing soon' })

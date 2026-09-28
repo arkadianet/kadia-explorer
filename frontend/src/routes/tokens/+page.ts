@@ -7,5 +7,9 @@ export type TokenSort = 'newest' | 'holders';
 // Reading `url.searchParams` here is what makes SvelteKit re-run the load when it changes.
 export const load: PageLoad = ({ url }) => {
 	const sort: TokenSort = url.searchParams.get('sort') === 'holders' ? 'holders' : 'newest';
-	return { sort };
+	return {
+		sort,
+		query: (url.searchParams.get('q') ?? '').replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, ''),
+		match: url.searchParams.get('match') === 'exact' ? ('exact' as const) : ('prefix' as const)
+	};
 };

@@ -8,7 +8,8 @@ export class ApiError extends Error {
 	constructor(
 		public status: number,
 		public title: string,
-		public detail: string
+		public detail: string,
+		public code?: string
 	) {
 		super(`${status} ${title}: ${detail}`);
 		this.name = 'ApiError';
@@ -30,6 +31,7 @@ function buildUrl(path: string, params?: QueryParams): string {
 }
 
 interface Problem {
+	code?: string;
 	type?: string;
 	title?: string;
 	status?: number;
@@ -56,7 +58,8 @@ export async function apiGet<T>(
 			throw new ApiError(
 				res.status,
 				problem.title || res.statusText || fallback,
-				problem.detail || res.statusText || fallback
+				problem.detail || res.statusText || fallback,
+				problem.code
 			);
 		}
 		return (await res.json()) as T;

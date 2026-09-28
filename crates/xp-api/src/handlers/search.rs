@@ -3,19 +3,6 @@ use crate::{blocking, ApiError, AppState};
 use axum::extract::{Query, State};
 use axum::Json;
 
-const BASE58: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-/// Cheap shape test for a mainnet address, used only to choose between "this looked like an
-/// address but is unknown" (404) and "this is not a searchable term at all" (400). Real
-/// parsing happens in `Reader::tree_by_address`, which cannot report *why* it failed.
-fn looks_like_address(q: &str) -> bool {
-    matches!(q.chars().next(), Some('9' | '3' | '2' | '8'))
-        // No upper length bound: a mainnet P2S address encodes the whole script, so it can
-        // run to several hundred characters.
-        && q.len() >= 40
-        && q.chars().all(|c| BASE58.contains(c))
-}
-
 /// Resolution order for a 64-hex term is header id, tx id, box id, token id, then template
 /// hash — the same order the spec lists, and the order of decreasing cardinality on chain.
 pub async fn search(
@@ -36,7 +23,7 @@ pub async fn search(
                 None => Err(ApiError::NotFound),
             };
         }
-        if q.len() == 64 {
+        if q.len() == 64 && q.bytes().all(|b| b.is_ascii_hexdigit()) {
             let id = parse_id(&q)?;
             let mut matches = Vec::new();
             for (kind, found) in [
@@ -62,7 +49,9 @@ pub async fn search(
             }
             return Err(ApiError::NotFound);
         }
-        if looks_like_address(&q) {
+        // Validate network, checksum and script. P2S prefixes vary with script length;
+        // neither the first character nor the text length identifies an Ergo address.
+        if xp_wire::tree::address_tree_hash(&q).is_ok() {
             return match rd.tree_by_address(&q)? {
                 Some(_) => Ok(SearchDto::single("address", q)),
                 None => Err(ApiError::NotFound),

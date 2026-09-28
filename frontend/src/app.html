@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-appearance="prism">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -18,8 +18,10 @@
 			// never sees a white flash. Keep this rule in step with $lib/theme/theme.svelte.ts.
 			(function () {
 				var saved = null;
+				var appearance = null;
 				try {
 					saved = localStorage.getItem('xp-theme');
+					appearance = localStorage.getItem('xp-appearance');
 				} catch (e) {
 					/* private mode */
 				}
@@ -29,6 +31,13 @@
 						: 'light';
 				document.documentElement.dataset.theme =
 					saved === 'light' || saved === 'dark' ? saved : system;
+				document.documentElement.dataset.appearance =
+					appearance === 'original' ||
+					appearance === 'aurora' ||
+					appearance === 'atelier' ||
+					appearance === 'prism'
+						? appearance
+						: 'prism';
 			})();
 		</script>
 		%sveltekit.head%
