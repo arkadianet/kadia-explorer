@@ -3,6 +3,37 @@ import type { AddressActivityDto, AddressActivityFilters, PageDto } from '$lib/a
 export const MAX_ACTIVITY_ITEMS = 500;
 export const MAX_CSV_ROWS = 5000;
 export const DIRECTIONS = ['all', 'received', 'sent', 'mixed', 'neutral', 'unknown'] as const;
+
+/** Aggregates only the rows supplied by the current filtered, anchored view. Unknown
+ * input coverage withholds the entire ERG aggregate, never just the missing terms. */
+export function loadedActivitySummary(items: AddressActivityDto[]) {
+	const directions = { received: 0, sent: 0, mixed: 0, neutral: 0, unknown: 0 };
+	let nano = 0n;
+	let unresolved = 0;
+	let fromMs: number | null = null;
+	let toMs: number | null = null;
+	for (const item of items) {
+		directions[item.direction]++;
+		fromMs = fromMs === null ? item.timestamp : Math.min(fromMs, item.timestamp);
+		toMs = toMs === null ? item.timestamp : Math.max(toMs, item.timestamp);
+		if (
+			!item.coverage.complete ||
+			item.coverage.resolved_inputs !== item.coverage.total_inputs ||
+			item.erg_delta === null
+		)
+			unresolved++;
+		else nano += BigInt(item.erg_delta);
+	}
+	return {
+		count: items.length,
+		nano: unresolved ? null : nano.toString(),
+		unresolved,
+		directions,
+		fromMs,
+		toMs
+	};
+}
+
 export function parseActivityFilters(params: URLSearchParams): {
 	filters: AddressActivityFilters;
 	error: string | null;

@@ -7,17 +7,25 @@
 	let opener: HTMLButtonElement;
 	let input: HTMLInputElement;
 	let label = $state('');
+	let group = $state('');
 	let announcement = $state('');
 	const saved = $derived(savedAddresses.items.find((item) => item.address === address));
+	const groups = $derived(
+		savedAddresses.items
+			.map((item) => item.group ?? '')
+			.filter((name, index, all) => name && all.indexOf(name) === index)
+			.sort((a, b) => a.localeCompare(b))
+	);
 	function open() {
 		label = saved?.label ?? '';
+		group = saved?.group ?? '';
 		announcement = '';
 		dialog.showModal();
 		input.focus();
 	}
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
-		if (savedAddresses.save(address, label)) {
+		if (savedAddresses.save(address, label, group)) {
 			dialog.close();
 			announcement = 'Saved in this browser.';
 		}
@@ -38,6 +46,7 @@
 
 <div class="save-address">
 	{#if saved?.label && !compact}<p class="local-label">Local label <bdi>{saved.label}</bdi></p>{/if}
+	{#if saved?.group && !compact}<p class="local-label">Group <bdi>{saved.group}</bdi></p>{/if}
 	<button
 		class="save-trigger"
 		type="button"
@@ -61,8 +70,8 @@
 		<button type="button" onclick={() => dialog.close()}>Close</button>
 	</header>
 	<p id={`${uid}-description`}>
-		Keep an address and optional label in this browser. Labels are private to this browser and do
-		not establish ownership or verification.
+		Keep an address, optional label and group in this browser. Groups organize your list; labels and
+		groups do not establish ownership or verification.
 	</p>
 	<p class="address mono">{address}</p>
 	<form onsubmit={submit}>
@@ -76,6 +85,24 @@
 			autocomplete="off"
 			placeholder="A name you recognise"
 		/>
+		<label for={`${uid}-group`}>Group <span>(optional, 40 characters maximum)</span></label>
+		<input
+			id={`${uid}-group`}
+			class="control"
+			bind:value={group}
+			maxlength="40"
+			autocomplete="off"
+			list={`${uid}-groups`}
+			placeholder="Choose or create a local group"
+			aria-describedby={`${uid}-group-help`}
+		/>
+		<datalist id={`${uid}-groups`}
+			>{#each groups as name (name)}<option value={name}></option>{/each}</datalist
+		>
+		<p id={`${uid}-group-help`}>
+			Use an existing group name or enter a new one. Clear this field to leave the address
+			ungrouped.
+		</p>
 		{#if savedAddresses.error}<p class="error" role="alert">{savedAddresses.error}</p>{/if}
 		<button type="submit" class="btn btn-fill"
 			>{saved ? 'Save changes' : 'Save in this browser'}</button

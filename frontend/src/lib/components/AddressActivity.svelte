@@ -9,6 +9,7 @@
 		activityCsv,
 		DIRECTIONS,
 		MAX_ACTIVITY_ITEMS,
+		loadedActivitySummary,
 		parseActivityFilters
 	} from '$lib/addresses/activity';
 	import { savedAddresses } from '$lib/addresses/saved.svelte';
@@ -40,6 +41,7 @@
 	let generation = 0;
 	let exportMessage = $state('');
 	const atLimit = $derived(items.length >= MAX_ACTIVITY_ITEMS);
+	const loadedSummary = $derived(loadedActivitySummary(items));
 	$effect(() => {
 		void address;
 		void queryKey;
@@ -238,6 +240,59 @@
 				>{restartRequired ? 'Restart from latest snapshot' : 'Retry activity'}</button
 			>
 		</div>{/if}
+	{#if items.length}
+		<section class="loaded-summary" aria-label="Loaded activity summary">
+			<header>
+				<h3>Loaded activity</h3>
+				<p>
+					{loadedSummary.count} filtered transaction{loadedSummary.count === 1 ? '' : 's'} · this view
+					only
+				</p>
+			</header>
+			<div class="summary-erg">
+				<p>Net ERG across loaded transactions</p>
+				{#if loadedSummary.nano !== null}<strong class:negative={BigInt(loadedSummary.nano) < 0n}
+						>{signed(loadedSummary.nano)} <span>ERG</span></strong
+					>
+					<p class="summary-raw mono">{loadedSummary.nano} nanoERG</p>{:else}<strong
+						class="summary-unavailable">Aggregate unavailable</strong
+					>
+					<p>
+						{loadedSummary.unresolved} transaction{loadedSummary.unresolved === 1 ? '' : 's'} lack{loadedSummary.unresolved ===
+						1
+							? 's'
+							: ''} complete input coverage or an ERG delta. Known rows are not summed into a full total.
+					</p>{/if}
+			</div>
+			<dl class="summary-directions">
+				{#each Object.entries(loadedSummary.directions) as [name, count] (name)}<div>
+						<dt>{name[0].toUpperCase() + name.slice(1)}</dt>
+						<dd>{count}</dd>
+					</div>{/each}
+			</dl>
+			<div class="summary-scope">
+				<p>
+					Loaded UTC range: <time datetime={new Date(loadedSummary.fromMs!).toISOString()}
+						>{new Date(loadedSummary.fromMs!)
+							.toISOString()
+							.replace('T', ' ')
+							.replace('Z', ' UTC')}</time
+					>
+					to
+					<time datetime={new Date(loadedSummary.toMs!).toISOString()}
+						>{new Date(loadedSummary.toMs!)
+							.toISOString()
+							.replace('T', ' ')
+							.replace('Z', ' UTC')}</time
+					>.
+				</p>
+				<p>
+					This summarizes only the loaded transactions matching your filters, not a full-period
+					total. Direction counts follow the selected asset.
+				</p>
+			</div>
+		</section>
+	{/if}
 	<ol class="activity-list">
 		{#each items as item (item.id)}<li class="activity-entry">
 				<div class="activity-identity">
@@ -341,6 +396,159 @@
 </section>
 
 <style>
+	.loaded-summary {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 20px;
+		padding: 20px;
+		margin: 20px 0;
+		border: var(--rule);
+		border-radius: 12px;
+		background: var(--surface-hover);
+		min-width: 0;
+	}
+	.loaded-summary header {
+		grid-column: 1/-1;
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
+	}
+	.loaded-summary h3 {
+		font: 650 21px var(--font-display, var(--font-sans));
+	}
+	.loaded-summary header p {
+		font-size: 11px;
+		color: var(--fg-muted);
+	}
+	.summary-erg {
+		min-width: 0;
+	}
+	.summary-erg > p {
+		font-size: 11px;
+		color: var(--fg-muted);
+		line-height: 1.7;
+	}
+	.summary-erg > strong {
+		display: block;
+		font: 600 29px var(--font-number, var(--font-sans));
+		color: var(--accent-ink);
+		margin: 10px 0 7px;
+		overflow-wrap: anywhere;
+	}
+	.summary-erg strong span {
+		font: 12px var(--font-sans);
+		color: var(--fg-muted);
+	}
+	.summary-erg > strong.summary-unavailable {
+		font-size: 20px;
+		color: var(--warn-ink);
+	}
+	.summary-raw {
+		overflow-wrap: anywhere;
+	}
+	.summary-directions {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 15px 20px;
+		align-content: start;
+	}
+	.summary-directions dt {
+		font-size: 11px;
+		color: var(--fg-muted);
+		margin-bottom: 6px;
+	}
+	.summary-directions dd {
+		font: 600 20px var(--font-number, var(--font-sans));
+	}
+	.summary-scope {
+		grid-column: 1/-1;
+		padding-top: 15px;
+		border-top: var(--rule);
+		font-size: 11px;
+		line-height: 1.8;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.summary-scope p + p {
+		margin-top: 6px;
+	}
+	:global(:root[data-appearance='prism']) .loaded-summary {
+		background: var(--surface-solid);
+		border-left: 4px solid var(--accent-ink);
+		box-shadow: var(--shadow-rest);
+		grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+	}
+	:global(:root[data-appearance='prism']) .summary-directions {
+		border-left: var(--rule);
+		padding-left: 20px;
+	}
+	:global(:root[data-appearance='atelier']) .loaded-summary {
+		background: none;
+		border-radius: 0;
+		border-width: 3px 0 1px;
+		border-top-style: double;
+		padding-inline: 0;
+	}
+	:global(:root[data-appearance='atelier']) .loaded-summary h3 {
+		font-size: 27px;
+	}
+	:global(:root[data-appearance='atelier']) .summary-directions {
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		align-content: center;
+	}
+	:global(:root[data-appearance='aurora']) .loaded-summary {
+		grid-template-columns: minmax(0, 1fr);
+		background: var(--surface-solid);
+		border-radius: 24px;
+		padding: 28px;
+		box-shadow: var(--shadow-lift);
+		text-align: center;
+	}
+	:global(:root[data-appearance='aurora']) .loaded-summary header {
+		display: block;
+	}
+	:global(:root[data-appearance='aurora']) .loaded-summary header p {
+		margin-top: 10px;
+	}
+	:global(:root[data-appearance='aurora']) .summary-erg > strong {
+		font-size: 36px;
+	}
+	:global(:root[data-appearance='aurora']) .summary-erg > strong.summary-unavailable {
+		font-size: 23px;
+	}
+	:global(:root[data-appearance='aurora']) .summary-directions {
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		padding-top: 10px;
+	}
+	@media (max-width: 700px) {
+		.loaded-summary,
+		:global(:root[data-appearance='prism']) .loaded-summary {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		:global(:root[data-appearance='prism']) .summary-directions {
+			border-left: 0;
+			border-top: var(--rule);
+			padding: 16px 0 0;
+		}
+		:global(:root[data-appearance='atelier']) .summary-directions,
+		:global(:root[data-appearance='aurora']) .summary-directions {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 400px) {
+		.loaded-summary,
+		:global(:root[data-appearance='aurora']) .loaded-summary {
+			padding: 16px;
+		}
+		.summary-directions {
+			gap: 15px 12px;
+		}
+		:global(:root[data-appearance='aurora']) .summary-erg > strong {
+			font-size: 29px;
+		}
+	}
 	.address-activity {
 		min-width: 0;
 	}

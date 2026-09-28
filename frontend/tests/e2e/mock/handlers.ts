@@ -554,6 +554,16 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 	}
 
 	// --- addresses -----------------------------------------------------------------
+	if (/^\/v1\/addresses\/[^/]+\/(balance|boxes)\/at$/.test(path)) {
+		return sendJson(res, 503, {
+			type: 'about:blank',
+			title: 'Historical state unavailable',
+			status: 503,
+			code: 'history_unavailable',
+			detail:
+				'This fixture index starts above genesis; exact historical state requires complete retained history.'
+		});
+	}
 	const address = /^\/v1\/addresses\/([^/]+)(\/boxes|\/txs|\/rent|\/activity)?$/.exec(path);
 	if (address) {
 		const addr = decodeURIComponent(address[1]);
@@ -636,9 +646,35 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		switch (token[2]) {
 			case '/txs':
 				return tokenTransactions(d, id, url, res);
-			case '/holders':
+			case '/holders': {
+				const result = holderPage(d.tokenHolders.get(id) ?? [], cursor, limit);
+				const strict = url.searchParams.get('consistency') === 'strict';
+				const block = d.blockByHeight.get(d.status.indexed ?? d.status.best)!;
+				const anchor = { height: block.height, block_id: block.id };
+				const snapshotFor = (next: string) =>
+					`mock-holders-${Buffer.from(JSON.stringify([anchor, id, next])).toString('base64url')}`;
+				const provided = url.searchParams.get('snapshot');
+				if (
+					strict &&
+					((cursor === null) !== (provided === null) ||
+						(cursor !== null && provided !== snapshotFor(cursor)))
+				)
+					return sendJson(res, 409, {
+						status: 409,
+						title: 'Snapshot changed',
+						code: 'snapshot_changed',
+						detail: 'Restart holders with the current snapshot, token and cursor.'
+					});
 				sendJson(res, 200, {
-					...holderPage(d.tokenHolders.get(id) ?? [], cursor, limit),
+					...result,
+					...(strict
+						? {
+								consistency: 'strict',
+								anchor,
+								observed_anchor: anchor,
+								next_snapshot: result.next_cursor ? snapshotFor(result.next_cursor) : null
+							}
+						: {}),
 					holder_context: {
 						supply: info.supply,
 						holder_count: info.holder_count,
@@ -646,6 +682,7 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 					}
 				});
 				return;
+			}
 			case '/boxes':
 				sendJson(res, 200, page(boxesOfIds(d, d.boxIdsByToken.get(id) ?? [], url), cursor, limit));
 				return;

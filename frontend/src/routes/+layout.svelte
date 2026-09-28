@@ -57,6 +57,7 @@
 		{ href: '/tokens', label: 'Tokens', icon: 'token' },
 		{ href: '/rent', label: 'Storage rent', icon: 'rent-coin', primary: true },
 		{ href: '/saved', label: 'Saved addresses', icon: 'addresses' },
+		{ href: '/developers', label: 'API playground', icon: 'contract' },
 		{ href: '/status', label: 'Status', icon: 'status' }
 	];
 
@@ -215,7 +216,7 @@
 				</a>
 				<p class="foot-line">Open source, built for a fairer and more open future.</p>
 				<nav class="foot-links" aria-label="Footer">
-					<a href="/v1/status">API</a>
+					<a href="/developers">API</a>
 					<a href="/status">Status</a>
 					<a href="https://github.com/arkadianet" rel="noreferrer">GitHub</a>
 				</nav>

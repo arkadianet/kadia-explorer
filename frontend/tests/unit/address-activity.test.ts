@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { activityCsv, parseActivityFilters } from '../../src/lib/addresses/activity';
+import {
+	activityCsv,
+	loadedActivitySummary,
+	parseActivityFilters
+} from '../../src/lib/addresses/activity';
 import type { AddressActivityDto } from '../../src/lib/api/types';
 
 const anchor = { height: 100, block_id: 'b'.repeat(64) };
@@ -27,6 +31,51 @@ const csv = (items = [item], label = '') =>
 		{ asset: 'all', direction: 'all' },
 		{ partialFrom: 10, matchingScanComplete: false }
 	);
+describe('loaded activity summary', () => {
+	it('keeps exact signed arithmetic, every direction count, and the loaded timestamp range', () => {
+		const rows: AddressActivityDto[] = [
+			item,
+			{
+				...item,
+				direction: 'received',
+				erg_delta: '900719925474099312350',
+				timestamp: item.timestamp - 5000
+			},
+			{ ...item, direction: 'sent', erg_delta: '-2' },
+			{ ...item, direction: 'neutral', erg_delta: '0', timestamp: item.timestamp + 1000 }
+		];
+		expect(loadedActivitySummary(rows)).toEqual({
+			count: 4,
+			nano: '3',
+			unresolved: 0,
+			directions: { received: 1, sent: 1, mixed: 1, neutral: 1, unknown: 0 },
+			fromMs: item.timestamp - 5000,
+			toMs: item.timestamp + 1000
+		});
+	});
+	it.each([
+		{
+			...item,
+			coverage: { complete: false, resolved_inputs: 1, total_inputs: 2 },
+			direction: 'unknown' as const
+		},
+		{ ...item, coverage: { complete: true, resolved_inputs: 1, total_inputs: 2 } },
+		{ ...item, erg_delta: null }
+	])('withholds the entire ERG aggregate for incomplete or missing values', (incomplete) => {
+		const summary = loadedActivitySummary([item, incomplete]);
+		expect(summary.nano).toBeNull();
+		expect(summary.unresolved).toBe(1);
+		expect(summary.count).toBe(2);
+	});
+	it('does not invent a date range for no loaded transactions', () => {
+		expect(loadedActivitySummary([])).toMatchObject({
+			count: 0,
+			nano: '0',
+			fromMs: null,
+			toMs: null
+		});
+	});
+});
 describe('address activity filters', () => {
 	it('uses inclusive UTC start and exclusive midnight after the through date', () => {
 		expect(

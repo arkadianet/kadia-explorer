@@ -10,6 +10,10 @@ The page computes shares from integer strings with `BigInt`, never by summing ro
 
 Scripts can represent contracts or many people, and one person may use many scripts. These figures are not a complete ownership distribution or a decentralization score. Missing or inconsistent holder context withholds concentration while retaining the holder rows. A changed strict snapshot clears the list and requires restart.
 
+**Export loaded holders CSV** downloads only the rows already loaded in the browser; it never requests the remaining holders. Every row includes its ordinal, address where available, tree hash, exact raw amount, declared decimals (blank when unknown), same-snapshot indexed supply and definition, block height/ID anchor, loaded count, and indexed holder-script count. The scope is explicitly `loaded_holder_scripts_only`, not a complete owner registry. A strict anchor and consistent denominator must survive every loaded page; loading, errors, conflicts and missing/invalid context disable export.
+
+Exports are limited to 5,000 rows and 2 MiB of UTF-8 CSV. Exceeding either limit fails without silently truncating rows. Text cells are quoted and formula-like content is neutralized. Raw integer strings remain exact in the file; spreadsheet users must import amount columns as text to avoid application rounding. The downloaded file contains public address/script data and should be shared deliberately.
+
 ## Mint provenance and media
 
 The page links the mint transaction, mint output, input-derived token ID and mint height. One internal box request reads the mint output address and metadata; no requests are made per holder. The box must match the token's mint box, transaction and token ID before its media can be used.

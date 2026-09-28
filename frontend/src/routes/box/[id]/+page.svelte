@@ -8,6 +8,7 @@
 	import Amount from '$lib/components/Amount.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import RegistersTable from '$lib/components/RegistersTable.svelte';
+	import BoxLineage from '$lib/components/BoxLineage.svelte';
 	import { hasDisplayableRegisters } from '$lib/registers/decode';
 	import { status } from '$lib/status/status.svelte';
 	import { formatTokenAmount } from '$lib/format/amount';
@@ -98,6 +99,8 @@
 		</details>
 	{/if}
 </div>
+
+{#key box.id}<BoxLineage {box} />{/key}
 
 {#if box.tokens.length > 0}
 	<Panel title={`Tokens (${box.tokens.length})`}>

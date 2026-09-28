@@ -507,3 +507,180 @@ test('partial token history discloses unresolved-input gaps and an older server 
 	);
 	await expect(history.getByText(/No transaction touching/)).toHaveCount(0);
 });
+
+const exportHolderRows = Array.from({ length: 20 }, (_, index) => ({
+	...tokenHolders[0],
+	tree_hash: index.toString(16).padStart(64, '0'),
+	amount: index === 0 ? '9007199254740993' : '1',
+	share_pct: '0.00'
+}));
+function exportHolderPage(extra: Record<string, unknown> = {}) {
+	return {
+		items: exportHolderRows,
+		next_cursor: 'cursor-1',
+		next_snapshot: 'snapshot-1',
+		consistency: 'strict',
+		anchor: { height: newestTx.height, block_id: 'b'.repeat(64) },
+		holder_context: {
+			supply: '18446744073709551615',
+			holder_count: 100,
+			definition: 'indexed_emission_minus_burned'
+		},
+		...extra
+	};
+}
+
+test('loaded holder CSV downloads exact amounts and the same snapshot without fetching remaining holders', async ({
+	page
+}) => {
+	await useShortViewport(page);
+	let requests = 0;
+	await page.route(`**/v1/tokens/${mostHeldToken.id}/holders?*`, (route) => {
+		requests++;
+		return route.fulfill({ json: exportHolderPage() });
+	});
+	await page.goto(`/token/${mostHeldToken.id}`);
+	const button = page.getByRole('button', { name: 'Export loaded holders CSV', exact: true });
+	await expect(button).toBeEnabled();
+	const [download] = await Promise.all([page.waitForEvent('download'), button.click()]);
+	const stream = await download.createReadStream();
+	let body = '';
+	for await (const chunk of stream!) body += chunk.toString();
+	const lines = body
+		.trim()
+		.split('\r\n')
+		.map((line) => line.split(',').map((value) => value.slice(1, -1)));
+	expect(lines).toHaveLength(21);
+	const first = Object.fromEntries(lines[0].map((header, index) => [header, lines[1][index]]));
+	expect(first).toMatchObject({
+		token_id: mostHeldToken.id,
+		ordinal: '1',
+		tree_hash: '0'.repeat(64),
+		amount_raw: '9007199254740993',
+		decimals: mostHeldToken.decimals === null ? '' : String(mostHeldToken.decimals),
+		indexed_supply_raw: '18446744073709551615',
+		snapshot_height: String(newestTx.height),
+		snapshot_block_id: 'b'.repeat(64),
+		export_scope: 'loaded_holder_scripts_only',
+		loaded_script_count: '20',
+		indexed_holder_script_count: '100'
+	});
+	expect(requests).toBe(1);
+	await expect(
+		page.getByText('Scripts do not identify individual owners.', { exact: false })
+	).toBeVisible();
+});
+
+test('holder CSV stays disabled when strict context is absent or changes across loaded pages', async ({
+	page
+}) => {
+	await useShortViewport(page);
+	let scenario = 'missing';
+	await page.route(`**/v1/tokens/${mostHeldToken.id}/holders?*`, (route) => {
+		const continued = new URL(route.request().url()).searchParams.has('cursor');
+		return route.fulfill({
+			json: exportHolderPage(
+				scenario === 'missing'
+					? { consistency: 'best_effort', anchor: null, next_cursor: null }
+					: scenario === 'invalid'
+						? {
+								holder_context: {
+									supply: '1',
+									holder_count: 100,
+									definition: 'indexed_emission_minus_burned'
+								},
+								next_cursor: null
+							}
+						: continued
+							? {
+									items: [{ ...exportHolderRows[1], tree_hash: 'c'.repeat(64) }],
+									next_cursor: null,
+									...(scenario === 'changed-anchor'
+										? { anchor: { height: newestTx.height, block_id: 'c'.repeat(64) } }
+										: {
+												holder_context: {
+													supply: '18446744073709551614',
+													holder_count: 100,
+													definition: 'indexed_emission_minus_burned'
+												}
+											})
+								}
+							: {}
+			)
+		});
+	});
+	await page.goto(`/token/${mostHeldToken.id}`);
+	const button = page.getByRole('button', { name: 'Export loaded holders CSV', exact: true });
+	await expect(page.locator('table.table tbody tr')).toHaveCount(20);
+	await expect(button).toBeDisabled();
+	scenario = 'invalid';
+	await page.reload();
+	await expect(page.locator('table.table tbody tr')).toHaveCount(20);
+	await expect(button).toBeDisabled();
+	for (scenario of ['changed-anchor', 'changed-supply']) {
+		// The previous scenario intentionally reached the pagination sentinel. Do not
+		// restore that scroll position and fetch page two before observing page one.
+		await page.evaluate(() => window.scrollTo(0, 0));
+		await page.reload();
+		await expect(page.locator('table.table tbody tr')).toHaveCount(20);
+		await expect(button).toBeEnabled();
+		await scrollUntilCount(page, 'table.table tbody tr', 21);
+		await expect(button).toBeDisabled();
+		await expect(
+			page.getByText(
+				'A consistent holder snapshot and supply denominator are required for export.',
+				{ exact: true }
+			)
+		).toBeVisible();
+	}
+});
+
+test('holder CSV cannot download during continuation loading or after a strict snapshot conflict', async ({
+	page
+}) => {
+	await useShortViewport(page);
+	let restarted = false;
+	let release!: () => void;
+	const wait = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let started!: () => void;
+	const requested = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	await page.route(`**/v1/tokens/${mostHeldToken.id}/holders?*`, async (route) => {
+		if (!new URL(route.request().url()).searchParams.has('cursor'))
+			return route.fulfill({
+				json: exportHolderPage(
+					restarted
+						? {
+								items: [{ ...exportHolderRows[1], tree_hash: 'c'.repeat(64) }],
+								next_cursor: null,
+								next_snapshot: null,
+								anchor: { height: newestTx.height, block_id: 'c'.repeat(64) }
+							}
+						: {}
+				)
+			});
+		started();
+		await wait;
+		return route.fulfill({
+			status: 409,
+			json: { title: 'Snapshot changed', detail: 'Restart required' }
+		});
+	});
+	await page.goto(`/token/${mostHeldToken.id}`);
+	const button = page.getByRole('button', { name: 'Export loaded holders CSV', exact: true });
+	await expect(button).toBeEnabled();
+	await page.locator('.sentinel').scrollIntoViewIfNeeded();
+	await requested;
+	await expect(button).toBeDisabled();
+	release();
+	await expect(page.getByRole('button', { name: 'Restart', exact: true })).toBeVisible();
+	await expect(button).toBeDisabled();
+	await expect(page.locator('table.table tbody tr')).toHaveCount(0);
+	restarted = true;
+	await page.getByRole('button', { name: 'Restart', exact: true }).click();
+	await expect(page.locator('table.table tbody tr')).toHaveCount(1);
+	await expect(button).toBeEnabled();
+});

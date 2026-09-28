@@ -21,7 +21,8 @@
 	import { formatTokenAmount } from '$lib/format/amount';
 	import { truncateMiddle } from '$lib/format/hash';
 	import { formatSharePct, shareBarWidth, tokenDisplayName } from '$lib/token/kind';
-	import type { BoxDto, TokenHolderContext, TokenHolderDto } from '$lib/api/types';
+	import { holderCsvIssue, holdersCsv } from '$lib/token/concentration';
+	import type { BoxDto, PageDto, TokenHolderContext, TokenHolderDto } from '$lib/api/types';
 	import type { PageData } from './$types';
 
 	const PAGE_SIZE = 50;
@@ -54,6 +55,9 @@
 	// once somebody opens that tab.
 	let holderPager = $state.raw<Pager<TokenHolderDto> | null>(null);
 	let holderContext = $state<TokenHolderContext | null>(null);
+	let holderAnchor = $state<PageDto<unknown>['anchor']>(null);
+	let holderExportError = $state('');
+	let holderExportNotice = $state('');
 	let boxPager = $state.raw<Pager<BoxDto> | null>(null);
 
 	/** Boxes tab filter. Unspent first: "who holds it now" is the question being asked. */
@@ -71,6 +75,9 @@
 		boxPager?.reset();
 		holderPager = null;
 		holderContext = null;
+		holderAnchor = null;
+		holderExportError = '';
+		holderExportNotice = '';
 		boxPager = null;
 		unspentOnly = true;
 	});
@@ -81,7 +88,25 @@
 			const tokenId = id;
 			const p = createPager<TokenHolderDto>(async (c, snapshot) => {
 				const response = await api.tokenHolders(tokenId, c, PAGE_SIZE, undefined, snapshot);
-				if (holderPager === p) holderContext = response.holder_context ?? null;
+				if (holderPager === p) {
+					const context = response.holder_context ?? null;
+					const strict =
+						response.consistency === 'strict' &&
+						(response.next_cursor === null || !!response.next_snapshot);
+					// All exported rows must retain one strict anchor and denominator. An older
+					// or inconsistent server can still show rows, but cannot enable this export.
+					if (!c) holderAnchor = strict ? (response.anchor ?? null) : null;
+					else if (
+						!strict ||
+						response.anchor?.height !== holderAnchor?.height ||
+						response.anchor?.block_id !== holderAnchor?.block_id ||
+						context?.supply !== holderContext?.supply ||
+						context?.holder_count !== holderContext?.holder_count ||
+						context?.definition !== holderContext?.definition
+					)
+						holderAnchor = null;
+					holderContext = context;
+				}
 				return response;
 			});
 			holderPager = p;
@@ -112,6 +137,36 @@
 	// snippets InfiniteList renders, and every amount on the page needs the token's decimals.
 	const decimals = $derived(token?.decimals ?? null);
 	const boxCount = $derived(token?.box_count ?? 0);
+	const holderExportContext = $derived({
+		id,
+		decimals,
+		context: holderContext,
+		anchor: holderAnchor
+	});
+	const holderExportIssue = $derived(
+		!holderPager || holderPager.loading
+			? 'Wait for the current holder page to finish loading.'
+			: holderPager.restartRequired || holderPager.error
+				? 'Resolve the holder loading error or restart the snapshot before exporting.'
+				: holderCsvIssue(holderPager.items, holderExportContext)
+	);
+	function exportHolders() {
+		if (!holderPager || holderExportIssue) return;
+		holderExportError = '';
+		holderExportNotice = '';
+		try {
+			const csv = holdersCsv(holderPager.items, holderExportContext);
+			const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = `kadia-token-${id}-loaded-holders.csv`;
+			link.click();
+			setTimeout(() => URL.revokeObjectURL(url), 1000);
+			holderExportNotice = `Exported ${holderPager.items.length} loaded holder scripts from indexed block ${holderAnchor!.height}.`;
+		} catch (error) {
+			holderExportError = error instanceof Error ? error.message : 'The CSV could not be exported.';
+		}
+	}
 </script>
 
 <svelte:head>
@@ -176,6 +231,22 @@
 						loading={holderPager.loading}
 						unavailable={holderPager.restartRequired}
 					/>
+					<div class="holder-export">
+						<button
+							type="button"
+							onclick={exportHolders}
+							disabled={!!holderExportIssue}
+							aria-describedby="holder-export-help">Export loaded holders CSV</button
+						>
+						<p id="holder-export-help">
+							Only loaded scripts; up to 5,000 rows and 2 MiB. Includes raw amounts, declared
+							decimals, indexed supply and the snapshot anchor. Scripts do not identify individual
+							owners. Import amount columns as text to avoid spreadsheet rounding.
+						</p>
+						{#if holderExportIssue}<p class="muted">{holderExportIssue}</p>{/if}
+						{#if holderExportError}<p role="alert">{holderExportError}</p>{/if}
+						{#if holderExportNotice}<p role="status">{holderExportNotice}</p>{/if}
+					</div>
 					<InfiniteList
 						table
 						columns={4}
@@ -324,6 +395,36 @@
 		flex-wrap: wrap;
 		padding: var(--space-4) 0 var(--space-2);
 		font-size: var(--fs-data);
+	}
+
+	.holder-export {
+		display: grid;
+		justify-items: start;
+		gap: var(--space-2);
+		padding: var(--space-3) 0 var(--space-4);
+		max-width: 75ch;
+		font-size: var(--fs-data);
+	}
+	.holder-export button {
+		border: var(--rule);
+		border-radius: var(--radius-control);
+		background: var(--surface-hover);
+		color: var(--fg);
+		padding: var(--space-2) var(--space-3);
+		font: inherit;
+		max-width: 100%;
+		cursor: pointer;
+	}
+	.holder-export button:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+	.holder-export p {
+		color: var(--fg-muted);
+		line-height: 1.6;
+	}
+	.holder-export [role='alert'] {
+		color: var(--danger-ink);
 	}
 
 	.boxes :global(.list) {

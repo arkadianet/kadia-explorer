@@ -70,6 +70,12 @@ test('address activity shows exact mixed deltas and keeps unresolved candidates 
 	await expect(section.getByText('-0.0009892 ERG', { exact: true })).toBeVisible();
 	await expect(section.getByText('+900,719,925,474,099,312,346', { exact: true })).toBeVisible();
 	await expect(section.getByText('Exact net changes unavailable')).toBeVisible();
+	const summary = section.getByRole('region', { name: 'Loaded activity summary', exact: true });
+	await expect(summary.getByText('Aggregate unavailable', { exact: true })).toBeVisible();
+	await expect(
+		summary.getByText('2 filtered transactions · this view only', { exact: true })
+	).toBeVisible();
+	await expect(summary.getByText('not a full-period total', { exact: false })).toBeVisible();
 	await expect(section.getByText('Token involvement is uncertain', { exact: false })).toBeVisible();
 	await expect(section.getByText('End of the matching indexed activity.')).toBeVisible();
 	await expect(section.getByRole('link', { name: 'View receipt ↗' }).first()).toHaveAttribute(
@@ -108,6 +114,10 @@ test('filters request anchored server pages and an empty candidate scan can cont
 	).toBeVisible();
 	await page.getByRole('button', { name: 'Continue scanning' }).click();
 	await expect(page.getByText('End of the matching indexed activity.')).toBeVisible();
+	const summary = page.getByRole('region', { name: 'Loaded activity summary', exact: true });
+	await expect(summary.getByText('-0.0009892 ERG', { exact: true })).toBeVisible();
+	await expect(summary.getByText('-989200 nanoERG', { exact: true })).toBeVisible();
+	await expect(summary.getByText('Loaded UTC range:', { exact: false })).toBeVisible();
 	expect(requests).toHaveLength(2);
 	for (const url of requests) {
 		expect(url.searchParams.get('asset')).toBe(token);

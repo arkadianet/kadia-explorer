@@ -18,6 +18,7 @@
 	import Skeleton from '$lib/components/Skeleton.svelte';
 	import SaveAddress from '$lib/components/SaveAddress.svelte';
 	import AddressActivity from '$lib/components/AddressActivity.svelte';
+	import AddressHistory from '$lib/components/AddressHistory.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager, type Pager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
@@ -30,6 +31,7 @@
 
 	const TABS = [
 		{ id: 'activity', label: 'Activity' },
+		{ id: 'history', label: 'Historical snapshot' },
 		{ id: 'txs', label: 'Transactions' },
 		{ id: 'unspent', label: 'Unspent boxes' },
 		{ id: 'boxes', label: 'All boxes' },
@@ -147,6 +149,7 @@
 			message="Address not seen yet — no boxes for it in the index. It may never have been funded, or the indexer may not have reached its first transaction."
 		/>
 	</div>
+	<Panel title="Historical snapshot"><AddressHistory address={addr} /></Panel>
 {:else}
 	<div class="head">
 		<PageHead title="Address" id={info.address}>
@@ -204,6 +207,8 @@
 		<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
 			{#if active === 'activity'}
 				<AddressActivity address={addr} />
+			{:else if active === 'history'}
+				<AddressHistory address={addr} />
 			{:else if active === 'txs'}
 				{#if txPager}
 					<InfiniteList

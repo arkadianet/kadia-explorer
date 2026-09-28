@@ -54,3 +54,39 @@ requests fail atomically with 422 and `activity_work_limit`, `activity_decode_li
 `activity_response_limit`, or `activity_deadline`; no truncated monetary result is
 returned. Reduce the page limit or time window. A single oversized transaction can
 still exceed these bounds; consult its summary/evidence instead.
+
+## Loaded activity summary
+
+The address view summarizes only the loaded rows matching its current filters and
+snapshot. Counts, direction categories and UTC bounds describe that loaded subset,
+not an entire date range or lifetime history. ERG changes are summed with `BigInt`;
+any unresolved input coverage or null delta withholds the entire net aggregate.
+The exact raw nanoERG value remains available alongside the formatted amount.
+
+## Local saved addresses, groups and backups
+
+The browser's `xp-saved-addresses` entry stores up to 100 addresses with local labels,
+creation/update timestamps, and an optional group. A group is an organizational label,
+not evidence of shared ownership. Labels are limited to 80 characters and groups to 40;
+control characters are rejected. Group filtering and edits make no chain requests.
+
+Version 1 entries remain readable without an eager rewrite. A deliberate save, remove
+or merge writes version 2, preserving existing addresses, labels and timestamps;
+label-only callers preserve an existing group. Clearing browser data removes this list.
+
+**Export JSON backup** reads the current local data and downloads a version 2 envelope
+with `format: "kadia.saved-addresses"`, `exported_at`, and `items`. Export does not mutate
+storage. The backup is plain text, contains local labels/groups, and is not encrypted.
+Import also accepts structurally valid version 1/2 storage envelopes. Files are capped
+at 512,000 UTF-8 bytes and 100 entries; the merged list cannot exceed 100 unique addresses.
+Invalid entries, duplicate addresses and unsupported versions reject the entire import.
+Address checks are structural only; importing does not establish on-chain validity.
+
+Import first presents additions, unchanged entries and field conflicts without writing.
+The default merge preserves existing labels and groups. Replacing them—including blank
+values—requires choosing the explicit backup-fields policy. Existing `added_at` values
+are preserved; new entries retain their backup timestamps. Before committing, merge
+re-reads storage and compares the exact bytes captured for the preview. An intervening
+edit requires a fresh preview. Corrupt or inaccessible browser state blocks writes and
+export; it is never replaced by an empty list or by an imported backup. Storage failures
+leave both persisted bytes and the last usable in-memory list intact.
