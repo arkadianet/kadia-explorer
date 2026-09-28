@@ -1,6 +1,6 @@
 # M5 ordinary route policy matrix
 
-Counts: **4 immutable membership, 11 current-state** (15 route/order entries, 14 distinct paged paths). Both supported directions share a policy; both unspent filter values share a policy. Policy tests live in `crates/xp-api/src/paging.rs`.
+Counts: **5 immutable membership, 12 current-state** (17 route/order entries, 16 distinct paged paths). Both supported directions share a policy; both unspent filter values share a policy. Policy tests live in `crates/xp-api/src/paging.rs`.
 
 Immutable membership means canonical membership below the original height/transaction bound survives appends; continuation requires the anchor to survive. Current-state means ANY observed tip change invalidates continuation, even a normal append. Steps 1–2 established this contract; steps 3–4 now integrate and exercise it in the backend handlers.
 
@@ -10,6 +10,8 @@ Immutable membership means canonical membership below the original height/transa
 | `global_summaries` | /v1/tx-summaries, asc/desc | immutable membership | `handlers/txs.rs::summaries`, `checked_tx_summary_dto`: id, height, index, timestamp, size, fee, input/data-input/output counts from immutable TxRow. Cap transaction gidx at anchor block end, derived from store. |
 | `block_summaries` | /v1/blocks/{height_or_id}/tx-summaries, asc/desc | immutable membership | `handlers/blocks.rs::summaries`: same immutable summary fields; contiguous selected-block transaction membership. Bind resolved canonical block id (including height-path requests); derive its range in Reader. |
 | `address_summaries` | /v1/addresses/{addr}/txs, asc/desc | immutable membership | `handlers/addresses.rs::txs`, `tx_summary_dto`, `read.rs::tree_txs`: historical tree/transaction membership plus immutable TxRow summary, no balance. Bind resolved tree hash and cap gidx at anchor block end. |
+| `address_activity` | /v1/addresses/{addr}/activity, asc/desc | current-state | Exact retained-box address deltas with token metadata and input coverage. Strict only, including when omitted. Bind tree, normalized asset/direction/UTC boundaries, order and cursor. Reject any canonical tip change. See `docs/operations/address-activity.md`. |
+| `token_history` | /v1/tokens/{id}/txs, asc/desc | immutable membership | Verified resolved-input/output token touches, deduplicated per transaction. Summary-only fields; strict only, including when omitted. Bind token id, index version, order and cursor; cap at original anchor's transaction end. Auxiliary index must be ready at the current canonical anchor. |
 | `transactions` | /v1/txs, asc/desc | current-state | `handlers/txs.rs::list`, `budget.rs::Budget::tx`: expanded input/output BoxDto carries `spent_by`, `spent_height`, `rent.claimable_at_tip`. Transaction membership alone is insufficient. |
 | `address_boxes` | /v1/addresses/{addr}/boxes, asc/desc, unspent=false/true | current-state | `handlers/addresses.rs::boxes`, `dto.rs::box_dto_from_reader`: `spent_by`, `spent_height`, `rent.claimable_at_tip`; live membership also changes when spent. Bind tree hash and unspent. |
 | `token_boxes` | /v1/tokens/{id}/boxes, asc/desc, unspent=false/true | current-state | `handlers/tokens.rs::boxes`: same mutable BoxDto fields, including on all-box walks. Bind token id and unspent. |
@@ -28,7 +30,7 @@ The subtle classifications are newest token listings (immutable ordering with mu
 
 ## Steps 3–4 implementation evidence
 
-All 15 entries above now use `paging::Request` with the page's own Reader. `consistency=strict` requires a bound `snapshot`/legacy `cursor` pair after page one. Responses add `consistency`, `observed_anchor`, original `anchor`, and `next_snapshot`. Bare cursors remain `best_effort`, with no claimed original anchor or continuation token. A null anchor reports unavailable canonical identity; missing required in-range headers still fail as corruption.
+All entries above use `paging::Request` with the page's own Reader. `consistency=strict` requires a bound `snapshot`/legacy `cursor` pair after page one. Responses add `consistency`, `observed_anchor`, original `anchor`, and `next_snapshot`. For the original 15 entries, bare cursors remain `best_effort`, with no claimed original anchor or continuation token. The additive address activity route requires strict consistency even when omitted, and rejects bare continuation cursors. A null anchor reports unavailable canonical identity; missing required in-range headers still fail as corruption.
 
 Immutable global/address summary reads cap the store range at the original header's exclusive transaction allocation end before resolving rows. Blocks cap heights; block summaries retain their selected block's range and bind its canonical id. Current-state projection reads run only after exact height/id tip validation. Address/block selector resolution first checks token route/order/cursor and anchor availability, so a reorg removing an address or rebinding a height produces 409; complete normalized filter binding is still required before projection reads. This is the awkward case beyond the matrix's mutable-enrichment classifications.
 

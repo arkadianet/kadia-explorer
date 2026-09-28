@@ -15,10 +15,12 @@
 
 	let {
 		tx,
+		perspectiveAddress = null,
 		onrefresh,
 		refreshing = false
 	}: {
 		tx: TxDto;
+		perspectiveAddress?: string | null;
 		onrefresh: () => void;
 		refreshing?: boolean;
 	} = $props();
@@ -32,13 +34,20 @@
 	const kind = $derived(txKind(tx, evidence));
 	const claims = $derived(rentInputs(tx, evidence));
 	const checkedEvidence = $derived(matchedEvidence(tx, evidence));
-	const addresses = $derived(effects.addresses.filter((a) => a.kind !== 'fee'));
+	const addresses = $derived(
+		effects.addresses.filter((a) => a.kind !== 'fee' || a.address === perspectiveAddress)
+	);
 	const selected = $derived(
 		addresses.find((a) => a.tree === selectedTree) ??
+			addresses.find((a) => a.address === perspectiveAddress) ??
 			addresses.find((a) => a.tokens.some((t) => t.amount > 0n)) ??
 			addresses.find((a) => a.erg > 0n) ??
 			addresses[0]
 	);
+	$effect(() => {
+		void perspectiveAddress;
+		selectedTree = '';
+	});
 	const hasSnapshot = $derived(tx.indexed_height != null && tx.indexed_height >= tx.height);
 	const confirmations = $derived(hasSnapshot ? tx.indexed_height! - tx.height + 1 : null);
 	const stale = $derived(status.health.state !== 'healthy');
@@ -95,6 +104,12 @@
 </script>
 
 <section class="receipt-section" aria-label="Transaction receipt">
+	{#if perspectiveAddress && !addresses.some((address) => address.address === perspectiveAddress)}
+		<p class="incomplete">
+			The requested address is not among the resolved transaction boxes. Showing an available
+			address instead.
+		</p>
+	{/if}
 	<div class="receipt-heading">
 		<div>
 			<p class="eyebrow">Transaction receipt</p>

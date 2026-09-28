@@ -56,35 +56,33 @@ test('summary route error is exposed and retries the same page', async () => {
 	);
 });
 
-test('homepage deliberately requests full transactions with limit 12 and retains outputs', async () => {
-	const tx = { ...newestTx, outputs: [{ ...newestTx.outputs[0], value: fee }] };
+test('homepage summaries preserve exact large fees without expanding outputs', async () => {
 	const f = vi.fn(async (url: string) => {
-		if (url === '/v1/txs?limit=12') return json({ items: [tx], next_cursor: 'unused' });
+		if (url === '/v1/tx-summaries?limit=6&consistency=strict')
+			return json({ items: [summary], next_cursor: null });
 		if (url.startsWith('/v1/tx')) throw new Error(`Unexpected transaction route: ${url}`);
 		return json({ items: [], next_cursor: null });
 	});
 	const result = await homeLoad({ fetch: f } as never);
-	expect(f.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/v1/tx'))).toEqual([
-		'/v1/txs?limit=12'
-	]);
-	expect(result!.txs.data!.items).toEqual([tx]);
-	expect(result!.txs.data!.items[0].outputs[0].value).toBe(fee);
+	expect(result!.txs.data!.items).toEqual([summary]);
+	expect(result!.txs.data!.items[0].fee).toBe(fee);
 });
 
-test('block page deliberately requests expanded transactions and retains output values', async () => {
-	const tx = { ...newestTx, outputs: [{ ...newestTx.outputs[0], value: fee }] };
+test('block load pins reward evidence to resolved ID and survives unavailable evidence', async () => {
 	const f = vi.fn(async (url: string) => {
-		if (url === `/v1/blocks/${block.id}`) return json(block);
-		if (url === `/v1/blocks/${block.id}/txs`) return json([tx]);
+		if (url === `/v1/blocks/${block.height}`) return json(block);
+		if (url === `/v1/blocks/${block.id}/rewards`)
+			return json({ detail: 'evidence unavailable' }, 503);
 		throw new Error(`Unexpected block route: ${url}`);
 	});
-	const result = await blockLoad({ params: { id: block.id }, fetch: f } as never);
+	const result = await blockLoad({ params: { id: String(block.height) }, fetch: f } as never);
 	expect(f.mock.calls.map(([url]) => url)).toEqual([
-		`/v1/blocks/${block.id}`,
-		`/v1/blocks/${block.id}/txs`
+		`/v1/blocks/${block.height}`,
+		`/v1/blocks/${block.id}/rewards`
 	]);
-	expect(result!.txs).toEqual([tx]);
-	expect(result!.txs[0].outputs[0].value).toBe(fee);
+	expect(result!.block).toEqual(block);
+	expect(result!.rewards.data).toBeNull();
+	expect(result!.rewards.error).toMatchObject({ status: 503 });
 });
 
 test('409 never concatenates pre-change rows with restarted pages and never auto-retries', async () => {

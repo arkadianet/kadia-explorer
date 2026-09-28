@@ -8,6 +8,7 @@
 	import { page } from '$app/state';
 	import { appearance, theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
+	import { savedAddresses, SAVED_ADDRESSES_KEY } from '$lib/addresses/saved.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import SearchBox from '$lib/components/SearchBox.svelte';
 	import AppearancePicker from '$lib/components/AppearancePicker.svelte';
@@ -55,6 +56,7 @@
 		{ href: '/richlist', label: 'Rich list', icon: 'richlist' },
 		{ href: '/tokens', label: 'Tokens', icon: 'token' },
 		{ href: '/rent', label: 'Storage rent', icon: 'rent-coin', primary: true },
+		{ href: '/saved', label: 'Saved addresses', icon: 'addresses' },
 		{ href: '/status', label: 'Status', icon: 'status' }
 	];
 
@@ -95,8 +97,16 @@
 	onMount(() => {
 		theme.init();
 		appearance.init();
+		savedAddresses.load();
+		const syncSaved = (event: StorageEvent) => {
+			if (event.key === SAVED_ADDRESSES_KEY || event.key === null) savedAddresses.load();
+		};
+		window.addEventListener('storage', syncSaved);
 		status.start();
-		return () => status.stop();
+		return () => {
+			status.stop();
+			window.removeEventListener('storage', syncSaved);
+		};
 	});
 </script>
 

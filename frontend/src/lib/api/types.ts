@@ -236,6 +236,43 @@ export interface TokenHolderDto {
 	share_pct: string;
 }
 
+export interface TokenHolderContext {
+	supply: string;
+	holder_count: number;
+	definition: 'indexed_emission_minus_burned';
+}
+export interface TokenHoldersPageDto extends PageDto<TokenHolderDto> {
+	holder_context?: TokenHolderContext;
+}
+
+export type ActivityDirection = 'received' | 'sent' | 'mixed' | 'neutral' | 'unknown';
+export interface AddressActivityFilters {
+	asset?: string;
+	direction?: ActivityDirection | 'all';
+	from_ms?: number;
+	to_ms?: number;
+}
+export interface AddressActivityDto {
+	id: string;
+	height: number;
+	block_id: string;
+	timestamp: number;
+	index: number;
+	fee: string;
+	input_count: number;
+	output_count: number;
+	coverage: { complete: boolean; resolved_inputs: number; total_inputs: number };
+	erg_delta: string | null;
+	tokens: { id: string; name: string | null; decimals: number | null; delta: string | null }[];
+	direction: ActivityDirection;
+	asset_match: 'definite' | 'uncertain';
+}
+export interface AddressActivityPageDto extends PageDto<AddressActivityDto> {
+	scanned: number;
+	scan_limit_reached: boolean;
+	partial_from: number | null;
+}
+
 export interface TemplateDto {
 	hash: string;
 	box_count: number;

@@ -3,13 +3,13 @@
 	import PageHead from '$lib/components/PageHead.svelte';
 	import Facts from '$lib/components/Facts.svelte';
 	import Fact from '$lib/components/Fact.svelte';
-	import Table from '$lib/components/Table.svelte';
+	import BlockTransactions from '$lib/components/BlockTransactions.svelte';
 	import Hash from '$lib/components/Hash.svelte';
 	import MinerChip from '$lib/components/MinerChip.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import Age from '$lib/components/Age.svelte';
-	import EmptyState from '$lib/components/EmptyState.svelte';
-	import { formatNano, sumNano } from '$lib/format/amount';
+	import ErrorState from '$lib/components/ErrorState.svelte';
+	import { formatNano } from '$lib/format/amount';
 	import { formatKb } from '$lib/format/size';
 	import { absTime } from '$lib/format/time';
 	import type { PageData } from './$types';
@@ -17,7 +17,6 @@
 	let { data }: { data: PageData } = $props();
 
 	const block = $derived(data.block);
-	const txs = $derived(data.txs);
 </script>
 
 <svelte:head>
@@ -38,7 +37,6 @@
 		<Fact label="Version"><span class="mono">{block.version}</span></Fact>
 		<Fact label="Txs"><span class="mono">{block.tx_count}</span></Fact>
 		<Fact label="Fees"><Amount nano={block.fees} maxFrac={3} /></Fact>
-		<Fact label="Reward"><Amount nano={block.reward} maxFrac={3} /></Fact>
 		<Fact label="Miner"><MinerChip minerPk={block.miner_pk} /></Fact>
 	</Facts>
 
@@ -52,36 +50,108 @@
 	</nav>
 </div>
 
-<Panel title="Transactions">
-	{#if txs.length === 0}
-		<EmptyState message="This block carries no transactions." />
+<Panel title="Emission reward explained">
+	{#if data.rewards.error}
+		<ErrorState error={data.rewards.error} />
+	{:else if data.rewards.data?.basis === 'observed_eip27_reward_box'}
+		{@const reward = data.rewards.data}
+		<div class="reward-equation">
+			<div>
+				<span>Gross reward box</span><strong><Amount nano={reward.gross_reward!} /></strong>
+			</div>
+			<span class="operator" aria-label="minus">−</span>
+			<div>
+				<span>Re-emission obligation</span><strong
+					><Amount nano={reward.reemission_obligation!} /></strong
+				>
+			</div>
+			<span class="operator" aria-label="equals">=</span>
+			<div class="net">
+				<span>Miner subsidy</span><strong><Amount nano={reward.miner_subsidy!} /></strong>
+			</div>
+		</div>
+		<p class="reward-note">{reward.note}</p>
+		<p class="reward-source">
+			Observed reward box: <Hash
+				value={reward.reward_box_id!}
+				href={`/box/${reward.reward_box_id}`}
+			/> ·
+			<a
+				href="https://github.com/ergoplatform/eips/blob/master/eip-0027.md"
+				target="_blank"
+				rel="noreferrer">EIP-27 definition</a
+			>
+		</p>
 	{:else}
-		<Table>
-			{#snippet head()}
-				<tr>
-					<th>Id</th>
-					<th class="num">Inputs</th>
-					<th class="num">Outputs</th>
-					<th class="num">Total output</th>
-					<th class="num">Fee</th>
-				</tr>
-			{/snippet}
-			{#each txs as tx (tx.id)}
-				<tr>
-					<td><Hash value={tx.id} href={`/tx/${tx.id}`} copy={false} /></td>
-					<td class="num mono">{tx.inputs.length}</td>
-					<td class="num mono">{tx.outputs.length}</td>
-					<td class="num">
-						<Amount nano={sumNano(tx.outputs.map((o) => o.value)).toString()} maxFrac={3} />
-					</td>
-					<td class="num"><Amount nano={tx.fee} maxFrac={3} /></td>
-				</tr>
-			{/each}
-		</Table>
+		<p class="reward-note">
+			{data.rewards.data?.note ?? 'Reward evidence is unavailable for this block.'}
+		</p>
 	{/if}
 </Panel>
 
+<Panel title="Transactions">
+	{#key block.id}<BlockTransactions blockId={block.id} />{/key}
+</Panel>
+
 <style>
+	.reward-equation {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-5);
+		padding-block: var(--space-3);
+	}
+	.reward-equation div {
+		display: grid;
+		gap: var(--space-2);
+	}
+	.reward-equation div > span {
+		color: var(--fg-muted);
+		font-size: var(--fs-micro);
+	}
+	.reward-equation strong {
+		font-size: var(--fs-key);
+		font-weight: 600;
+	}
+	.reward-equation .net {
+		color: var(--accent-ink);
+	}
+	.operator {
+		color: var(--fg-muted);
+		font-size: var(--fs-key);
+	}
+	.reward-note,
+	.reward-source {
+		color: var(--fg-muted);
+		font-size: var(--fs-data);
+		line-height: 1.6;
+		margin-top: var(--space-3);
+		overflow-wrap: anywhere;
+	}
+	:global(html[data-appearance='prism']) .reward-equation {
+		border-left: 3px solid var(--accent);
+		padding-left: var(--space-4);
+	}
+	:global(html[data-appearance='atelier']) .reward-equation {
+		justify-content: space-between;
+		border-block: 1px solid var(--border);
+	}
+	:global(html[data-appearance='aurora']) .reward-equation div {
+		background: var(--surface-solid);
+		border: 1px solid var(--border);
+		border-radius: 18px;
+		padding: var(--space-4);
+	}
+	@media (max-width: 540px) {
+		.reward-equation {
+			flex-direction: column;
+			align-items: stretch;
+			gap: var(--space-2);
+		}
+		.operator {
+			text-align: center;
+		}
+	}
 	.head {
 		display: flex;
 		flex-direction: column;

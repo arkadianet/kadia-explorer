@@ -1085,6 +1085,12 @@ async fn token_holders_are_ordered_by_amount_with_shares_and_a_cursor() {
     }
     assert_eq!(items[0]["amount"], "3");
     assert_eq!(items[1]["amount"], "2");
+    assert_eq!(v["holder_context"]["supply"], "5");
+    assert_eq!(v["holder_context"]["holder_count"], 2);
+    assert_eq!(
+        v["holder_context"]["definition"],
+        "indexed_emission_minus_burned"
+    );
 
     // The cursor is "<amount>:<tree hex>" and a limit-1 walk reproduces the whole list.
     let (st, p1) = get(&app, &format!("/v1/tokens/{SIGUSD}/holders?limit=1")).await;
@@ -1423,6 +1429,8 @@ async fn supply_is_emission_minus_burned_and_shares_use_it() {
     assert_eq!(items[0]["share_pct"], "60.00");
     assert_eq!(items[1]["amount"], "2");
     assert_eq!(items[1]["share_pct"], "40.00");
+    assert_eq!(h["holder_context"]["supply"], v["supply"]);
+    assert_eq!(h["holder_context"]["holder_count"], v["holder_count"]);
 }
 
 /// `/v1/tokens/{id}/holders` has one fixed ordering, so it takes no `dir` — and, like every

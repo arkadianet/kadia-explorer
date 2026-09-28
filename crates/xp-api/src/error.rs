@@ -151,6 +151,11 @@ impl From<StoreError> for ApiError {
                 code: "token_search_preparing",
                 detail: "token-name search is preparing its index; retry shortly".into(),
             },
+            StoreError::TokenHistoryNotReady => ApiError::History {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                code: "token_history_preparing",
+                detail: "token transaction history is preparing; retry shortly".into(),
+            },
             StoreError::InvalidTokenSearch(detail) => ApiError::BadRequest(detail.into()),
             StoreError::ReadLimit(code) => ApiError::Expansion(code),
             StoreError::Corrupt(_) => ApiError::Integrity(format!("store: {e}")),

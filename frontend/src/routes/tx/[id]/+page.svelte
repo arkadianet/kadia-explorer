@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import { api } from '$lib/api/endpoints';
 	import { createTransactionTracker, type TrackingState } from '$lib/tx/tracker';
 	import TransactionTracking from '$lib/components/TransactionTracking.svelte';
@@ -87,6 +88,7 @@
 	{#if tx && receiptTx}
 		{#key `${tx.id}:${tx.block_id}:${tx.height}`}<TransactionReceipt
 				tx={receiptTx}
+				perspectiveAddress={page.url.searchParams.get('address')}
 				refreshing={tracking.checking}
 				onrefresh={refresh}
 			/>{/key}

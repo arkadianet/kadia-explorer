@@ -231,10 +231,20 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
             get(handlers::history::boxes),
         )
         .route("/v1/addresses/{addr}/txs", get(handlers::addresses::txs))
+        .route(
+            "/v1/addresses/{addr}/activity",
+            get(handlers::address_activity::list),
+        )
+        .route("/v1/network/summary", get(handlers::network::summary))
+        .route(
+            "/v1/blocks/{height_or_id}/rewards",
+            get(handlers::rewards::get),
+        )
         .route("/v1/addresses/{addr}/rent", get(handlers::addresses::rent))
         .route("/v1/tokens", get(handlers::tokens::list))
         .route("/v1/tokens/search", get(handlers::token_search::search))
         .route("/v1/tokens/{id}", get(handlers::tokens::get_one))
+        .route("/v1/tokens/{id}/txs", get(handlers::token_history::list))
         .route("/v1/tokens/{id}/holders", get(handlers::tokens::holders))
         .route("/v1/tokens/{id}/boxes", get(handlers::tokens::boxes))
         .route("/v1/templates/{hash}", get(handlers::templates::get_one))

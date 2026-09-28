@@ -25,15 +25,13 @@ test('home renders the hero and every panel with rows from the mock', async ({ p
 		await expect(blocks.getByRole('link', { name: String(h), exact: true })).toBeVisible();
 	}
 
-	// Live transactions is a classified list, not a table: one row per transaction, each
-	// naming what kind of transaction it is.
+	// Compact rows show observed counts and fees without expanding transaction boxes.
 	const txs = page.locator('section.panel', {
 		has: page.getByRole('heading', { name: 'Live transactions' })
 	});
 	await expect(txs.locator('.txlist li')).toHaveCount(5);
-	// This fixture spends a contract script without a supported decoder; no payment intent
-	// or rent claim is inferred from token presence or box age.
-	await expect(txs.locator('.tx-kind').first()).toHaveText('Contract interaction');
+	// A summary does not infer payment intent or a transferred output total.
+	await expect(txs.locator('.tx-kind').first()).toHaveText(/^\d+ in · \d+ out$/);
 
 	const rent = page.locator('section.panel', {
 		has: page.getByRole('heading', { name: 'Rent maturing soon' })
@@ -62,14 +60,14 @@ test('a block row links through to the block page', async ({ page }) => {
 });
 
 test('failed statistic dependencies show unavailable instead of zero', async ({ page }) => {
-	await page.route('**/v1/blocks?*', (route) =>
+	await page.route('**/v1/network/summary', (route) =>
 		route.fulfill({ status: 503, json: { detail: 'offline' } })
 	);
 	await page.route('**/v1/rent/upcoming?*', (route) =>
 		route.fulfill({ status: 503, json: { detail: 'offline' } })
 	);
 	await page.goto('/');
-	for (const label of ['Transactions', 'Blocks', 'Miner rewards', 'Storage rent']) {
+	for (const label of ['Transactions', 'Blocks', 'Transaction fees', 'Storage rent']) {
 		await expect(
 			page
 				.locator('.stat')
@@ -89,4 +87,60 @@ test('capped rent totals are visible lower bounds', async ({ page }) => {
 	const card = page.locator('.stat').filter({ hasText: 'Storage rent' });
 	await expect(card.locator('.stat-value')).toContainText('≥');
 	await expect(card).toContainText('incomplete');
+});
+
+test('overview uses bounded summaries instead of expanded transaction and block lists', async ({
+	page
+}) => {
+	const forbidden: string[] = [];
+	page.on('request', (request) => {
+		const url = new URL(request.url());
+		if (url.pathname === '/v1/txs' || url.pathname === '/v1/blocks') forbidden.push(url.pathname);
+	});
+	await page.goto('/');
+	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
+	await expect(page.locator('.txlist li')).toHaveCount(5);
+	await expect(page.locator('.stats')).toContainText('latest 13 indexed blocks');
+	expect(forbidden).toEqual([]);
+});
+
+test('fee precision and sampled history remain explicit', async ({ page }) => {
+	await page.route('**/v1/network/summary', async (route) => {
+		const response = await route.fetch();
+		await route.fulfill({
+			json: { ...(await response.json()), fees: '1999123456', partial_from: 123 }
+		});
+	});
+	await page.goto('/');
+	const card = page.locator('.stat').filter({ hasText: 'Transaction fees' });
+	await expect(card.locator('.stat-value')).toContainText('≈ 1.999');
+	await expect(card.locator('.stat-value')).toHaveAttribute('title', /1999123456 nanoERG/);
+	await expect(page.locator('.window-caption')).toContainText(
+		'Hourly charts cover these blocks only'
+	);
+	await expect(page.locator('.window-caption')).toContainText(
+		'Indexed history begins at block 123'
+	);
+});
+
+test('a successful live refresh recovers from initial summary failure', async ({ page }) => {
+	let summaries = 0;
+	let statuses = 0;
+	await page.route('**/v1/tx-summaries?*', async (route) => {
+		if (++summaries === 1)
+			return route.fulfill({ status: 503, json: { detail: 'summary temporarily unavailable' } });
+		return route.continue();
+	});
+	await page.route('**/v1/status', async (route) => {
+		const response = await route.fetch();
+		const data = await response.json();
+		await route.fulfill({ json: { ...data, indexed: data.indexed + (++statuses > 2 ? 1 : 0) } });
+	});
+	await page.goto('/');
+	const panel = page
+		.locator('section.panel')
+		.filter({ has: page.getByRole('heading', { name: 'Live transactions' }) });
+	await expect(panel.getByText('summary temporarily unavailable', { exact: false })).toBeVisible();
+	await expect(panel.locator('.txlist li').first()).toBeVisible({ timeout: 12000 });
+	await expect(panel.getByText('summary temporarily unavailable', { exact: false })).toHaveCount(0);
 });

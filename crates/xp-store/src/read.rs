@@ -223,9 +223,21 @@ impl Reader {
     }
 
     pub fn header_at(&self, height: u32) -> Result<Option<HeaderRow>, StoreError> {
+        self.header_at_admitted(height, |_| Ok(()))
+    }
+
+    /// Admit the encoded header, including raw JSON, before any owned decode/copy.
+    pub fn header_at_admitted(
+        &self,
+        height: u32,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Option<HeaderRow>, StoreError> {
         let table = self.txn.open_table(HEADERS)?;
         match table.get(k_u32(height).as_slice())? {
-            Some(v) => Ok(Some(HeaderRow::decode(v.value())?)),
+            Some(v) => {
+                admit(v.value().len())?;
+                Ok(Some(HeaderRow::decode(v.value())?))
+            }
             None => {
                 let start = self.partial_from()?.unwrap_or(1);
                 if height >= start && self.indexed_height()?.is_some_and(|tip| height <= tip) {
@@ -251,6 +263,22 @@ impl Reader {
             }
             None => Ok(None),
         }
+    }
+
+    /// Canonical identity without copying the header's raw JSON. HeaderRow starts with
+    /// the fixed 32-byte id; a short row is corruption, never an absent header.
+    pub fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, StoreError> {
+        let headers = self.txn.open_table(HEADERS)?;
+        headers
+            .get(k_u32(height).as_slice())?
+            .map(|v| {
+                as_hash32(
+                    v.value()
+                        .get(..32)
+                        .ok_or(StoreError::Corrupt("truncated header id"))?,
+                )
+            })
+            .transpose()
     }
 
     /// Headers strictly below `before_height` (or below the tip when `None`), newest first,
@@ -700,6 +728,20 @@ impl Reader {
         dir: Dir,
         end: Option<Gidx>,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.tree_txs_bounded_admitted(tree, cursor, limit, dir, end, |_| Ok(()))
+    }
+
+    /// Admit each encoded row before decoding; zero-byte callbacks during decoding
+    /// allow the caller to enforce a deadline without copying an unbounded row.
+    pub fn tree_txs_bounded_admitted(
+        &self,
+        tree: &Hash32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
         let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
         let txs = self.txn.open_table(TXS)?;
         self.page_composite_bounded(
@@ -710,7 +752,45 @@ impl Reader {
             dir,
             |gidx| {
                 let tx_id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
-                self.resolve_tx(&txs, tx_id)
+                let result = self.resolve_tx_admitted(&txs, tx_id, &mut admit)?;
+                if result.1.gidx != gidx {
+                    return Err(StoreError::Corrupt("address transaction gidx mismatch"));
+                }
+                Ok(result)
+            },
+        )
+    }
+
+    /// Token history is served only from a fully anchored auxiliary index, never boxes.
+    pub fn token_txs_bounded_admitted(
+        &self,
+        token: &Hash32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        if !self.token_history_status()?.ready {
+            return Err(StoreError::TokenHistoryNotReady);
+        }
+        let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
+        let txs = self.txn.open_table(TXS)?;
+        self.page_composite_bounded(
+            crate::token_history::TOKEN_TXS,
+            token.as_slice(),
+            (cursor, end),
+            limit,
+            dir,
+            |gidx| {
+                let id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
+                let result = self.resolve_tx_admitted(&txs, id, &mut admit)?;
+                if result.1.gidx != gidx {
+                    return Err(StoreError::Corrupt(
+                        "token-history transaction gidx mismatch",
+                    ));
+                }
+                Ok(result)
             },
         )
     }

@@ -24,13 +24,15 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
+	AddressActivityDto,
+	AddressActivityPageDto,
 	BoxDto,
 	PageDto,
 	TokenHolderDto,
 	TxDto,
 	TxSummaryDto
 } from '../../../src/lib/api/types.ts';
-import { buildDataset, registerKey, type Dataset } from './fixtures.ts';
+import { buildDataset, FIXTURE_HEIGHTS, registerKey, type Dataset } from './fixtures.ts';
 
 /** Items per page, small enough that the app's 50-item requests still paginate. */
 export const PAGE_SIZE = 5;
@@ -195,6 +197,185 @@ function txSummary(t: TxDto): TxSummaryDto {
 	};
 }
 
+/** Token touches use only retained fixture inputs/outputs, not guessed transfer intent. */
+function tokenTransactions(d: Dataset, id: string, url: URL, res: ServerResponse): void {
+	const dir = url.searchParams.get('dir') ?? 'desc';
+	const limit = Number(url.searchParams.get('limit') ?? 20);
+	const cursor = url.searchParams.get('cursor');
+	const offset = Number(cursor ?? 0);
+	if (
+		!['asc', 'desc'].includes(dir) ||
+		![null, 'strict'].includes(url.searchParams.get('consistency')) ||
+		!Number.isInteger(limit) ||
+		limit < 1 ||
+		limit > 100 ||
+		!Number.isSafeInteger(offset) ||
+		offset < 0 ||
+		(cursor !== null && !DIGITS.test(cursor))
+	)
+		return badRequest(res, 'invalid token history pagination');
+	const block = d.blockByHeight.get(d.status.indexed ?? d.status.best)!;
+	const anchor = { height: block.height, block_id: block.id };
+	const snapshot = `mock-token-history-${Buffer.from(JSON.stringify([anchor, id, dir])).toString('base64url')}`;
+	const provided = url.searchParams.get('snapshot');
+	if ((cursor !== null && provided !== snapshot) || (provided !== null && provided !== snapshot))
+		return sendJson(res, 409, {
+			status: 409,
+			title: 'Snapshot changed',
+			code: 'snapshot_changed',
+			detail: 'Restart token history with the current snapshot and token.'
+		});
+	const seen = new Set<string>();
+	const touched = d.txs
+		.filter((tx) => {
+			if (seen.has(tx.id)) return false;
+			const touches =
+				tx.outputs.some((box) => box.tokens.some((token) => token.id === id)) ||
+				tx.inputs.some((input) => input.box?.tokens.some((token) => token.id === id));
+			if (touches) seen.add(tx.id);
+			return touches;
+		})
+		.sort((a, b) =>
+			dir === 'asc'
+				? a.height - b.height || a.index - b.index
+				: b.height - a.height || b.index - a.index
+		);
+	const result = page(touched.map(txSummary), cursor, limit);
+	sendJson(res, 200, {
+		...result,
+		next_snapshot: result.next_cursor ? snapshot : null,
+		consistency: 'strict',
+		anchor,
+		observed_anchor: anchor,
+		history_context: { scope: 'indexed_token_touches', partial_from: FIXTURE_HEIGHTS[0] }
+	});
+}
+
+/** Recorded fixture activity, with the same incomplete-input rules as the real endpoint.
+ * The mock's numeric cursor tracks scanned candidates, including filtered-out rows. */
+function addressActivity(d: Dataset, tree: string, url: URL, res: ServerResponse): void {
+	const asset = (url.searchParams.get('asset') ?? 'all').toLowerCase();
+	const direction = url.searchParams.get('direction') ?? 'all';
+	const dir = url.searchParams.get('dir') ?? 'desc';
+	const limit = Number(url.searchParams.get('limit') ?? 20);
+	const offset = Number(url.searchParams.get('cursor') ?? 0);
+	const time = (key: string) =>
+		url.searchParams.has(key) ? Number(url.searchParams.get(key)) : null;
+	const from = time('from_ms');
+	const to = time('to_ms');
+	if (
+		(asset !== 'all' && asset !== 'erg' && !HEX64.test(asset)) ||
+		!['all', 'received', 'sent', 'mixed', 'neutral', 'unknown'].includes(direction) ||
+		!['asc', 'desc'].includes(dir) ||
+		!Number.isInteger(limit) ||
+		limit < 1 ||
+		limit > 100 ||
+		!Number.isSafeInteger(offset) ||
+		offset < 0 ||
+		[from, to].some(
+			(value) =>
+				value !== null &&
+				(!Number.isSafeInteger(value) || value < 0 || value > 8_640_000_000_000_000)
+		) ||
+		(from !== null && to !== null && from >= to) ||
+		![null, 'strict'].includes(url.searchParams.get('consistency'))
+	) {
+		return badRequest(res, 'invalid address activity filters or pagination');
+	}
+	const block = d.blockByHeight.get(d.status.indexed ?? d.status.best)!;
+	const anchor = { height: block.height, block_id: block.id };
+	const snapshot = `mock-activity-${Buffer.from(JSON.stringify([anchor, tree, asset, direction, dir, from, to])).toString('base64url')}`;
+	const providedSnapshot = url.searchParams.get('snapshot');
+	if (
+		(offset > 0 && providedSnapshot !== snapshot) ||
+		(providedSnapshot !== null && providedSnapshot !== snapshot)
+	) {
+		return sendJson(res, 409, {
+			status: 409,
+			title: 'Snapshot changed',
+			code: 'snapshot_changed',
+			detail: 'Restart fixture activity with the current filters and snapshot.'
+		});
+	}
+	const candidates = txsOfTree(d, tree);
+	if (dir === 'asc') candidates.reverse();
+	const items: AddressActivityDto[] = [];
+	let scanned = 0;
+	let next = offset;
+	while (next < candidates.length && scanned < 200 && items.length < Math.min(PAGE_SIZE, limit)) {
+		const tx = candidates[next++];
+		scanned++;
+		if ((from !== null && tx.timestamp < from) || (to !== null && tx.timestamp >= to)) continue;
+		const resolved = tx.inputs.filter((input) => input.box !== null).length;
+		const complete = resolved === tx.inputs.length;
+		let erg = 0n;
+		const tokens = new Map<string, bigint>();
+		function accumulate(box: BoxDto, sign: bigint) {
+			if (box.tree_hash !== tree) return;
+			erg += sign * BigInt(box.value);
+			for (const token of box.tokens)
+				tokens.set(token.id, (tokens.get(token.id) ?? 0n) + sign * BigInt(token.amount));
+		}
+		for (const input of tx.inputs) if (input.box) accumulate(input.box, -1n);
+		for (const output of tx.outputs) accumulate(output, 1n);
+		const tokenMissing = asset !== 'all' && asset !== 'erg' && !tokens.has(asset);
+		if (tokenMissing && complete) continue;
+		const values =
+			asset === 'all'
+				? [erg, ...tokens.values()]
+				: asset === 'erg'
+					? [erg]
+					: [tokens.get(asset) ?? 0n];
+		const positive = values.some((value) => value > 0n);
+		const negative = values.some((value) => value < 0n);
+		const actualDirection = !complete
+			? 'unknown'
+			: positive && negative
+				? 'mixed'
+				: positive
+					? 'received'
+					: negative
+						? 'sent'
+						: 'neutral';
+		if (direction !== 'all' && direction !== actualDirection) continue;
+		items.push({
+			id: tx.id,
+			height: tx.height,
+			block_id: tx.block_id ?? d.blockByHeight.get(tx.height)!.id,
+			timestamp: tx.timestamp,
+			index: tx.index,
+			fee: tx.fee,
+			input_count: tx.inputs.length,
+			output_count: tx.outputs.length,
+			coverage: { complete, resolved_inputs: resolved, total_inputs: tx.inputs.length },
+			erg_delta: complete ? erg.toString() : null,
+			tokens: [...tokens]
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([id, delta]) => ({
+					id,
+					name: d.tokenById.get(id)?.name || null,
+					decimals: d.tokenById.get(id)?.decimals ?? null,
+					delta: complete ? delta.toString() : null
+				})),
+			direction: actualDirection,
+			asset_match: tokenMissing ? 'uncertain' : 'definite'
+		});
+	}
+	const more = next < candidates.length;
+	const result: AddressActivityPageDto = {
+		items,
+		next_cursor: more ? String(next) : null,
+		next_snapshot: more ? snapshot : null,
+		consistency: 'strict',
+		anchor,
+		observed_anchor: anchor,
+		scanned,
+		scan_limit_reached: scanned === 200 && more,
+		partial_from: FIXTURE_HEIGHTS[0]
+	};
+	sendJson(res, 200, result);
+}
+
 /** Resolves `/v1/blocks/{height_or_id}` the way the real handler does. */
 function resolveBlock(d: Dataset, raw: string) {
 	if (DIGITS.test(raw)) return d.blockByHeight.get(Number(raw));
@@ -248,6 +429,55 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 				: null
 		});
 		return;
+	}
+
+	if (path === '/v1/network/summary') {
+		const rows = d.blocks.slice(0, 720);
+		const anchor = rows[0]?.timestamp ?? 0;
+		const bucket = (step: number, count: number, value: (b: (typeof rows)[number]) => number) =>
+			Array.from({ length: count }, (_, i) =>
+				rows
+					.filter((b) => {
+						const age = anchor - b.timestamp;
+						return age >= 0 && age < step * count && count - 1 - Math.floor(age / step) === i;
+					})
+					.reduce((n, b) => n + value(b), 0)
+			);
+		return sendJson(res, 200, {
+			scope: 'latest_indexed_blocks',
+			requested_blocks: 720,
+			block_count: rows.length,
+			transaction_count: rows.reduce((n, b) => n + b.tx_count, 0),
+			fees: rows.reduce((n, b) => n + BigInt(b.fees), 0n).toString(),
+			from_height: rows.at(-1)?.height ?? null,
+			to_height: rows[0]?.height ?? null,
+			anchor_id: rows[0]?.id ?? null,
+			earliest_timestamp: rows.length ? Math.min(...rows.map((b) => b.timestamp)) : null,
+			latest_timestamp: rows.length ? Math.max(...rows.map((b) => b.timestamp)) : null,
+			partial_from: null,
+			recent_blocks: rows.slice(0, 6),
+			blocks_per_hour: bucket(3600000, 24, () => 1),
+			transactions_per_hour: bucket(3600000, 24, (b) => b.tx_count),
+			fees_per_hour: bucket(3600000, 24, (b) => Number(b.fees)).map(String),
+			blocks_per_ten_minutes: bucket(600000, 36, () => 1)
+		});
+	}
+	const rewards = /^\/v1\/blocks\/([^/]+)\/rewards$/.exec(path);
+	if (rewards) {
+		const block = resolveBlock(d, decodeURIComponent(rewards[1]));
+		if (!block) return notFound(res);
+		return sendJson(res, 200, {
+			block_id: block.id,
+			height: block.height,
+			basis: 'unsupported',
+			gross_reward: null,
+			reemission_obligation: null,
+			miner_subsidy: null,
+			transaction_fees: block.fees,
+			reward_box_id: null,
+			transaction_id: null,
+			note: 'No supported EIP-27 emission reward was identified. Fees are separate; storage-rent income is not included.'
+		});
 	}
 
 	// --- blocks --------------------------------------------------------------------
@@ -324,12 +554,14 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 	}
 
 	// --- addresses -----------------------------------------------------------------
-	const address = /^\/v1\/addresses\/([^/]+)(\/boxes|\/txs|\/rent)?$/.exec(path);
+	const address = /^\/v1\/addresses\/([^/]+)(\/boxes|\/txs|\/rent|\/activity)?$/.exec(path);
 	if (address) {
 		const addr = decodeURIComponent(address[1]);
 		const tree = d.treeByAddress.get(addr);
 		if (tree === undefined) return notFound(res);
 		switch (address[2]) {
+			case '/activity':
+				return addressActivity(d, tree, url, res);
 			case '/boxes': {
 				const unspent = url.searchParams.get('unspent') === 'true';
 				sendJson(res, 200, page(boxesOfTree(d, tree, unspent), cursor, limit));
@@ -396,14 +628,23 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		return;
 	}
 
-	const token = /^\/v1\/tokens\/([^/]+)(\/holders|\/boxes)?$/.exec(path);
+	const token = /^\/v1\/tokens\/([^/]+)(\/holders|\/boxes|\/txs)?$/.exec(path);
 	if (token) {
 		const id = decodeURIComponent(token[1]).toLowerCase();
 		const info = d.tokenById.get(id);
 		if (info === undefined) return notFound(res);
 		switch (token[2]) {
+			case '/txs':
+				return tokenTransactions(d, id, url, res);
 			case '/holders':
-				sendJson(res, 200, holderPage(d.tokenHolders.get(id) ?? [], cursor, limit));
+				sendJson(res, 200, {
+					...holderPage(d.tokenHolders.get(id) ?? [], cursor, limit),
+					holder_context: {
+						supply: info.supply,
+						holder_count: info.holder_count,
+						definition: 'indexed_emission_minus_burned'
+					}
+				});
 				return;
 			case '/boxes':
 				sendJson(res, 200, page(boxesOfIds(d, d.boxIdsByToken.get(id) ?? [], url), cursor, limit));

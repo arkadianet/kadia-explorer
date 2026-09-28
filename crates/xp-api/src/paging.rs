@@ -14,6 +14,7 @@ pub enum Route {
     GlobalSummaries,
     BlockSummaries,
     AddressSummaries,
+    AddressActivity,
     Transactions,
     AddressBoxes,
     TokenBoxes,
@@ -21,6 +22,7 @@ pub enum Route {
     TokensNewest,
     TokensHolders,
     TokensSearch,
+    TokenHistory,
     Holders,
     Richlist,
     RegisterBoxes,
@@ -34,7 +36,9 @@ impl Route {
             | Self::GlobalSummaries
             | Self::BlockSummaries
             | Self::AddressSummaries => Policy::ImmutableMembership,
+            Self::TokenHistory => Policy::ImmutableMembership,
             Self::Transactions
+            | Self::AddressActivity
             | Self::AddressBoxes
             | Self::TokenBoxes
             | Self::TemplateBoxes
@@ -61,8 +65,10 @@ mod policy_tests {
             Route::GlobalSummaries,
             Route::BlockSummaries,
             Route::AddressSummaries,
+            Route::TokenHistory,
         ];
         let current = [
+            Route::AddressActivity,
             Route::Transactions,
             Route::AddressBoxes,
             Route::TokenBoxes,
@@ -95,7 +101,7 @@ mod policy_tests {
         }
         assert_eq!(
             doc.lines().filter(|line| line.starts_with("| `")).count(),
-            15
+            17
         );
     }
 }
@@ -123,6 +129,10 @@ pub enum Order {
 pub enum Filter {
     None,
     Entity(Hash32),
+    Activity {
+        entity: Hash32,
+        query_hash: Hash32,
+    },
     Boxes {
         entity: Hash32,
         unspent: bool,
@@ -135,6 +145,10 @@ pub enum Filter {
         query_hash: Hash32,
         exact: bool,
         index_version: u32,
+    },
+    TokenHistory {
+        token: Hash32,
+        version: u32,
     },
 }
 
@@ -155,6 +169,8 @@ impl Binding {
             AddressBoxes | TokenBoxes | TemplateBoxes => matches!(filter, Filter::Boxes { .. }),
             RegisterBoxes => matches!(filter, Filter::Register { number: 4..=9, .. }),
             TokensSearch => matches!(filter, Filter::TokenNames { .. }),
+            TokenHistory => matches!(filter, Filter::TokenHistory { .. }),
+            AddressActivity => matches!(filter, Filter::Activity { .. }),
         };
         let valid_order = match route {
             Blocks | TokensNewest | TokensHolders | Holders | Richlist => order == Order::Desc,

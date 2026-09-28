@@ -9,6 +9,7 @@ mod read_tokens;
 pub mod rollback;
 pub mod rows;
 pub mod tables;
+pub mod token_history;
 pub mod token_search;
 pub(crate) mod tokens;
 
@@ -132,6 +133,7 @@ impl Store {
             }
         }
         token_search::prepare_write(&txn)?;
+        token_history::prepare_write(&txn)?;
         txn.commit()?;
         Ok(Store {
             register_cache_writer: std::sync::Mutex::new(()),
@@ -228,6 +230,7 @@ impl Store {
     fn seed_impl(&self, height: u32, id: Hash32, partial: bool) -> Result<(), StoreError> {
         let txn = self.db.begin_write()?;
         token_search::prepare_write(&txn)?;
+        token_history::prepare_write(&txn)?;
         {
             let hrow = rows::HeaderRow {
                 id,
@@ -260,6 +263,7 @@ impl Store {
             }
         }
         token_search::finish_write(&txn)?;
+        token_history::finish_write(&txn)?;
         txn.commit()?;
         Ok(())
     }
@@ -269,6 +273,8 @@ impl Store {
 pub enum StoreError {
     #[error("token-name index is not ready")]
     TokenSearchNotReady,
+    #[error("token history index is not ready")]
+    TokenHistoryNotReady,
     #[error("invalid token-name search: {0}")]
     InvalidTokenSearch(&'static str),
     #[error("local register index capacity: {existing} existing + {additional} prospective entries reaches ceiling {ceiling}; raise register_index_ceiling above this total and restart ingest")]

@@ -139,6 +139,48 @@ where
     }
 }
 
+/// Token history follows the same cancellation discipline as token-name backfill: one
+/// admitted write is joined before exit, and a headerless partial start is retried.
+async fn backfill_token_history<F>(batch: F, shutdown: CancellationToken)
+where
+    F: Fn() -> Result<xp_store::token_history::TokenHistoryStatus, xp_store::StoreError>
+        + Send
+        + Sync
+        + 'static,
+{
+    let batch = Arc::new(batch);
+    loop {
+        if shutdown.is_cancelled() {
+            return;
+        }
+        let next = batch.clone();
+        let cancelled = shutdown.clone();
+        let result =
+            tokio::task::spawn_blocking(move || (!cancelled.is_cancelled()).then(|| next())).await;
+        let pause = match result {
+            Ok(Some(Ok(status))) if status.ready => {
+                info!(
+                    memberships = status.indexed_memberships,
+                    "token transaction history index ready"
+                );
+                return;
+            }
+            Ok(Some(Ok(_))) => TOKEN_NAME_BACKFILL_PAUSE,
+            Ok(Some(Err(xp_store::StoreError::TokenHistoryNotReady))) => TOKEN_NAME_ANCHOR_PAUSE,
+            Ok(Some(Err(error))) => {
+                warn!(%error,"token history backfill stopped; token history remains unavailable, ordinary indexing continues");
+                return;
+            }
+            Ok(None) => return,
+            Err(error) => {
+                warn!(%error,"token history backfill task failed; ordinary indexing continues");
+                return;
+            }
+        };
+        tokio::select! {biased;_ = shutdown.cancelled()=>return,_ = tokio::time::sleep(pause)=>{}}
+    }
+}
+
 /// Runs the explorer to completion and returns the process exit code: `0` on a clean
 /// signal-triggered shutdown, [`EXIT_REINDEX_REQUIRED`] if ingest halted because the store
 /// needs a reindex, `1` for any other halt.
@@ -223,6 +265,13 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         move || backfill_store.backfill_token_names_batch(TOKEN_NAME_BACKFILL_BATCH),
         shutdown.clone(),
     ));
+    let history_store = store.clone();
+    let history_backfill_handle = tokio::spawn(backfill_token_history(
+        move || {
+            history_store.backfill_token_history_batch(xp_store::token_history::MAX_HISTORY_BATCH)
+        },
+        shutdown.clone(),
+    ));
 
     info!(
         per_second = api_cfg.per_second,
@@ -300,6 +349,9 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
     // backfill batch as well, so the process never exits with a detached database write.
     if let Err(error) = backfill_handle.await {
         warn!(%error, "token-name backfill task failed while joining shutdown");
+    }
+    if let Err(error) = history_backfill_handle.await {
+        warn!(%error,"token history backfill task failed while joining shutdown");
     }
 
     Ok(explorer_exit_code(ingest_outcome, server_failed))
@@ -560,6 +612,88 @@ mod tests {
         );
         assert!(parse_args(["--config".to_string()].into_iter()).is_err());
         assert!(parse_args(["oops".to_string()].into_iter()).is_err());
+    }
+
+    fn history_status(ready: bool) -> xp_store::token_history::TokenHistoryStatus {
+        xp_store::token_history::TokenHistoryStatus {
+            version: 1,
+            ready,
+            phase: if ready { "ready" } else { "building" },
+            scanned_boxes: 0,
+            total_boxes: 0,
+            indexed_memberships: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn token_history_worker_retries_anchor_then_reaches_ready() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = calls.clone();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            backfill_token_history(
+                move || match worker_calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => Err(xp_store::StoreError::TokenHistoryNotReady),
+                    1 => Ok(history_status(false)),
+                    _ => Ok(history_status(true)),
+                },
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn token_history_worker_cancellation_joins_admitted_write() {
+        let shutdown = CancellationToken::new();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let started = std::sync::Mutex::new(Some(started_tx));
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        let release = std::sync::Mutex::new(release_rx);
+        let mut handle = tokio::spawn(backfill_token_history(
+            move || {
+                started.lock().unwrap().take().unwrap().send(()).unwrap();
+                release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                Ok(history_status(false))
+            },
+            shutdown.clone(),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), started_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        shutdown.cancel();
+        assert!(tokio::time::timeout(Duration::from_millis(25), &mut handle)
+            .await
+            .is_err());
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .unwrap()
+            .unwrap();
+        backfill_token_history(|| panic!("cancelled worker must not write"), shutdown).await;
+    }
+
+    #[tokio::test]
+    async fn token_history_worker_failure_does_not_cancel_service() {
+        let shutdown = CancellationToken::new();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            backfill_token_history(
+                || Err(xp_store::StoreError::ReadLimit("test history failure")),
+                shutdown.clone(),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(!shutdown.is_cancelled());
     }
 
     #[test]

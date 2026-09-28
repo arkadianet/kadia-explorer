@@ -143,6 +143,7 @@ impl Store {
             .unwrap_or_else(|e| e.into_inner());
         let txn = self.db.begin_write()?;
         crate::token_search::prepare_write(&txn)?;
+        crate::token_history::prepare_write(&txn)?;
         for h in (target + 1..=tip).rev() {
             // Scoped so the `AccessGuard` (and the table handle it borrows) drop before the
             // next `txn.open_table` call opens a different table for writing. The binding is
@@ -262,6 +263,7 @@ impl Store {
                     )?;
                     decoded
                 };
+                crate::token_history::remove_tx(&txn, row.gidx)?;
                 txn.open_table(TXS)?.remove(tid.as_slice())?;
                 txn.open_table(TX_BY_GIDX)?
                     .remove(k_u64(row.gidx).as_slice())?;
@@ -354,6 +356,7 @@ impl Store {
         }
         let entries = txn.open_table(REGISTER_IDX)?.len()?;
         crate::token_search::finish_write(&txn)?;
+        crate::token_history::finish_write(&txn)?;
         txn.commit()?;
         self.register_entries_cache
             .store(entries, std::sync::atomic::Ordering::Relaxed);
