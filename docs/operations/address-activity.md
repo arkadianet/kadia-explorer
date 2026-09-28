@@ -90,3 +90,34 @@ re-reads storage and compares the exact bytes captured for the preview. An inter
 edit requires a fresh preview. Corrupt or inaccessible browser state blocks writes and
 export; it is never replaced by an empty list or by an imported backup. Storage failures
 leave both persisted bytes and the last usable in-memory list intact.
+
+## Saved group balance dashboard
+
+The Saved page's balance selection is exactly the visible saved-address list: the
+selected local group intersected with the local label/address/group text filter.
+**Load group balances** explicitly sends those address strings together in
+`POST /v1/addresses/balances` with `{ "addresses": [...] }`. Labels and group names
+remain local. Page load, filtering and editing do not trigger balance requests.
+The UI discloses the shared request before loading; neither grouping nor the response
+establishes ownership. Limits are 1–100 addresses, 4,096 UTF-8 bytes per address,
+128,000 address bytes total, and a 512,000-byte JSON request.
+
+The response uses one store Reader snapshot. Canonical script aliases are explicitly
+linked to their first member and counted once. ERG values are rendered exactly from
+integer nanoERG strings; token quantities remain raw integer units with token IDs,
+without token-name, decimals or price assumptions. Individual balances and combined
+totals are checked for consistent member order, alias mappings and exact sums before
+display. Token lists render bounded chunks with explicit local expansion.
+
+An invalid or unseen member withholds the combined ERG and token totals; unknown
+balances never become zero. A partial index may return **observed balances only**,
+with incomplete-history wording because earlier outputs and unresolved pre-index
+spends can affect the view. A seeded genesis snapshot can be complete without a
+retained block anchor; the absence of an anchor is disclosed separately. This is a
+loaded snapshot, not a live account monitor.
+
+Changing the visible address membership clears all results and aborts pending work.
+Late responses after a scope change or navigation cannot restore old totals. A failed
+explicit refresh retains the previous snapshot with a visible stale/error notice;
+only a successful refresh replaces it. Older servers, busy servers and bounded-read
+failures show unavailable/error states rather than empty or truncated balances.

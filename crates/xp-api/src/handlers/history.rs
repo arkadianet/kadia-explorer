@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 use xp_store::{rows::BoxRow, Reader};
@@ -25,6 +26,15 @@ pub struct Params {
     block_id: Option<String>,
     cursor: Option<String>,
     limit: Option<String>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompareParams {
+    from_height: Option<String>,
+    to_height: Option<String>,
+    from_block_id: Option<String>,
+    to_block_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +61,19 @@ pub struct BalanceAt {
     indexed_height: Option<u32>,
     balance: Balance,
     complete: bool,
+}
+#[derive(Serialize)]
+pub struct ComparisonPoint {
+    at: Anchor,
+    balance: Balance,
+}
+#[derive(Serialize)]
+pub struct BalanceComparison {
+    address: String,
+    indexed_height: Option<u32>,
+    complete: bool,
+    from: ComparisonPoint,
+    to: ComparisonPoint,
 }
 #[derive(Serialize)]
 pub struct BoxAt {
@@ -209,6 +232,10 @@ impl Request {
                 "Exact history requires a full mainnet genesis-seeded store.",
             ));
         }
+        self.canonical_anchor(rd)
+    }
+
+    fn canonical_anchor(&self, rd: &Reader) -> Result<(Anchor, Option<u32>), ApiError> {
         let tip = rd.indexed_height()?;
         if self.height > tip.unwrap_or(0) {
             return Err(if self.cursor.is_some() {
@@ -225,7 +252,7 @@ impl Request {
             None
         } else {
             Some(hex::encode(
-                rd.header_at(self.height)?.ok_or_else(changed)?.id,
+                rd.header_id_at(self.height)?.ok_or_else(changed)?,
             ))
         };
         let at = Anchor {
@@ -267,6 +294,15 @@ impl Scan {
         examined == PAGE_CAP || (examined > 0 && self.start.elapsed() >= self.deadline)
     }
     fn birth(&mut self, rd: &Reader, id: &Hash32, row: &BoxRow) -> Result<u32, ApiError> {
+        self.birth_admitted(rd, id, row, |_| Ok(()))
+    }
+    fn birth_admitted(
+        &mut self,
+        rd: &Reader,
+        id: &Hash32,
+        row: &BoxRow,
+        admit: impl FnMut(usize) -> Result<(), xp_store::StoreError>,
+    ) -> Result<u32, ApiError> {
         if row.tx_id == [0; 32] {
             if xp_store::read::MAINNET_GENESIS
                 .iter()
@@ -280,7 +316,7 @@ impl Scan {
             return Ok(*h);
         }
         let tx = rd
-            .tx_by_id(&row.tx_id)?
+            .tx_by_id_admitted(&row.tx_id, admit)?
             .ok_or_else(|| integrity("missing historical creator"))?;
         self.creators.insert(row.tx_id, tx.height);
         Ok(tx.height)
@@ -296,6 +332,222 @@ fn bounded<T: Serialize>(value: T) -> Result<T, ApiError> {
     } else {
         Ok(value)
     }
+}
+
+#[derive(Default)]
+struct Accumulator {
+    nano: u128,
+    count: u64,
+    amounts: BTreeMap<Hash32, u128>,
+}
+impl Accumulator {
+    fn add(&mut self, row: &BoxRow, scan: &Scan) -> Result<(), ApiError> {
+        self.nano = checked_add(self.nano, row.value.into())?;
+        self.count = self
+            .count
+            .checked_add(1)
+            .ok_or_else(|| integrity("historical box count overflow"))?;
+        for (id, amount) in &row.tokens {
+            scan.check()?;
+            let entry = self.amounts.entry(*id).or_default();
+            *entry = checked_add(*entry, (*amount).into())?;
+        }
+        Ok(())
+    }
+    fn finish(self) -> Balance {
+        Balance {
+            nano: self.nano.to_string(),
+            box_count: self.count,
+            tokens: tokens(self.amounts),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CompareLimits {
+    candidates: usize,
+    tokens: usize,
+    bytes: usize,
+    decoded_bytes: usize,
+    deadline: Duration,
+}
+impl Default for CompareLimits {
+    fn default() -> Self {
+        Self {
+            candidates: CANDIDATE_CAP,
+            tokens: TOKEN_CAP,
+            bytes: RESPONSE_CAP,
+            decoded_bytes: 8 * 1024 * 1024,
+            deadline: SCALAR_DEADLINE,
+        }
+    }
+}
+
+fn comparison_requests(addr: &str, params: CompareParams) -> Result<(Request, Request), ApiError> {
+    let from = Request::parse(
+        addr,
+        Params {
+            height: params.from_height,
+            block_id: params.from_block_id,
+            ..Params::default()
+        },
+        false,
+    )?;
+    let to = Request::parse(
+        addr,
+        Params {
+            height: params.to_height,
+            block_id: params.to_block_id,
+            ..Params::default()
+        },
+        false,
+    )?;
+    if from.height > to.height {
+        return Err(invalid("from_height must not exceed to_height"));
+    }
+    if (from.height == 0 && from.block.is_some()) || (to.height == 0 && to.block.is_some()) {
+        return Err(invalid("genesis height 0 has no block id"));
+    }
+    Ok((from, to))
+}
+
+/// Both endpoints are accumulated during one retained-box walk in one immutable Reader.
+/// Work and response budgets cover the whole comparison; neither side can be partial.
+fn compare_balances(
+    rd: &Reader,
+    addr: String,
+    from: Request,
+    to: Request,
+    limits: CompareLimits,
+) -> Result<BalanceComparison, ApiError> {
+    let mut scan = Scan::new();
+    scan.deadline = limits.deadline;
+    let mut before = Accumulator::default();
+    let mut after = Accumulator::default();
+    let examined = Cell::new(0usize);
+    let decoded = Cell::new(0usize);
+    let start = scan.start;
+    let admit = |bytes: usize| -> Result<(), xp_store::StoreError> {
+        let total = decoded
+            .get()
+            .checked_add(bytes)
+            .ok_or(xp_store::StoreError::ReadLimit("history_scan_limit"))?;
+        if total > limits.decoded_bytes || start.elapsed() >= limits.deadline {
+            return Err(xp_store::StoreError::ReadLimit("history_scan_limit"));
+        }
+        decoded.set(total);
+        Ok(())
+    };
+    // Genesis recognition decodes three retained rows. Admit them before that read too.
+    for (id, _) in xp_store::read::MAINNET_GENESIS {
+        admit(rd.expansion_row_len(xp_store::read::ExpansionRow::Box, &hash(id)?)?)
+            .map_err(|_| exhausted())?;
+    }
+    if !rd.mainnet_genesis()? {
+        return Err(problem(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "history_unavailable",
+            "Exact history requires a full mainnet genesis-seeded store.",
+        ));
+    }
+    let tip = rd.indexed_height()?.unwrap_or(0);
+    if [&from, &to]
+        .iter()
+        .any(|request| request.block.is_some() && request.height > tip)
+    {
+        return Err(changed());
+    }
+    let (from_at, indexed_height) = from.canonical_anchor(rd)?;
+    let (to_at, _) = to.canonical_anchor(rd)?;
+    scan.check()?;
+    let mut token_work: usize = 0;
+    rd.visit_history_candidates_admitted(
+        &from.tree,
+        None,
+        false,
+        |bytes| {
+            if bytes > 0 {
+                if examined.get() == limits.candidates {
+                    return Err(xp_store::StoreError::ReadLimit("history_scan_limit"));
+                }
+                examined.set(examined.get() + 1);
+            }
+            admit(bytes)
+        },
+        |id, row| -> Result<bool, ApiError> {
+            scan.check()?;
+            // Spent at/before the earlier endpoint means absent from both endpoints.
+            if row.spent.is_some_and(|(_, height)| height <= from.height) {
+                return Ok(true);
+            }
+            let birth = scan.birth_admitted(rd, &id, &row, admit)?;
+            let present =
+                |height| birth <= height && row.spent.is_none_or(|(_, spent)| spent > height);
+            let at_from = present(from.height);
+            let at_to = present(to.height);
+            let work = row
+                .tokens
+                .len()
+                .checked_mul(usize::from(at_from) + usize::from(at_to))
+                .ok_or_else(exhausted)?;
+            token_work = token_work.checked_add(work).ok_or_else(exhausted)?;
+            if token_work > limits.tokens {
+                return Err(exhausted());
+            }
+            if at_from {
+                before.add(&row, &scan)?;
+            }
+            if at_to {
+                after.add(&row, &scan)?;
+            }
+            // Account for both serialized token arrays, even when they share IDs.
+            if before.amounts.len() + after.amounts.len() > limits.bytes / 90 {
+                return Err(too_large());
+            }
+            Ok(true)
+        },
+    )
+    .map_err(|error| match error {
+        ApiError::Expansion("history_scan_limit") => exhausted(),
+        other => other,
+    })?;
+    scan.check()?;
+    let result = BalanceComparison {
+        address: addr,
+        indexed_height,
+        complete: true,
+        from: ComparisonPoint {
+            at: from_at,
+            balance: before.finish(),
+        },
+        to: ComparisonPoint {
+            at: to_at,
+            balance: after.finish(),
+        },
+    };
+    let size = serde_json::to_vec(&result)
+        .map_err(|_| integrity("serialize historical comparison"))?
+        .len();
+    if size > limits.bytes {
+        return Err(too_large());
+    }
+    scan.check()?;
+    Ok(result)
+}
+
+pub async fn compare(
+    State(state): State<AppState>,
+    Path(addr): Path<String>,
+    params: Result<Query<CompareParams>, QueryRejection>,
+) -> Result<Json<BalanceComparison>, ApiError> {
+    let params = params.map(|Query(params)| params).map_err(|_| invalid("Use from_height, to_height and optional from_block_id/to_block_id; other fields are unsupported."))?;
+    let (from, to) = comparison_requests(&addr, params)?;
+    Ok(Json(
+        history_blocking(&state, move |rd| {
+            compare_balances(rd, addr, from, to, CompareLimits::default())
+        })
+        .await?,
+    ))
 }
 
 pub async fn balance(
@@ -599,5 +851,141 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn comparison_has_one_shared_candidate_deadline_and_response_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = xp_store::Store::open(&dir.path().join("comparison.redb")).unwrap();
+        let genesis =
+            xp_wire::decode_genesis_boxes(include_str!("../../../../tests/fixtures/genesis.json"))
+                .unwrap();
+        store.seed_genesis(&genesis).unwrap();
+        let addr = xp_wire::tree_info(&genesis[0].tree_bytes).unwrap().address;
+        let rd = Reader::new(&store).unwrap();
+        let run = |limits| {
+            let (from, to) = comparison_requests(
+                &addr,
+                CompareParams {
+                    from_height: Some("0".into()),
+                    to_height: Some("0".into()),
+                    ..CompareParams::default()
+                },
+            )
+            .unwrap();
+            compare_balances(&rd, addr.clone(), from, to, limits)
+        };
+        assert!(matches!(
+            run(CompareLimits {
+                candidates: 0,
+                ..CompareLimits::default()
+            }),
+            Err(ApiError::History {
+                code: "history_scan_limit",
+                ..
+            })
+        ));
+        assert!(matches!(
+            run(CompareLimits {
+                deadline: Duration::ZERO,
+                ..CompareLimits::default()
+            }),
+            Err(ApiError::History {
+                code: "history_scan_limit",
+                ..
+            })
+        ));
+        assert!(matches!(
+            run(CompareLimits {
+                decoded_bytes: 0,
+                ..CompareLimits::default()
+            }),
+            Err(ApiError::History {
+                code: "history_scan_limit",
+                ..
+            })
+        ));
+        assert!(matches!(
+            run(CompareLimits {
+                bytes: 1,
+                ..CompareLimits::default()
+            }),
+            Err(ApiError::History {
+                code: "history_response_limit",
+                ..
+            })
+        ));
+        let result = run(CompareLimits {
+            candidates: 1,
+            ..CompareLimits::default()
+        })
+        .unwrap();
+        assert_eq!(
+            result.from.balance.nano, result.to.balance.nano,
+            "one candidate walk supplies both endpoints"
+        );
+    }
+
+    #[test]
+    fn comparison_token_budget_counts_both_endpoint_accumulations() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = xp_store::Store::open(&dir.path().join("comparison-tokens.redb")).unwrap();
+        let genesis =
+            xp_wire::decode_genesis_boxes(include_str!("../../../../tests/fixtures/genesis.json"))
+                .unwrap();
+        store.seed_genesis(&genesis).unwrap();
+        let mut block = xp_wire::decode_block(include_str!(
+            "../../../../tests/fixtures/blocks/1866000.json"
+        ))
+        .unwrap();
+        block.header.height = 1;
+        block.header.parent_id = xp_types::HeaderId([0; 32]);
+        let mut output = genesis[0].clone();
+        output.id = xp_types::BoxId([8; 32]);
+        output.tx_id = xp_types::TxId([9; 32]);
+        output.index = 0;
+        output.value -= 1;
+        output.tokens = vec![(genesis[0].id.0, 100)];
+        block.txs = vec![xp_wire::DecodedTx {
+            id: output.tx_id,
+            inputs: vec![genesis[0].id],
+            data_inputs: vec![],
+            outputs: vec![output],
+            size: 100,
+        }];
+        store.apply_batch(&[block], true).unwrap();
+        let rd = Reader::new(&store).unwrap();
+        let addr = xp_wire::tree_info(&genesis[0].tree_bytes).unwrap().address;
+        let run = |tokens| {
+            let (from, to) = comparison_requests(
+                &addr,
+                CompareParams {
+                    from_height: Some("1".into()),
+                    to_height: Some("1".into()),
+                    ..CompareParams::default()
+                },
+            )
+            .unwrap();
+            compare_balances(
+                &rd,
+                addr.clone(),
+                from,
+                to,
+                CompareLimits {
+                    tokens,
+                    ..CompareLimits::default()
+                },
+            )
+        };
+        assert!(matches!(
+            run(1),
+            Err(ApiError::History {
+                code: "history_scan_limit",
+                ..
+            })
+        ));
+        let result = run(2).unwrap();
+        assert_eq!(result.from.balance.tokens[0].amount, "100");
+        assert_eq!(result.to.balance.tokens[0].amount, "100");
     }
 }

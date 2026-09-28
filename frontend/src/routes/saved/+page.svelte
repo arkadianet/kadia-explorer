@@ -8,6 +8,7 @@
 		type ImportPolicy
 	} from '$lib/addresses/saved.svelte';
 	import SaveAddress from '$lib/components/SaveAddress.svelte';
+	import GroupBalances from '$lib/components/GroupBalances.svelte';
 	let announcement = $state('');
 	let filter = $state('');
 	let groupFilter = $state('all');
@@ -257,6 +258,11 @@
 		</details>
 	</header>
 	<div class="saved-list">
+		<GroupBalances
+			items={visibleItems}
+			available={savedAddresses.ready && savedAddresses.readable}
+			scope={`${groupFilter === 'all' ? 'All groups' : groupFilter === 'ungrouped' ? 'Ungrouped' : groupFilter.slice(5)}${query ? ` · local filter “${filter.trim()}”` : ''}`}
+		/>
 		{#if savedAddresses.error}<p class="notice" role="alert">{savedAddresses.error}</p>{/if}
 		{#if !savedAddresses.ready}<p role="status">Reading this browser’s saved addresses…</p>
 		{:else if !savedAddresses.readable && !savedAddresses.items.length}<div class="empty">

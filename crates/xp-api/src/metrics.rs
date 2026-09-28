@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const ROUTES: [&str; 35] = [
+const ROUTES: [&str; 37] = [
     "/v1/metrics",
     "/v1/register-capacity",
     "/v1/status",
@@ -28,8 +28,10 @@ const ROUTES: [&str; 35] = [
     "/v1/boxes/{id}",
     "/v1/boxes/{id}/rent",
     "/v1/addresses/{addr}",
+    "/v1/addresses/balances",
     "/v1/addresses/{addr}/boxes",
     "/v1/addresses/{addr}/balance/at",
+    "/v1/addresses/{addr}/balance/compare",
     "/v1/addresses/{addr}/boxes/at",
     "/v1/addresses/{addr}/txs",
     "/v1/addresses/{addr}/activity",
@@ -339,7 +341,7 @@ mod tests {
         )));
         assert!(state.counters.metrics.started > 0.0);
         assert_eq!(text.lines().count(), ROUTES.len() * 22 + 11 + 12);
-        assert_eq!(ROUTES.len(), 35);
+        assert_eq!(ROUTES.len(), 37);
         let second = scrape(app).await;
         let marker = |s: &str| {
             s.lines()

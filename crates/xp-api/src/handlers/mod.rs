@@ -1,4 +1,5 @@
 pub mod address_activity;
+pub mod address_groups;
 pub mod addresses;
 pub mod blocks;
 pub mod boxes;

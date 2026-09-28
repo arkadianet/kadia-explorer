@@ -30,6 +30,13 @@ export interface HistorySelector {
 	height: number;
 	block_id?: string;
 }
+export interface HistoryComparison {
+	address: string;
+	indexed_height: number | null;
+	complete: boolean;
+	from: { at: HistoryAnchor; balance: HistoryBalance['balance'] };
+	to: { at: HistoryAnchor; balance: HistoryBalance['balance'] };
+}
 export interface HistoryIssue {
 	message: string;
 	code: string;
@@ -105,6 +112,200 @@ export const historyApi = {
 			limit
 		})
 };
+
+export function comparisonSelectors(
+	from: string | null,
+	to: string | null,
+	fromBlock: string | null = null,
+	toBlock: string | null = null
+) {
+	const before = historySelector(from, fromBlock);
+	const after = historySelector(to, toBlock);
+	const error =
+		before.error ??
+		after.error ??
+		(!before.value || !after.value
+			? 'Enter both comparison heights.'
+			: before.value.height > after.value.height
+				? 'The earlier height must not exceed the later height.'
+				: null);
+	return {
+		value: error || !before.value || !after.value ? null : { from: before.value, to: after.value },
+		error
+	};
+}
+
+export function historyComparisonLink(address: string, value: HistoryComparison): string {
+	const params = new URLSearchParams({
+		from_height: String(value.from.at.height),
+		to_height: String(value.to.at.height)
+	});
+	if (value.from.at.block_id) params.set('from_block', value.from.at.block_id);
+	if (value.to.at.block_id) params.set('to_block', value.to.at.block_id);
+	return `/address/${encodeURIComponent(address)}?${params}#history`;
+}
+
+export async function historyCompareApi(
+	address: string,
+	from: HistorySelector,
+	to: HistorySelector
+) {
+	return apiGet<HistoryComparison>(`/addresses/${encodeURIComponent(address)}/balance/compare`, {
+		from_height: from.height,
+		to_height: to.height,
+		from_block_id: from.block_id,
+		to_block_id: to.block_id
+	});
+}
+
+/** Reject incomplete or inconsistent endpoint states before any BigInt subtraction. */
+export function comparisonChanges(
+	value: HistoryComparison,
+	address: string,
+	from: HistorySelector,
+	to: HistorySelector
+) {
+	if (!value || value.complete !== true || value.address !== address || !value.from || !value.to)
+		throw new Error(
+			'A complete comparison for this address is required. No balance difference is shown.'
+		);
+	if (
+		from.height > to.height ||
+		(value.indexed_height === null
+			? to.height !== 0
+			: !Number.isSafeInteger(value.indexed_height) || value.indexed_height < to.height)
+	)
+		throw new Error('The comparison has invalid indexed coverage. No balance difference is shown.');
+	for (const [point, requested] of [
+		[value.from, from],
+		[value.to, to]
+	] as const) {
+		if (
+			!point.at ||
+			point.at.height !== requested.height ||
+			(requested.height === 0
+				? point.at.block_id !== null
+				: typeof point.at.block_id !== 'string' || !/^[a-f0-9]{64}$/i.test(point.at.block_id)) ||
+			(requested.block_id && point.at.block_id?.toLowerCase() !== requested.block_id.toLowerCase())
+		)
+			throw new ApiError(
+				409,
+				'Snapshot changed',
+				'A comparison anchor does not match the request.',
+				'snapshot_changed'
+			);
+	}
+	if (from.height === to.height && value.from.at.block_id !== value.to.at.block_id)
+		throw new ApiError(
+			409,
+			'Snapshot changed',
+			'Equal heights returned different blocks.',
+			'snapshot_changed'
+		);
+	const raw = (amount: unknown): amount is string =>
+		typeof amount === 'string' &&
+		/^(0|[1-9]\d{0,38})$/.test(amount) &&
+		BigInt(amount) <= (1n << 128n) - 1n;
+	let entries = 0;
+	for (const point of [value.from, value.to]) {
+		const balance = point.balance;
+		if (
+			!balance ||
+			!raw(balance.nano) ||
+			!Number.isSafeInteger(balance.box_count) ||
+			balance.box_count < 0 ||
+			!Array.isArray(balance.tokens)
+		)
+			throw new Error('The comparison contains invalid exact balances. Refresh before comparing.');
+		entries += balance.tokens.length;
+		if (entries > HISTORY_TOKEN_LIMIT)
+			throw new Error(
+				'This comparison exceeds the 10,000-token-entry view limit. No partial difference is shown.'
+			);
+		const seen = new Set<string>();
+		for (const token of balance.tokens) {
+			if (
+				!token ||
+				typeof token.token_id !== 'string' ||
+				!/^[a-f0-9]{64}$/.test(token.token_id) ||
+				!raw(token.amount) ||
+				seen.has(token.token_id)
+			)
+				throw new Error(
+					'The comparison contains invalid or repeated token balances. No difference is shown.'
+				);
+			seen.add(token.token_id);
+		}
+	}
+	const before = new Map(
+		value.from.balance.tokens.map((token) => [token.token_id, BigInt(token.amount)])
+	);
+	const after = new Map(
+		value.to.balance.tokens.map((token) => [token.token_id, BigInt(token.amount)])
+	);
+	return {
+		nano: (BigInt(value.to.balance.nano) - BigInt(value.from.balance.nano)).toString(),
+		box_count: (
+			BigInt(value.to.balance.box_count) - BigInt(value.from.balance.box_count)
+		).toString(),
+		tokens: [...new Set([...before.keys(), ...after.keys()])].sort().map((token_id) => ({
+			token_id,
+			before: (before.get(token_id) ?? 0n).toString(),
+			after: (after.get(token_id) ?? 0n).toString(),
+			delta: ((after.get(token_id) ?? 0n) - (before.get(token_id) ?? 0n)).toString()
+		}))
+	};
+}
+
+export interface ComparisonState {
+	busy: boolean;
+	result: HistoryComparison | null;
+	changes: ReturnType<typeof comparisonChanges> | null;
+	issue: HistoryIssue | null;
+}
+export function createHistoryComparison(
+	onChange: (value: ComparisonState) => void,
+	api = historyCompareApi
+) {
+	let current: ComparisonState = { busy: false, result: null, changes: null, issue: null };
+	let generation = 0;
+	let stopped = false;
+	function update(value: ComparisonState) {
+		current = value;
+		onChange(value);
+	}
+	return {
+		get state() {
+			return current;
+		},
+		reset() {
+			generation++;
+			if (!stopped) update({ busy: false, result: null, changes: null, issue: null });
+		},
+		stop() {
+			generation++;
+			stopped = true;
+		},
+		async start(address: string, from: HistorySelector, to: HistorySelector) {
+			if (stopped) return;
+			const own = ++generation;
+			update({ busy: true, result: null, changes: null, issue: null });
+			try {
+				const result = await api(address, from, to);
+				if (stopped || own !== generation) return;
+				const changes = comparisonChanges(result, address, from, to);
+				update({ busy: false, result, changes, issue: null });
+			} catch (error) {
+				if (stopped || own !== generation) return;
+				const issue = historyIssue(error);
+				if (['history_scan_limit', 'history_response_limit'].includes(issue.code))
+					issue.message =
+						'The complete comparison exceeds the server’s work or response budget. Neither balance nor a partial difference is shown. Try a smaller address; separately loaded box pages cannot establish this comparison.';
+				update({ busy: false, result: null, changes: null, issue });
+			}
+		}
+	};
+}
 
 export function sumHistoryBoxes(boxes: HistoryBox[]) {
 	let nano = 0n;

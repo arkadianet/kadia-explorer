@@ -14,7 +14,7 @@ mod observations;
 pub mod paging;
 
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -219,12 +219,20 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .route("/v1/boxes/{id}/rent", get(handlers::boxes::rent))
         .route("/v1/addresses/{addr}", get(handlers::addresses::get_one))
         .route(
+            "/v1/addresses/balances",
+            post(handlers::address_groups::balances),
+        )
+        .route(
             "/v1/addresses/{addr}/boxes",
             get(handlers::addresses::boxes),
         )
         .route(
             "/v1/addresses/{addr}/balance/at",
             get(handlers::history::balance),
+        )
+        .route(
+            "/v1/addresses/{addr}/balance/compare",
+            get(handlers::history::compare),
         )
         .route(
             "/v1/addresses/{addr}/boxes/at",

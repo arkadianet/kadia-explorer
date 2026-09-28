@@ -4254,3 +4254,155 @@ async fn m5_strict_expanded_wire_preserves_decimal_amounts_and_hex_ids() {
     hex_id(&output["tokens"][0]["id"]);
     decimal(&output["tokens"][0]["amount"]);
 }
+
+#[tokio::test]
+async fn history_comparison_exact_endpoints_genesis_and_reorgs() {
+    let genesis = mainnet_genesis();
+    let (_d, app, store) = genesis_app(&genesis);
+    let address = xp_wire::tree_info(&[0, 8, 0xd3]).unwrap().address;
+    let token = genesis[0].id.0;
+    let big = 9_007_199_254_740_993u64;
+    let one = history_block(
+        1,
+        8100,
+        [0; 32],
+        vec![history_tx(
+            8200,
+            vec![genesis[0].id],
+            vec![history_output(8300, big, vec![(token, big)])],
+        )],
+    );
+    let two = history_block(
+        2,
+        8101,
+        one.header.id.0,
+        vec![history_tx(
+            8201,
+            vec![xp_types::BoxId(history_id(8300))],
+            vec![
+                history_output(8301, big - 10, vec![(token, big - 2)]),
+                history_output(8302, 1, vec![]),
+            ],
+        )],
+    );
+    store
+        .apply_batch(&[one.clone(), two.clone()], true)
+        .unwrap();
+    let before = store.fingerprint().unwrap();
+    let path = format!("/v1/addresses/{address}/balance/compare");
+    let query = format!(
+        "from_height=1&to_height=2&from_block_id={}&to_block_id={}",
+        hex::encode(one.header.id.0),
+        hex::encode(two.header.id.0)
+    );
+    let (status, result) = get(&app, &format!("{path}?{query}")).await;
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["complete"], true);
+    assert_eq!(result["indexed_height"], 2);
+    assert_eq!(result["from"]["balance"]["nano"], big.to_string());
+    assert_eq!(result["to"]["balance"]["nano"], (big - 9).to_string());
+    assert_eq!(
+        result["from"]["balance"]["tokens"][0]["amount"],
+        big.to_string()
+    );
+    assert_eq!(
+        result["to"]["balance"]["tokens"][0]["amount"],
+        (big - 2).to_string()
+    );
+    assert_eq!(result["from"]["balance"]["box_count"], 1);
+    assert_eq!(result["to"]["balance"]["box_count"], 2);
+    for (side, height) in [("from", 1), ("to", 2)] {
+        let (_, scalar) = get(
+            &app,
+            &format!("/v1/addresses/{address}/balance/at?height={height}"),
+        )
+        .await;
+        assert_eq!(result[side]["balance"], scalar["balance"]);
+        assert_eq!(result[side]["at"], scalar["at"]);
+    }
+    let (_, same) = get(&app, &format!("{path}?from_height=1&to_height=1")).await;
+    assert_eq!(same["from"], same["to"]);
+    let genesis_address = xp_wire::tree_info(&genesis[0].tree_bytes).unwrap().address;
+    let (status, at_genesis) = get(
+        &app,
+        &format!("/v1/addresses/{genesis_address}/balance/compare?from_height=0&to_height=2"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(at_genesis["from"]["at"]["block_id"].is_null());
+    assert_eq!(
+        at_genesis["from"]["balance"]["nano"],
+        genesis[0].value.to_string()
+    );
+    assert_eq!(at_genesis["to"]["balance"]["nano"], "0");
+    assert_eq!(store.fingerprint().unwrap(), before);
+    let three = history_block(3, 8102, two.header.id.0, vec![]);
+    store.apply_batch(&[three], true).unwrap();
+    assert_eq!(
+        get(&app, &format!("{path}?{query}")).await.0,
+        StatusCode::OK,
+        "append preserves both anchors"
+    );
+    store.rollback_to(1).unwrap();
+    let (status, stale) = get(&app, &format!("{path}?{query}")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(stale["code"], "snapshot_changed");
+    assert!(stale["from"].is_null(), "no partial endpoint on conflict");
+    let mut fork = two.clone();
+    fork.header.id = xp_types::HeaderId(history_id(8103));
+    store.apply_batch(&[fork], true).unwrap();
+    assert_eq!(
+        get(&app, &format!("{path}?{query}")).await.0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        get(&app, &format!("{path}?from_height=1&to_height=2"))
+            .await
+            .0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn history_comparison_rejects_unavailable_invalid_and_invented_anchors() {
+    let genesis = mainnet_genesis();
+    let address = xp_wire::tree_info(&genesis[0].tree_bytes).unwrap().address;
+    let path = format!("/v1/addresses/{address}/balance/compare");
+    let (_d, app, _) = genesis_app(&genesis);
+    for query in [
+        "",
+        "from_height=0",
+        "from_height=1&to_height=0",
+        "from_height=-1&to_height=0",
+        "from_height=0&to_height=4294967296",
+        "from_height=0&to_height=0&cursor=x",
+        "from_height=0&to_height=0&from_block_id=bad",
+    ] {
+        assert_eq!(
+            get(&app, &format!("{path}?{query}")).await.0,
+            StatusCode::BAD_REQUEST,
+            "{query}"
+        );
+    }
+    assert_eq!(
+        get(
+            &app,
+            &format!(
+                "{path}?from_height=0&to_height=0&from_block_id={}",
+                "a".repeat(64)
+            )
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let (status, result) = get(&app, &format!("{path}?from_height=0&to_height=0")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["from"], result["to"]);
+    assert!(result["from"]["at"]["block_id"].is_null());
+    let (_partial, partial_app) = app_with_stall(None);
+    let (status, result) = get(&partial_app, &format!("{path}?from_height=0&to_height=1")).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(result["code"], "history_unavailable");
+    assert!(result["from"].is_null());
+}

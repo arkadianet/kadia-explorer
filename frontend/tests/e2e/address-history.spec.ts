@@ -1,6 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { MOCK_ADDRESS, UNKNOWN_ADDRESS } from './data.ts';
-import type { HistoryBalance, HistoryBoxes } from '../../src/lib/addresses/history.ts';
+import type {
+	HistoryBalance,
+	HistoryBoxes,
+	HistoryComparison
+} from '../../src/lib/addresses/history.ts';
 
 const height = 1_866_000;
 const block = 'a'.repeat(64);
@@ -29,6 +33,157 @@ const boxes: HistoryBoxes = {
 	],
 	next_cursor: null
 };
+
+const compared: HistoryComparison = {
+	address: MOCK_ADDRESS,
+	indexed_height: height + 2,
+	complete: true,
+	from: { at: anchor, balance: balance.balance },
+	to: {
+		at: { height: height + 1, block_id: 'd'.repeat(64) },
+		balance: {
+			nano: '9007199254740993122',
+			box_count: 2,
+			tokens: [{ token_id: token, amount: '900719925474099312347' }]
+		}
+	}
+};
+const comparisonPath = `/address/${MOCK_ADDRESS}?from_height=${height}&to_height=${height + 1}&from_block=${block}&to_block=${'d'.repeat(64)}#history`;
+
+test('historical comparison is opt-in, exact and shareable with both canonical anchors', async ({
+	page
+}) => {
+	const requests: URL[] = [];
+	await page.route('**/v1/addresses/*/balance/compare?**', (route) => {
+		requests.push(new URL(route.request().url()));
+		return route.fulfill({ json: compared });
+	});
+	await page.goto(comparisonPath);
+	await expect(
+		page.getByRole('heading', { name: 'Two moments. One exact comparison.' })
+	).toBeVisible();
+	expect(requests).toHaveLength(0);
+	await page.getByRole('button', { name: 'Compare balances', exact: true }).click();
+	const result = page.getByRole('region', { name: 'Historical balance comparison', exact: true });
+	await expect(result.getByRole('article', { name: 'Exact balance difference' })).toContainText(
+		'-0.000000001'
+	);
+	await expect(result.getByText('900,719,925,474,099,312,347', { exact: true })).toBeVisible();
+	await expect(result.getByText('+2', { exact: true })).toBeVisible();
+	await expect(result.getByRole('link', { name: 'Pinned comparison link ↗' })).toHaveAttribute(
+		'href',
+		comparisonPath
+	);
+	expect(requests).toHaveLength(1);
+	expect(requests[0].searchParams.get('from_block_id')).toBe(block);
+	expect(requests[0].searchParams.get('to_block_id')).toBe('d'.repeat(64));
+	await page.reload();
+	await expect(page.getByRole('button', { name: 'Compare balances', exact: true })).toBeVisible();
+	expect(requests).toHaveLength(1);
+});
+
+test('comparison conflict clears both states and explicit restart removes stale pins', async ({
+	page
+}) => {
+	let calls = 0;
+	await page.route('**/v1/addresses/*/balance/compare?**', (route) => {
+		calls++;
+		if (calls === 2) return route.fulfill({ status: 409, json: { code: 'snapshot_changed' } });
+		if (calls === 3) {
+			const query = new URL(route.request().url()).searchParams;
+			expect(query.has('from_block_id')).toBe(false);
+			expect(query.has('to_block_id')).toBe(false);
+		}
+		return route.fulfill({ json: compared });
+	});
+	await page.goto(comparisonPath);
+	await page.getByRole('button', { name: 'Compare balances', exact: true }).click();
+	await expect(
+		page.getByRole('region', { name: 'Historical balance comparison', exact: true })
+	).toBeVisible();
+	await page.getByRole('button', { name: 'Compare balances', exact: true }).click();
+	await expect(page.getByRole('alert')).toContainText('old results were cleared');
+	await expect(
+		page.getByRole('region', { name: 'Historical balance comparison', exact: true })
+	).toHaveCount(0);
+	await page.getByRole('button', { name: 'Restart comparison at these heights' }).click();
+	await expect(
+		page.getByRole('region', { name: 'Historical balance comparison', exact: true })
+	).toBeVisible();
+	expect(calls).toBe(3);
+});
+
+test('comparison budgets and unavailable history never become partial differences', async ({
+	page
+}) => {
+	let calls = 0;
+	await page.route('**/v1/addresses/*/balance/compare?**', (route) => {
+		calls++;
+		return route.fulfill({
+			status: calls === 1 ? 422 : 503,
+			json: { code: calls === 1 ? 'history_scan_limit' : 'history_unavailable' }
+		});
+	});
+	await page.goto(comparisonPath);
+	await page.getByRole('button', { name: 'Compare balances', exact: true }).click();
+	await expect(page.getByRole('alert')).toContainText('Neither balance nor a partial difference');
+	await expect(
+		page.getByRole('region', { name: 'Historical balance comparison', exact: true })
+	).toHaveCount(0);
+	await page.getByRole('button', { name: 'Retry comparison' }).click();
+	await expect(page.getByRole('alert')).toContainText('complete mainnet index');
+	await expect(
+		page.getByRole('region', { name: 'Historical balance comparison', exact: true })
+	).toHaveCount(0);
+});
+
+test('genesis comparison can establish complete zero differences without a fabricated block ID', async ({
+	page
+}) => {
+	await page.route('**/v1/addresses/*/balance/compare?**', (route) =>
+		route.fulfill({
+			json: {
+				...compared,
+				indexed_height: null,
+				from: {
+					at: { height: 0, block_id: null },
+					balance: { nano: '0', box_count: 0, tokens: [] }
+				},
+				to: { at: { height: 0, block_id: null }, balance: { nano: '0', box_count: 0, tokens: [] } }
+			}
+		})
+	);
+	await page.goto(`/address/${MOCK_ADDRESS}?from_height=0&to_height=0#history`);
+	await page.getByRole('button', { name: 'Compare balances', exact: true }).click();
+	const result = page.getByRole('region', { name: 'Historical balance comparison', exact: true });
+	await expect(result.getByText('Recognized mainnet genesis · no block ID')).toHaveCount(2);
+	await expect(result.getByRole('article', { name: 'Exact balance difference' })).toContainText(
+		'0 nanoERG difference'
+	);
+	await expect(result.getByRole('link', { name: 'Pinned comparison link ↗' })).toHaveAttribute(
+		'href',
+		`/address/${MOCK_ADDRESS}?from_height=0&to_height=0#history`
+	);
+});
+
+for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	test(`comparison remains keyboard accessible at 320px in ${appearance}`, async ({ page }) => {
+		await page.setViewportSize({ width: 320, height: 900 });
+		await page.addInitScript((value) => localStorage.setItem('xp-appearance', value), appearance);
+		await page.route('**/v1/addresses/*/balance/compare?**', (route) =>
+			route.fulfill({ json: compared })
+		);
+		await page.goto(comparisonPath);
+		await page.getByRole('button', { name: 'Compare balances', exact: true }).focus();
+		await page.keyboard.press('Enter');
+		await expect(
+			page.getByRole('region', { name: 'Historical balance comparison', exact: true })
+		).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+		await page.getByRole('searchbox', { name: 'Filter comparison token IDs' }).fill('f'.repeat(64));
+		await expect(page.getByText('No token IDs match this filter.')).toBeVisible();
+	});
+}
 
 async function mockHistory(page: Page) {
 	await page.route('**/v1/addresses/*/balance/at?**', (route) => route.fulfill({ json: balance }));

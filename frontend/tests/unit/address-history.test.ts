@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../src/lib/api/client';
 import {
+	comparisonSelectors,
+	comparisonChanges,
+	createHistoryComparison,
+	historyComparisonLink,
+	type HistoryComparison,
 	createHistoryInspector,
 	historySelector,
 	sumHistoryBoxes,
@@ -25,6 +30,131 @@ const balance: HistoryBalance = {
 	complete: true
 };
 const boxes: HistoryBoxes = { at: anchor, items: [box], next_cursor: null };
+const comparison: HistoryComparison = {
+	address: 'address',
+	indexed_height: 20,
+	complete: true,
+	from: {
+		at: anchor,
+		balance: {
+			nano: '9007199254740993123',
+			box_count: 1,
+			tokens: [{ token_id: token, amount: '900719925474099312345' }]
+		}
+	},
+	to: {
+		at: { height: 13, block_id: 'd'.repeat(64) },
+		balance: {
+			nano: '9007199254740993122',
+			box_count: 2,
+			tokens: [{ token_id: token, amount: '900719925474099312347' }]
+		}
+	}
+};
+
+describe('complete historical comparisons', () => {
+	it('validates ordered endpoints, equal heights and genesis without inventing a block ID', () => {
+		expect(comparisonSelectors('0', '0').value).toEqual({ from: { height: 0 }, to: { height: 0 } });
+		expect(comparisonSelectors('13', '12').error).toContain('earlier');
+		expect(comparisonSelectors(null, '12').error).toBeTruthy();
+		expect(comparisonSelectors('0', '12', 'a'.repeat(64)).error).toContain('genesis');
+	});
+	it('subtracts exact raw quantities and unions entering, leaving and unchanged token IDs', () => {
+		const input = structuredClone(comparison);
+		input.from.balance.tokens.push({ token_id: 'e'.repeat(64), amount: '7' });
+		input.to.balance.tokens.push({ token_id: 'f'.repeat(64), amount: '9' });
+		const delta = comparisonChanges(input, 'address', { height: 12 }, { height: 13 });
+		expect(delta.nano).toBe('-1');
+		expect(delta.box_count).toBe('1');
+		expect(delta.tokens.map((row) => row.delta)).toEqual(['2', '-7', '9']);
+		expect(delta.tokens[0].before).toBe('900719925474099312345');
+	});
+	it('pins both returned anchors in a share link but omits the genesis ID', () => {
+		const input = structuredClone(comparison);
+		input.from.at = { height: 0, block_id: null };
+		const url = new URL(historyComparisonLink('address', input), 'https://test.invalid');
+		expect(url.searchParams.get('from_height')).toBe('0');
+		expect(url.searchParams.has('from_block')).toBe(false);
+		expect(url.searchParams.get('to_block')).toBe(input.to.at.block_id);
+		expect(url.hash).toBe('#history');
+	});
+	it('rejects incomplete, wrong-address, mismatched-anchor and invalid exact balances', () => {
+		for (const input of [
+			{ ...comparison, complete: false },
+			{ ...comparison, address: 'another' },
+			{ ...comparison, indexed_height: 12 },
+			{
+				...comparison,
+				from: { ...comparison.from, balance: { ...comparison.from.balance, nano: '-1' } }
+			},
+			{
+				...comparison,
+				from: {
+					...comparison.from,
+					balance: {
+						...comparison.from.balance,
+						tokens: [...comparison.from.balance.tokens, ...comparison.from.balance.tokens]
+					}
+				}
+			}
+		])
+			expect(() => comparisonChanges(input, 'address', { height: 12 }, { height: 13 })).toThrow();
+		expect(() =>
+			comparisonChanges(
+				comparison,
+				'address',
+				{ height: 12, block_id: 'e'.repeat(64) },
+				{ height: 13 }
+			)
+		).toThrow(ApiError);
+	});
+	it('does not turn an over-limit token list into a partial difference', () => {
+		const input = structuredClone(comparison);
+		input.to.balance.tokens = Array(10_001).fill({ token_id: token, amount: '1' });
+		expect(() => comparisonChanges(input, 'address', { height: 12 }, { height: 13 })).toThrow(
+			'view limit'
+		);
+	});
+	it('loads only on demand and clears both endpoints on a 409 or budget error', async () => {
+		const api = vi
+			.fn()
+			.mockResolvedValueOnce(comparison)
+			.mockRejectedValueOnce(new ApiError(409, 'Changed', 'changed', 'snapshot_changed'))
+			.mockRejectedValueOnce(new ApiError(422, 'Limit', 'limit', 'history_scan_limit'));
+		const controller = createHistoryComparison(() => {}, api);
+		expect(api).not.toHaveBeenCalled();
+		await controller.start('address', { height: 12 }, { height: 13 });
+		expect(controller.state.changes?.nano).toBe('-1');
+		await controller.start('address', { height: 12 }, { height: 13 });
+		expect(controller.state.result).toBeNull();
+		expect(controller.state.changes).toBeNull();
+		expect(controller.state.issue?.restart).toBe(true);
+		await controller.start('address', { height: 12 }, { height: 13 });
+		expect(controller.state.issue?.message).toContain('Neither balance');
+		expect(controller.state.result).toBeNull();
+		expect(api).toHaveBeenCalledTimes(3);
+	});
+	it('ignores old responses after a new query, reset, or unmount', async () => {
+		for (const action of ['reset', 'stop'] as const) {
+			let resolve!: (value: HistoryComparison) => void;
+			const api = vi.fn(
+				() =>
+					new Promise<HistoryComparison>((done) => {
+						resolve = done;
+					})
+			);
+			const updates = vi.fn();
+			const controller = createHistoryComparison(updates, api);
+			const pending = controller.start('address', { height: 12 }, { height: 13 });
+			controller[action]();
+			const count = updates.mock.calls.length;
+			resolve(comparison);
+			await pending;
+			expect(updates).toHaveBeenCalledTimes(count);
+			expect(controller.state.result).toBeNull();
+		}
+	});
+});
 function setup() {
 	const api = { balance: vi.fn(async () => balance), boxes: vi.fn(async () => boxes) };
 	const inspect = createHistoryInspector(() => {}, api);

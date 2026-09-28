@@ -23,6 +23,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readFileSync } from 'node:fs';
+import type { GroupBalances, GroupMember } from '../../../src/lib/addresses/groups.ts';
 import type {
 	AddressActivityDto,
 	AddressActivityPageDto,
@@ -36,6 +38,41 @@ import { buildDataset, FIXTURE_HEIGHTS, registerKey, type Dataset } from './fixt
 
 /** Items per page, small enough that the app's 50-item requests still paginate. */
 export const PAGE_SIZE = 5;
+
+// A captured mainnet workflow for the local demo. Display-only size/rent values are
+// synthetic; workflow identities, scripts, registers and amounts come from the fixture.
+const appFixture = JSON.parse(
+	readFileSync(
+		new URL('../../../../tests/fixtures/apps/spectrum-v3-swap.json', import.meta.url),
+		'utf8'
+	)
+) as { order: BoxDto; settlement: TxDto };
+function appBox(box: BoxDto): BoxDto {
+	return {
+		...box,
+		size: 0,
+		kind: 'box',
+		rent: {
+			maturity_height: box.creation_height + 1_051_200,
+			due_nano: '0',
+			claimable_at_tip: false,
+			consensus_fee_nano: '0',
+			collectible: false
+		}
+	};
+}
+const appTransaction: TxDto = {
+	...appFixture.settlement,
+	inputs: appFixture.settlement.inputs.map((input) => ({ ...input, box: appBox(input.box!) })),
+	outputs: appFixture.settlement.outputs.map(appBox)
+};
+const appBoxes = new Map(
+	[
+		appBox(appFixture.order),
+		...appTransaction.inputs.map((input) => input.box!),
+		...appTransaction.outputs
+	].map((box) => [box.id, box])
+);
 
 /** Titles for the statuses the fail toggle may produce, mirroring `xp-api`'s `ApiError`. */
 const FAIL_TITLES: Record<number, string> = {
@@ -181,6 +218,167 @@ function txsOfTree(d: Dataset, tree: string): TxDto[] {
 /** `/v1/addresses/{addr}/txs` — mirrors `xp-api`'s switch to cheap summaries (Task 1). */
 function txSummariesOfTree(d: Dataset, tree: string): TxSummaryDto[] {
 	return txsOfTree(d, tree).map(txSummary);
+}
+
+/** Explicit group fixture read: the sample index is partial and has no address decoder. */
+async function addressGroupBalances(d: Dataset, req: IncomingMessage, res: ServerResponse) {
+	const reject = (status: number, code: string, detail: string) =>
+		sendJson(res, status, { status, title: 'Group balances unavailable', code, detail });
+	if (header(req, 'content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json')
+		return reject(
+			400,
+			'invalid_group_request',
+			'Send an application/json object containing only addresses.'
+		);
+	const raw = await new Promise<string | null>((resolve, rejectRead) => {
+		const chunks: Buffer[] = [];
+		let bytes = 0;
+		let finished = false;
+		req.on('data', (chunk: Buffer) => {
+			if (finished) return;
+			bytes += chunk.length;
+			if (bytes > 512_000) {
+				finished = true;
+				resolve(null);
+				return;
+			}
+			chunks.push(chunk);
+		});
+		req.once('end', () => {
+			if (!finished) resolve(Buffer.concat(chunks).toString('utf8'));
+		});
+		req.once('error', rejectRead);
+	});
+	if (raw === null)
+		return reject(413, 'group_request_limit', 'Group request exceeds its byte limit.');
+	let body: unknown;
+	try {
+		body = JSON.parse(raw);
+	} catch {
+		return reject(
+			400,
+			'invalid_group_request',
+			'Send a valid JSON object containing only addresses.'
+		);
+	}
+	if (
+		!body ||
+		typeof body !== 'object' ||
+		Array.isArray(body) ||
+		Object.keys(body).length !== 1 ||
+		!('addresses' in body) ||
+		!Array.isArray(body.addresses) ||
+		!body.addresses.length ||
+		body.addresses.length > 100 ||
+		body.addresses.some((address: unknown) => typeof address !== 'string')
+	)
+		return reject(
+			400,
+			'invalid_group_request',
+			'Select 1–100 address strings; labels and group names are not accepted.'
+		);
+	const addresses = body.addresses as string[];
+	if (
+		addresses.some((address) => Buffer.byteLength(address, 'utf8') > 4096) ||
+		addresses.reduce((bytes, address) => bytes + Buffer.byteLength(address, 'utf8'), 0) > 128_000
+	)
+		return reject(413, 'group_request_limit', 'Group addresses exceed their byte limit.');
+	// Only fixture mappings can establish canonical scripts here. A plausible unknown
+	// address is unsupported, not a made-up hash, a zero balance, or a verified invalidity.
+	if (
+		addresses.some(
+			(address) => !d.treeByAddress.has(address) && /^[1-9A-HJ-NP-Za-km-z]{7,4096}$/.test(address)
+		)
+	)
+		return reject(
+			501,
+			'mock_address_unavailable',
+			'This preview only resolves recorded sample addresses. A requested address is not mapped in the fixture; its validity and balance are unknown.'
+		);
+	const members: GroupMember[] = [];
+	const seen = new Map<string, number>();
+	const tokens = new Map<string, bigint>();
+	let nano = 0n;
+	let missing = false;
+	let tokenEntries = 0;
+	for (const address of addresses) {
+		const tree = d.treeByAddress.get(address);
+		if (tree === undefined) {
+			missing = true;
+			members.push({
+				address,
+				tree_hash: null,
+				status: 'invalid',
+				duplicate_of: null,
+				balance: null
+			});
+			continue;
+		}
+		const first = seen.get(tree);
+		if (first !== undefined) {
+			members.push({
+				address,
+				tree_hash: tree,
+				status: 'duplicate',
+				duplicate_of: first,
+				balance: null
+			});
+			continue;
+		}
+		const info = d.addresses.get(address);
+		if (!info)
+			return reject(
+				500,
+				'mock_fixture_integrity',
+				'A known sample address has no retained balance.'
+			);
+		seen.set(tree, members.length);
+		const balance = {
+			nano: info.balance.nano,
+			tokens: info.balance.tokens
+				.map(({ id, amount }) => ({ id, amount }))
+				.sort((a, b) => a.id.localeCompare(b.id))
+		};
+		tokenEntries += balance.tokens.length;
+		if (tokenEntries > 5000)
+			return reject(
+				422,
+				'group_work_limit',
+				'The selected fixture balances exceed the bounded token budget.'
+			);
+		nano += BigInt(balance.nano);
+		for (const token of balance.tokens)
+			tokens.set(token.id, (tokens.get(token.id) ?? 0n) + BigInt(token.amount));
+		members.push({ address, tree_hash: tree, status: 'resolved', duplicate_of: null, balance });
+	}
+	const block = d.status.indexed === null ? undefined : d.blockByHeight.get(d.status.indexed);
+	const result: GroupBalances = {
+		scope: 'selected_address_scripts',
+		consistency: 'single_reader',
+		indexed_height: d.status.indexed,
+		anchor: block ? { height: block.height, block_id: block.id } : null,
+		full_history: false,
+		partial_from: Math.min(...FIXTURE_HEIGHTS),
+		complete: false,
+		requested_count: addresses.length,
+		resolved_script_count: seen.size,
+		members,
+		observed_totals: missing
+			? null
+			: {
+					nano: nano.toString(),
+					tokens: [...tokens]
+						.sort(([a], [b]) => a.localeCompare(b))
+						.map(([id, amount]) => ({ id, amount: amount.toString() }))
+				}
+	};
+	if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 2 * 1024 * 1024)
+		return reject(
+			422,
+			'group_response_limit',
+			'The selected fixture balances exceed the bounded response budget.'
+		);
+	sendJson(res, 200, result);
 }
 
 function txSummary(t: TxDto): TxSummaryDto {
@@ -399,18 +597,53 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		return;
 	}
 
-	if (req.method !== 'GET') {
+	if (req.method !== 'GET' && !(req.method === 'POST' && path === '/v1/addresses/balances')) {
 		problem(res, 405, 'Method Not Allowed', `${req.method} is not supported`);
 		return;
 	}
-
 	const fail = failStatus(req, url);
 	if (fail !== null && path.startsWith('/v1/')) {
 		problem(res, fail, FAIL_TITLES[fail], 'the mock was asked to fail this request');
 		return;
 	}
-
+	if (req.method === 'POST' && path === '/v1/addresses/balances') {
+		void addressGroupBalances(d, req, res).catch((error: unknown) => {
+			if (!res.headersSent && !res.destroyed)
+				problem(
+					res,
+					500,
+					'Fixture read failed',
+					error instanceof Error ? error.message : 'Unable to read the request.'
+				);
+		});
+		return;
+	}
 	// --- status --------------------------------------------------------------------
+	if (path === '/v1/txs/' + appTransaction.id + '/status') {
+		return sendJson(res, 200, {
+			id: appTransaction.id,
+			state: 'confirmed',
+			checked_at_ms: Date.now(),
+			indexed_height: appTransaction.height,
+			inclusion: {
+				block_id: appTransaction.block_id,
+				height: appTransaction.height,
+				confirmations: 1
+			},
+			previous_inclusion: null,
+			mempool: {
+				observation: 'not_checked',
+				checked_at_ms: null,
+				first_seen_at_ms: null,
+				last_seen_at_ms: null,
+				error: null
+			},
+			pending: null,
+			conflicts: [],
+			history_scope: 'process_local_requested_transactions',
+			retention_seconds: 3600
+		});
+	}
 	if (path === '/v1/status') {
 		const lag = lagBlocks(req, url);
 		const indexed = d.status.indexed ?? d.status.best;
@@ -536,7 +769,8 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 
 	const oneTx = /^\/v1\/txs\/([^/]+)$/.exec(path);
 	if (oneTx) {
-		const tx = d.txById.get(decodeURIComponent(oneTx[1]).toLowerCase());
+		const id = decodeURIComponent(oneTx[1]).toLowerCase();
+		const tx = id === appTransaction.id ? appTransaction : d.txById.get(id);
 		return tx ? sendJson(res, 200, tx) : notFound(res);
 	}
 
@@ -549,12 +783,13 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 
 	const oneBox = /^\/v1\/boxes\/([^/]+)$/.exec(path);
 	if (oneBox) {
-		const b = d.boxById.get(decodeURIComponent(oneBox[1]).toLowerCase());
+		const id = decodeURIComponent(oneBox[1]).toLowerCase();
+		const b = appBoxes.get(id) ?? d.boxById.get(id);
 		return b ? sendJson(res, 200, b) : notFound(res);
 	}
 
 	// --- addresses -----------------------------------------------------------------
-	if (/^\/v1\/addresses\/[^/]+\/(balance|boxes)\/at$/.test(path)) {
+	if (/^\/v1\/addresses\/[^/]+\/(?:(balance|boxes)\/at|balance\/compare)$/.test(path)) {
 		return sendJson(res, 503, {
 			type: 'about:blank',
 			title: 'Historical state unavailable',

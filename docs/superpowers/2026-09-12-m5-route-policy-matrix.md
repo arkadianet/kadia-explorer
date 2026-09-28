@@ -26,6 +26,13 @@ Immutable membership means canonical membership below the original height/transa
 
 Nonpaged exclusions: `/v1/rent/upcoming` is a capped window prefix (`complete`, always-null `next_cursor`), not a pageable list; `/v1/addresses/{addr}/rent` is a capped scan sorted afterward (`truncated`), not an exhaustive earliest-maturity answer. They remain explicitly samples. `/v1/blocks/{height_or_id}/txs` stays an all-or-error array. Detail/search/supply/template examples are not paged walks. `/v1/addresses/{addr}/balance/at` and `/boxes/at` keep their existing historical anchors and cursor contract unchanged; existing history tests remain regression targets.
 
+Two additional nonpaged balance routes do not use the matrix's continuation tokens:
+
+- `POST /v1/addresses/balances` is a read-only, bounded query for 1–100 selected address strings. One Reader supplies the current anchor and all balances; canonical script aliases count once. Invalid or unseen members withhold combined totals. Partial stores may return observed balances with `complete: false`; nullable anchors are disclosed independently. Grouping does not establish ownership. Request limits return 400/413, and read-budget limits return 422 without partial monetary totals. See `docs/operations/address-activity.md`.
+- `GET /v1/addresses/{addr}/balance/compare` reads both requested historical heights and anchors in one Reader and one shared bounded scan. It returns two complete balances or an error, with no paged or subtotal fallback. Optional block IDs pin each endpoint; stale pins return 409, unavailable full history returns 503, and scan/response limits return 422. Later appends preserve historical endpoint identity while a fresh read reports its current indexed height. See `docs/product/address-history-inspector.md`.
+
+Both routes have fixed matched-path entries in `metrics.rs`; address strings and selected heights never become metric labels.
+
 The subtle classifications are newest token listings (immutable ordering with mutable projection), all-box/register lists (immutable membership with mutable spent/rent enrichment), and address transactions (summaries despite the `/txs` name, so no mutable expansion). No monetary field is used to classify a summary as mutable merely because it is an amount: the stored transaction fee is immutable.
 
 ## Steps 3–4 implementation evidence

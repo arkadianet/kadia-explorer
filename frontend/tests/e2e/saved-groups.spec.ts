@@ -24,6 +24,180 @@ async function backup(page: Page, raw: string) {
 }
 const stored = (page: Page) => page.evaluate(() => localStorage.getItem('xp-saved-addresses'));
 
+function groupSnapshot(addresses: string[]) {
+	const nano = '9007199254740993123';
+	const token = { id: 'b'.repeat(64), amount: '18446744073709551615' };
+	return {
+		scope: 'selected_address_scripts',
+		consistency: 'single_reader',
+		indexed_height: 1000,
+		anchor: { height: 1000, block_id: 'c'.repeat(64) },
+		full_history: true,
+		partial_from: null as number | null,
+		complete: true,
+		requested_count: addresses.length,
+		resolved_script_count: addresses.length,
+		members: addresses.map((address, index) => ({
+			address,
+			tree_hash: String(index + 1).padStart(64, '0') as string | null,
+			status: 'resolved',
+			duplicate_of: null as number | null,
+			balance: { nano, tokens: [token] } as { nano: string; tokens: (typeof token)[] } | null
+		})),
+		observed_totals: {
+			nano: (BigInt(nano) * BigInt(addresses.length)).toString(),
+			tokens: [{ ...token, amount: (BigInt(token.amount) * BigInt(addresses.length)).toString() }]
+		} as { nano: string; tokens: (typeof token)[] } | null
+	};
+}
+
+test('group balances are explicit, send only visible addresses, and clear when filters change membership', async ({
+	page
+}) => {
+	await seed(
+		page,
+		encode([
+			{ ...entry, group: 'Research' },
+			{ ...other, group: 'Other' }
+		])
+	);
+	const bodies: unknown[] = [];
+	await page.route('**/v1/addresses/balances', async (route) => {
+		const body = route.request().postDataJSON();
+		bodies.push(body);
+		expect(route.request().method()).toBe('POST');
+		await route.fulfill({ json: groupSnapshot(body.addresses) });
+	});
+	await page.goto('/saved');
+	await page.getByLabel('Filter by group', { exact: true }).selectOption('name:Research');
+	await page.getByLabel('Filter saved addresses', { exact: true }).fill('Alpha');
+	await expect(page.locator('.saved-entry')).toHaveCount(1);
+	expect(bodies).toEqual([]);
+	const dashboard = page.getByRole('region', { name: 'Group balances', exact: true });
+	await expect(dashboard).toContainText('Loading sends these visible addresses together');
+	await dashboard.getByRole('button', { name: 'Load group balances', exact: true }).click();
+	await expect(dashboard.getByText('Complete indexed balance', { exact: true })).toBeVisible();
+	await expect(dashboard.getByRole('link', { name: 'Block 1,000', exact: true })).toHaveAttribute(
+		'href',
+		`/blocks/${'c'.repeat(64)}`
+	);
+	expect(bodies).toEqual([{ addresses: [entry.address] }]);
+	await expect(dashboard.locator('.erg-total')).toContainText('9,007,199,254.740993123');
+	await expect(dashboard.locator('.token-balances')).toContainText('18,446,744,073,709,551,615');
+	await page.getByLabel('Filter saved addresses', { exact: true }).fill('No matching label');
+	await expect(dashboard.locator('.snapshot')).toHaveCount(0);
+	await expect(
+		dashboard.getByRole('button', { name: 'Load group balances', exact: true })
+	).toBeDisabled();
+	expect(bodies).toHaveLength(1);
+});
+
+test('canonical aliases count once and a failed refresh retains a clearly stale snapshot', async ({
+	page
+}) => {
+	await seed(page, encode([entry, other]));
+	let request = 0;
+	await page.route('**/v1/addresses/balances', async (route) => {
+		if (++request === 2) {
+			await route.fulfill({ status: 503, json: { title: 'Busy', detail: 'Try again' } });
+			return;
+		}
+		const data = groupSnapshot([entry.address, other.address]);
+		data.members[1] = {
+			...data.members[1],
+			tree_hash: data.members[0].tree_hash,
+			status: 'duplicate',
+			duplicate_of: 0,
+			balance: null
+		};
+		data.resolved_script_count = 1;
+		data.observed_totals = data.members[0].balance;
+		await route.fulfill({ json: data });
+	});
+	await page.goto('/saved');
+	const dashboard = page.getByRole('region', { name: 'Group balances', exact: true });
+	await dashboard.getByRole('button', { name: 'Load group balances', exact: true }).click();
+	await expect(dashboard.getByText('Same script as entry 1', { exact: true })).toBeVisible();
+	await expect(dashboard.locator('.erg-total')).toContainText('9,007,199,254.740993123');
+	await dashboard.getByRole('button', { name: 'Refresh group balances', exact: true }).click();
+	await expect(dashboard.getByRole('alert')).toContainText('Stale snapshot — refresh failed');
+	await expect(dashboard.locator('.snapshot')).toContainText('Previous snapshot');
+	await expect(dashboard.locator('.erg-total')).toContainText('9,007,199,254.740993123');
+	await dashboard.getByRole('button', { name: 'Refresh group balances', exact: true }).click();
+	await expect(dashboard.getByRole('alert')).toHaveCount(0);
+	await expect(dashboard.locator('.snapshot')).toContainText('Loaded snapshot');
+});
+
+test('unseen and invalid members withhold totals and partial observed totals remain explicitly incomplete', async ({
+	page
+}) => {
+	const third = { ...entry, address: '7'.repeat(51), label: 'Invalid saved format' };
+	await seed(page, encode([entry, other, third]));
+	let request = 0;
+	await page.route('**/v1/addresses/balances', async (route) => {
+		const data = groupSnapshot([entry.address, other.address, third.address]);
+		data.full_history = false;
+		data.complete = false;
+		data.partial_from = 500;
+		if (++request === 1) {
+			data.members[1] = { ...data.members[1], status: 'unseen', balance: null };
+			data.members[2] = { ...data.members[2], tree_hash: null, status: 'invalid', balance: null };
+			data.resolved_script_count = 1;
+			data.observed_totals = null;
+		}
+		await route.fulfill({ json: data });
+	});
+	await page.goto('/saved');
+	const dashboard = page.getByRole('region', { name: 'Group balances', exact: true });
+	await dashboard.getByRole('button', { name: 'Load group balances', exact: true }).click();
+	await expect(dashboard.getByText('Combined balance unavailable', { exact: true })).toBeVisible();
+	await expect(dashboard.getByText('Unseen in this index', { exact: true })).toBeVisible();
+	await expect(dashboard.getByText('Invalid address', { exact: true })).toBeVisible();
+	await expect(dashboard.locator('.erg-total')).toHaveCount(0);
+	await expect(dashboard.locator('.coverage')).toContainText('unresolved pre-index spends');
+	await dashboard.getByRole('button', { name: 'Refresh group balances', exact: true }).click();
+	await expect(dashboard.getByText('Observed balance only', { exact: true })).toBeVisible();
+	await expect(dashboard.getByText('Complete indexed balance', { exact: true })).toHaveCount(0);
+});
+
+test('an in-flight group response cannot restore totals after membership changes', async ({
+	page
+}) => {
+	await seed(page, encode([entry, other]));
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => (release = resolve));
+	let requested!: () => void;
+	const started = new Promise<void>((resolve) => (requested = resolve));
+	await page.route('**/v1/addresses/balances', async (route) => {
+		requested();
+		await held;
+		await route.fulfill({ json: groupSnapshot([entry.address, other.address]) }).catch(() => {});
+	});
+	await page.goto('/saved');
+	const dashboard = page.getByRole('region', { name: 'Group balances', exact: true });
+	await dashboard.getByRole('button', { name: 'Load group balances', exact: true }).click();
+	await started;
+	await page.getByLabel('Filter saved addresses', { exact: true }).fill('Alpha');
+	await expect(
+		dashboard.getByRole('button', { name: 'Load group balances', exact: true })
+	).toBeEnabled();
+	release();
+	await expect(dashboard.locator('.snapshot')).toHaveCount(0);
+	await expect(page.locator('.saved-entry')).toHaveCount(1);
+});
+
+test('an older server shows an unavailable state without treating it as an empty balance', async ({
+	page
+}) => {
+	await seed(page);
+	await page.route('**/v1/addresses/balances', (route) => route.fulfill({ status: 404, json: {} }));
+	await page.goto('/saved');
+	const dashboard = page.getByRole('region', { name: 'Group balances', exact: true });
+	await dashboard.getByRole('button', { name: 'Load group balances', exact: true }).click();
+	await expect(dashboard.getByRole('alert')).toContainText('not available on this server yet');
+	await expect(dashboard.locator('.erg-total')).toHaveCount(0);
+});
+
 test('groups migrate v1 on edit, filter locally, and survive reload', async ({ page }) => {
 	await seed(page, encode([entry, other], 1));
 	const chainRequests: string[] = [];
@@ -201,6 +375,9 @@ for (const appearance of ['original', 'aurora', 'atelier', 'prism'])
 					}
 				])
 			);
+			await page.route('**/v1/addresses/balances', (route) =>
+				route.fulfill({ json: groupSnapshot([entry.address]) })
+			);
 			await page.goto('/saved');
 			const opener = page.getByRole('button', { name: 'Edit saved address', exact: true });
 			await opener.click();
@@ -230,4 +407,10 @@ for (const appearance of ['original', 'aurora', 'atelier', 'prism'])
 			await expect(region).toBeFocused();
 			await page.getByRole('button', { name: 'Cancel preview', exact: true }).click();
 			await expect(page.getByLabel('Choose JSON backup', { exact: true })).toBeFocused();
+			await page.getByRole('button', { name: 'Load group balances', exact: true }).click();
+			await expect(page.getByText('Complete indexed balance', { exact: true })).toBeVisible();
+			await page.getByText('Inspect 1 token balances', { exact: true }).click();
+			expect(
+				await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+			).toBe(true);
 		});
