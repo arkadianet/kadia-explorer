@@ -62,6 +62,7 @@ jobs:
           mkdir -p ../artifacts/setup
           set -o pipefail
           npm ci 2>&1 | tee ../artifacts/setup/npm-ci.log
+          npm ci --ignore-scripts --prefix ../tools/mcp 2>&1 | tee ../artifacts/setup/mcp-npm-ci.log
           npx playwright install --with-deps chromium 2>&1 | tee ../artifacts/setup/chromium.log
       - name: Run G frontend gates
         run: scripts/check.sh frontend

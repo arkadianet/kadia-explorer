@@ -38,6 +38,12 @@
 		padding: 20px 10px;
 	}
 
+	/* The scrollable icon rail opens its labels inside the rail, so keyboard focus and
+	   tool names remain visible without clipped popovers outside a scroll container. */
+	:root[data-appearance='aurora'] .rail:is(:hover, :focus-within) {
+		width: 224px;
+	}
+
 	:root[data-appearance='aurora'] .rail .brand {
 		padding: 0;
 	}
@@ -68,6 +74,7 @@
 
 	:root[data-appearance='aurora'] .nav ul {
 		gap: 9px;
+		scrollbar-color: var(--fg-muted) transparent;
 	}
 
 	:root[data-appearance='aurora'] .nav a {
@@ -91,22 +98,21 @@
 		box-shadow: inset 0 0 0 1px var(--hairline);
 	}
 
-	:root[data-appearance='aurora'] .nav a:is(:hover, :focus-visible) .nav-label {
-		z-index: 2;
-		left: calc(100% + 17px);
-		top: 50%;
-		transform: translateY(-50%);
-		width: max-content;
+	:root[data-appearance='aurora'] .rail:is(:hover, :focus-within) .nav a {
+		justify-content: flex-start;
+		gap: 12px;
+		padding-inline: 12px;
+	}
+
+	:root[data-appearance='aurora'] .rail:is(:hover, :focus-within) .nav-label {
+		position: static;
+		width: auto;
 		height: auto;
 		margin: 0;
-		padding: 10px 14px;
+		padding: 0;
 		clip-path: none;
 		overflow: visible;
-		background: var(--surface-solid);
-		color: var(--fg);
-		border: var(--rule);
-		border-radius: 9px;
-		box-shadow: var(--shadow-lift);
+		white-space: nowrap;
 		font-size: 12px;
 	}
 

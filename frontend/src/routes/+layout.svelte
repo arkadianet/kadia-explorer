@@ -44,6 +44,7 @@
 	interface NavLink {
 		href: string;
 		label: string;
+		compactLabel?: string;
 		icon: IconName;
 		/** Whether the item earns a slot in the phone's bottom bar (five fit; six do not). */
 		primary?: boolean;
@@ -53,13 +54,24 @@
 		{ href: '/', label: 'Home', icon: 'home', primary: true },
 		{ href: '/blocks', label: 'Blocks', icon: 'blocks', primary: true },
 		{ href: '/txs', label: 'Transactions', icon: 'txs', primary: true },
+		{ href: '/mempool', label: 'Mempool', icon: 'clock' },
 		{ href: '/richlist', label: 'Rich list', icon: 'richlist' },
 		{ href: '/tokens', label: 'Tokens', icon: 'token' },
-		{ href: '/rent', label: 'Storage rent', icon: 'rent-coin', primary: true },
-		{ href: '/saved', label: 'Saved addresses', icon: 'addresses' },
-		{ href: '/developers', label: 'API playground', icon: 'contract' },
+		{
+			href: '/rent',
+			label: 'Storage rent',
+			compactLabel: 'Rent',
+			icon: 'rent-coin',
+			primary: true
+		},
+		{ href: '/saved', label: 'Saved addresses', compactLabel: 'Saved', icon: 'addresses' },
+		{ href: '/applications', label: 'Applications', icon: 'layers' },
+		{ href: '/investigate', label: 'Investigate', icon: 'trace' },
+		{ href: '/network', label: 'Network history', compactLabel: 'Network', icon: 'status' },
+		{ href: '/developers', label: 'API playground', compactLabel: 'API', icon: 'contract' },
 		{ href: '/status', label: 'Status', icon: 'status' }
 	];
+	const compactNav = $derived(appearance.current === 'prism' || appearance.current === 'atelier');
 
 	function isActive(href: string): boolean {
 		const path = page.url.pathname;
@@ -80,6 +92,8 @@
 
 	let moreOpen = $state(false);
 	let moreButton: HTMLButtonElement;
+	let navList: HTMLUListElement;
+	let navOverflows = $state(false);
 
 	$effect(() => {
 		void page.url.pathname;
@@ -103,8 +117,13 @@
 			if (event.key === SAVED_ADDRESSES_KEY || event.key === null) savedAddresses.load();
 		};
 		window.addEventListener('storage', syncSaved);
+		const navSize = new ResizeObserver(() => {
+			navOverflows = navList.scrollHeight > navList.clientHeight + 2;
+		});
+		navSize.observe(navList);
 		status.start();
 		return () => {
+			navSize.disconnect();
 			status.stop();
 			window.removeEventListener('storage', syncSaved);
 		};
@@ -125,20 +144,24 @@
 			</a>
 
 			<nav class="nav" aria-label="Primary">
-				<ul>
+				<ul bind:this={navList}>
 					{#each navLinks as link (link.href)}
 						<li>
 							<a
 								href={link.href}
+								aria-label={link.label}
 								class:current={isCurrent(link.href)}
 								aria-current={isActive(link.href) ? 'page' : undefined}
 							>
 								<Icon name={link.icon} size={19} />
-								<span class="nav-label">{link.label}</span>
+								<span class="nav-label"
+									>{compactNav ? (link.compactLabel ?? link.label) : link.label}</span
+								>
 							</a>
 						</li>
 					{/each}
 				</ul>
+				<span class="nav-scroll-hint" hidden={!navOverflows} aria-hidden="true">Scroll ↕</span>
 			</nav>
 
 			<div class="rail-foot">
@@ -343,6 +366,14 @@
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+	}
+
+	.nav-scroll-hint {
+		flex: none;
+		text-align: center;
+		font-size: 11px;
+		line-height: 1.4;
+		color: inherit;
 	}
 
 	.nav a {
@@ -655,6 +686,12 @@
 		bottom: calc(100% + 8px);
 		right: 8px;
 		width: min(240px, calc(100vw - 16px));
+		max-height: calc(100dvh - 96px - env(safe-area-inset-bottom));
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		scrollbar-color: var(--ink-fg-muted) var(--ink-panel);
+		scrollbar-gutter: stable;
+		scroll-padding-block: 8px;
 		padding: 8px;
 		border: 1px solid var(--ink-fg-muted);
 		border-radius: var(--radius-control);
@@ -694,6 +731,49 @@
 			position: sticky;
 			top: 0;
 			height: 100vh;
+			height: 100dvh;
+			min-height: 0;
+		}
+
+		.rail-in > .brand,
+		.rail-foot {
+			flex: none;
+		}
+
+		.nav {
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+			flex: 1;
+			min-width: 0;
+			min-height: 0;
+		}
+
+		.nav ul {
+			min-height: 0;
+			overflow-y: auto;
+			overscroll-behavior: contain;
+			scrollbar-width: thin;
+			scrollbar-color: var(--ink-fg-muted) transparent;
+			scrollbar-gutter: stable;
+			scroll-padding-block: 4px;
+			padding: 4px;
+			margin: -4px;
+		}
+
+		.nav li {
+			flex: none;
+		}
+	}
+
+	@media (min-width: 900px) and (max-height: 650px) {
+		.rail-in {
+			gap: 12px;
+			padding-block: 12px;
+		}
+
+		.rail-foot .note {
+			display: none;
 		}
 	}
 

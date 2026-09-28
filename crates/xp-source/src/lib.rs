@@ -53,6 +53,18 @@ pub trait BlockSource: Send + Sync {
             "unconfirmed transaction lookup is unsupported".into(),
         ))
     }
+    /// One bounded page from this node's mempool, in the node's own order. This is
+    /// not a network-wide snapshot and must not fall back to another node.
+    /// Implementations must enforce the decompressed byte bound before returning.
+    async fn unconfirmed_transactions_json(
+        &self,
+        _limit: u16,
+        _max_bytes: usize,
+    ) -> Result<String, SourceError> {
+        Err(SourceError::Capability(
+            "mempool listing is unsupported".into(),
+        ))
+    }
     /// The raw JSON array of the chain-spec genesis boxes (`/utxo/genesis`). These boxes are
     /// created by the chain spec rather than by any block, so they are the one piece of
     /// indexable state that cannot be reached through the block endpoints.

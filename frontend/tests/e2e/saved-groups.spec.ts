@@ -230,6 +230,114 @@ test('groups migrate v1 on edit, filter locally, and survive reload', async ({ p
 	expect(chainRequests).toEqual([]);
 });
 
+test('page-open group watch is opt-in, pauses hidden checks, records exact changes and stops on membership changes', async ({
+	page
+}) => {
+	await page.clock.install();
+	await seed(page);
+	let reads = 0;
+	await page.route('**/v1/addresses/balances', async (route) => {
+		const data = groupSnapshot([entry.address]);
+		const offset = reads++;
+		data.indexed_height += offset;
+		data.anchor = {
+			height: data.indexed_height,
+			block_id: data.indexed_height.toString(16).padStart(64, '0')
+		};
+		data.members[0].balance!.nano = (
+			BigInt(data.members[0].balance!.nano) + BigInt(offset)
+		).toString();
+		data.observed_totals!.nano = data.members[0].balance!.nano;
+		await route.fulfill({ json: data });
+	});
+	await page.goto('/saved');
+	await page.clock.fastForward(120_000);
+	expect(reads).toBe(0);
+	await page.getByRole('button', { name: 'Start watching group', exact: true }).click();
+	await expect(page.locator('.watch-history')).toContainText(
+		'Complete anchored baseline established'
+	);
+	expect(reads).toBe(1);
+	await page.clock.fastForward(60_000);
+	await expect(page.locator('.watch-delta').first()).toContainText('+0.000000001 ERG');
+	await expect(page.locator('.watch-delta').first()).toContainText('+1 nanoERG');
+	expect(reads).toBe(2);
+	await page.evaluate(() => {
+		Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	await page.clock.fastForward(180_000);
+	expect(reads).toBe(2);
+	await expect(page.locator('.watch-status')).toContainText('Paused while this page is hidden');
+	await page.evaluate(() => {
+		Object.defineProperty(document, 'visibilityState', {
+			configurable: true,
+			get: () => 'visible'
+		});
+		document.dispatchEvent(new Event('visibilitychange'));
+	});
+	await expect(page.locator('.watch-delta')).toHaveCount(2);
+	expect(reads).toBe(3);
+	await page.getByLabel('Filter saved addresses', { exact: true }).fill('No matches');
+	await expect(
+		page.getByRole('button', { name: 'Start watching group', exact: true })
+	).toBeDisabled();
+	await expect(page.locator('.watch-history')).toHaveCount(0);
+	await page.clock.fastForward(120_000);
+	expect(reads).toBe(3);
+	await page.getByLabel('Filter saved addresses', { exact: true }).fill('');
+	await expect(
+		page.getByRole('button', { name: 'Start watching group', exact: true })
+	).toBeEnabled();
+	expect(reads).toBe(3);
+});
+
+test('incomplete and failed watch checks establish no false change and require a new complete baseline', async ({
+	page
+}) => {
+	await page.clock.install();
+	await seed(page);
+	let reads = 0;
+	await page.route('**/v1/addresses/balances', async (route) => {
+		reads++;
+		if (reads === 3) {
+			await route.fulfill({ status: 503, json: { detail: 'Busy' } });
+			return;
+		}
+		const data = groupSnapshot([entry.address]);
+		data.indexed_height += reads;
+		data.anchor = {
+			height: data.indexed_height,
+			block_id: data.indexed_height.toString(16).padStart(64, '0')
+		};
+		if (reads === 1) {
+			data.complete = false;
+			data.full_history = false;
+			data.partial_from = 500;
+		}
+		await route.fulfill({ json: data });
+	});
+	await page.goto('/saved');
+	await page.getByRole('button', { name: 'Start watching group', exact: true }).click();
+	await expect(page.locator('.watch-history')).toContainText('Comparison unavailable');
+	await page.clock.fastForward(60_000);
+	await expect(page.locator('.watch-history')).toContainText(
+		'Complete anchored baseline established'
+	);
+	await page.clock.fastForward(60_000);
+	await expect(page.locator('.watch-history')).toContainText(
+		'Check failed; comparison baseline cleared'
+	);
+	await expect(page.getByRole('alert')).toContainText('Stale snapshot');
+	await page.clock.fastForward(60_000);
+	await expect(page.locator('.watch-history > ol > li')).toHaveCount(4);
+	await expect(page.locator('.watch-delta')).toHaveCount(0);
+	await page.getByRole('button', { name: 'Stop watching', exact: true }).click();
+	await page.clock.fastForward(120_000);
+	expect(reads).toBe(4);
+	await expect(page.locator('.watch-status')).toContainText('Watching stopped');
+});
+
 test('backup preview preserves existing labels by default and exports the merged local data', async ({
 	page
 }) => {
@@ -410,6 +518,17 @@ for (const appearance of ['original', 'aurora', 'atelier', 'prism'])
 			await page.getByRole('button', { name: 'Load group balances', exact: true }).click();
 			await expect(page.getByText('Complete indexed balance', { exact: true })).toBeVisible();
 			await page.getByText('Inspect 1 token balances', { exact: true }).click();
+			await page.getByRole('button', { name: 'Start watching group', exact: true }).click();
+			await expect(page.locator('.watch-history')).toContainText(
+				'Complete anchored baseline established'
+			);
+			await page
+				.getByRole('list', { name: 'Recent group watch observations', exact: true })
+				.focus();
+			await expect(
+				page.getByRole('list', { name: 'Recent group watch observations', exact: true })
+			).toBeFocused();
+			await page.getByRole('button', { name: 'Stop watching', exact: true }).click();
 			expect(
 				await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
 			).toBe(true);

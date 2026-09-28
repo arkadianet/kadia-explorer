@@ -121,3 +121,26 @@ Late responses after a scope change or navigation cannot restore old totals. A f
 explicit refresh retains the previous snapshot with a visible stale/error notice;
 only a successful refresh replaces it. Older servers, busy servers and bounded-read
 failures show unavailable/error states rather than empty or truncated balances.
+
+## Page-open group balance watch
+
+**Start watching group** opts in for the current visible address selection only.
+It repeats the same batch POST, never per-address fan-out. Requests start at least
+60 seconds apart, never overlap, and pause while the document is hidden. Returning
+to the page checks immediately only when the next check is already due. Changing
+membership or leaving stops watching; no preference is stored and there is no
+background push, service worker, notification permission or wallet connection.
+Manual balance refresh is disabled while watching to preserve request bounds.
+
+The in-page timeline keeps at most 20 baseline/change/reset/error observations.
+Exact signed nanoERG and raw token differences use `BigInt` and compare only
+complete, anchored responses for the same canonical script set. Missing members,
+partial history, absent anchors and read failures clear the comparison baseline;
+the next complete read starts a new baseline without claiming a change across the
+gap. A decreasing tip, a replaced block at the same height, a changed script set,
+or contradictory values at an unchanged anchor reset the baseline without a
+monetary change claim. A higher tip cannot establish common-branch continuity, so
+the UI explicitly describes these as differences between observed snapshots,
+not transfers or ownership changes. Existing group results remain visibly stale
+if a refresh fails. Stop preserves the local timeline for review; membership
+changes clear it. Token-change previews are bounded and disclose omitted rows.

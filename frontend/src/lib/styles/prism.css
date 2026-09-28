@@ -1009,9 +1009,17 @@
 		color: var(--fg-muted);
 		font-size: 10px;
 	}
+	:root[data-appearance='prism'] .nav {
+		display: block;
+		flex: 1;
+		min-width: 0;
+	}
 	:root[data-appearance='prism'] .nav ul {
 		flex-direction: row;
-		gap: 18px;
+		flex-wrap: wrap;
+		gap: 4px 18px;
+		overflow: visible;
+		scrollbar-gutter: auto;
 	}
 	:root[data-appearance='prism'] .nav a {
 		padding: 7px 0;
@@ -1021,6 +1029,7 @@
 		color: var(--fg-muted);
 		background: none;
 		border-bottom: 2px solid transparent;
+		white-space: nowrap;
 	}
 	:root[data-appearance='prism'] .nav a svg {
 		display: none;

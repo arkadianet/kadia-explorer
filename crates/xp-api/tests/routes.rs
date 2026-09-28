@@ -49,6 +49,33 @@ fn unlimited() -> ApiConfig {
     }
 }
 
+#[tokio::test]
+async fn browser_clients_can_read_completeness_and_retry_headers() {
+    let (_dir, router) = app();
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/v1/supply")
+                .header("origin", "https://client.example")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["x-explorer-completeness"], "incomplete");
+    assert_eq!(response.headers()["access-control-allow-origin"], "*");
+    let exposed = response.headers()["access-control-expose-headers"]
+        .to_str()
+        .unwrap();
+    assert!(exposed
+        .split(',')
+        .any(|value| value.trim() == "x-explorer-completeness"));
+    assert!(exposed
+        .split(',')
+        .any(|value| value.trim() == "retry-after"));
+}
+
 /// Same again, under an explicit [`ApiConfig`] (rate-limit knobs).
 fn app_with(cfg: ApiConfig, stall: Option<StalledInfo>) -> (tempfile::TempDir, Router) {
     let (dir, router, _state) = app_with_state(cfg, stall);

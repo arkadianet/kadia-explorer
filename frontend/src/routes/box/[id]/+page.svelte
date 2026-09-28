@@ -10,6 +10,8 @@
 	import RegistersTable from '$lib/components/RegistersTable.svelte';
 	import BoxLineage from '$lib/components/BoxLineage.svelte';
 	import ApplicationWorkflow from '$lib/components/ApplicationWorkflow.svelte';
+	import RosenWorkflow from '$lib/components/RosenWorkflow.svelte';
+	import { rosenDeposit } from '$lib/apps/rosen';
 	import { spectrumOrder } from '$lib/tx/spectrum';
 	import { hasDisplayableRegisters } from '$lib/registers/decode';
 	import { status } from '$lib/status/status.svelte';
@@ -26,6 +28,7 @@
 
 	const box = $derived(data.box);
 	const applicationOrder = $derived(spectrumOrder(box));
+	const bridgeDeposit = $derived(rosenDeposit(box));
 	const tip = $derived(status.current?.indexed ?? null);
 
 	const hasRegisters = $derived(hasDisplayableRegisters(box.registers));
@@ -103,7 +106,12 @@
 	{/if}
 </div>
 
+<p class="investigation-link">
+	<a href={`/investigate?kind=box&id=${box.id}`}>Investigate this box ↗</a>
+</p>
+
 {#if applicationOrder}{#key box.id}<ApplicationWorkflow order={applicationOrder} />{/key}{/if}
+{#if bridgeDeposit}{#key box.id}<RosenWorkflow deposit={bridgeDeposit} />{/key}{/if}
 {#key box.id}<BoxLineage {box} />{/key}
 
 {#if box.tokens.length > 0}
@@ -170,6 +178,15 @@
 </Panel>
 
 <style>
+	.investigation-link {
+		font-size: var(--fs-data);
+		grid-column: 1 / -1;
+	}
+	.investigation-link a {
+		color: var(--accent-ink);
+		text-decoration: underline;
+		text-underline-offset: 0.25em;
+	}
 	.head {
 		display: flex;
 		flex-direction: column;

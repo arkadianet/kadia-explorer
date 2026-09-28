@@ -3,8 +3,8 @@
 	import { api } from '$lib/api/endpoints';
 	import {
 		createSpectrumWorkflow,
-		SPECTRUM_SOURCE,
 		type SpectrumOrder,
+		type WorkflowAsset,
 		type WorkflowState
 	} from '$lib/tx/spectrum';
 	import { formatErg } from '$lib/format/amount';
@@ -26,6 +26,9 @@
 			order.box.id,
 			order.box.ergo_tree,
 			order.box.value,
+			order.box.tokens,
+			order.box.registers,
+			order.box.creation_height,
 			order.box.spent_by,
 			order.box.spent_height
 		])
@@ -47,11 +50,47 @@
 	});
 	const short = (id: string) => truncateMiddle(id, 10, 7);
 	const matched = $derived(state.outcome?.kind === 'matched' ? state.outcome : null);
+	const isSwap = $derived(order.kind === 'swap_sell' || order.kind === 'swap_buy');
+	const requested = $derived.by((): WorkflowAsset[] => {
+		switch (order.kind) {
+			case 'swap_sell':
+				return [{ id: 'erg', amount: order.baseNano.toString() }];
+			case 'swap_buy':
+				return [{ id: order.baseId, amount: order.baseAmount.toString() }];
+			case 'deposit':
+				return [
+					{ id: 'erg', amount: order.baseNano.toString() },
+					{ id: order.tokenId, amount: order.tokenAmount.toString() }
+				];
+			case 'redeem':
+				return [{ id: order.lpId, amount: order.lpAmount.toString() }];
+		}
+	});
+	const minimum = $derived(
+		order.kind === 'swap_sell'
+			? { id: order.quoteId, amount: order.minimumQuote.toString() }
+			: order.kind === 'swap_buy'
+				? { id: 'erg', amount: order.minimumNano.toString() }
+				: null
+	);
+	const intro = $derived(
+		order.kind === 'swap_sell'
+			? 'An ERG → token order, from its request to the observed spend.'
+			: order.kind === 'swap_buy'
+				? 'A token → ERG order, from its request to the observed spend.'
+				: order.kind === 'deposit'
+					? 'An ERG + token deposit, from its request to the observed LP output.'
+					: 'An LP redemption, from its request to the observed ERG and token outputs.'
+	);
 	const stage = $derived(
 		state.error
 			? 'Inspection unavailable'
 			: matched
-				? 'Matching swap observed'
+				? isSwap
+					? 'Matching swap observed'
+					: order.kind === 'deposit'
+						? 'Matching deposit observed'
+						: 'Matching redemption observed'
 				: state.tx
 					? 'Spent · outcome unrecognized'
 					: state.checked
@@ -65,15 +104,36 @@
 	}
 </script>
 
-<section class="application-workflow" aria-label="Spectrum swap workflow" aria-busy={state.loading}>
+{#snippet assetDetail(asset: WorkflowAsset)}
+	{#if asset.id === 'erg'}
+		<span title={asset.amount + ' nanoERG'}>{formatErg(asset.amount)} ERG</span>
+	{:else}
+		<span>{BigInt(asset.amount).toLocaleString('en-US')} raw units</span><br /><a
+			href={'/token/' + asset.id}
+			title={asset.id}>{short(asset.id)}</a
+		>
+	{/if}
+{/snippet}
+
+<section
+	class="application-workflow"
+	aria-label={isSwap ? 'Spectrum swap workflow' : 'Spectrum liquidity workflow'}
+	aria-busy={state.loading}
+>
 	<header>
 		<div class="workflow-brand">
 			<Icon name="layers" size={18} /><span>APPLICATION WORKFLOW / SPECTRUM V3</span>
 		</div>
 		<div class="workflow-title">
 			<div>
-				<h2>Follow the swap.</h2>
-				<p>An ERG → token order, from its request to the observed spend.</p>
+				<h2>
+					{isSwap
+						? 'Follow the swap.'
+						: order.kind === 'deposit'
+							? 'Follow the deposit.'
+							: 'Follow the redemption.'}
+				</h2>
+				<p>{intro}</p>
 			</div>
 			<span class:matched={!!matched} class="stage" role="status"
 				>{state.loading ? 'Inspecting indexed evidence…' : stage}</span
@@ -83,22 +143,47 @@
 	<div class="workflow-body">
 		<div class="request-brief">
 			<p class="step-label">01 / THE REQUEST</p>
-			<p class="base-amount" title={order.baseNano.toString() + ' nanoERG'}>
-				{formatErg(order.baseNano)} <span>ERG</span>
-			</p>
+			{#each requested as asset (asset.id)}
+				<p
+					class="base-amount"
+					title={asset.amount + (asset.id === 'erg' ? ' nanoERG' : ' raw units')}
+				>
+					{asset.id === 'erg'
+						? formatErg(asset.amount)
+						: BigInt(asset.amount).toLocaleString('en-US')}
+					<span
+						>{asset.id === 'erg'
+							? 'ERG'
+							: order.kind === 'redeem'
+								? 'raw LP units'
+								: 'raw token units'}</span
+					>
+				</p>
+				{#if asset.id !== 'erg'}<a
+						class="request-asset"
+						href={'/token/' + asset.id}
+						title={asset.id}>{short(asset.id)}</a
+					>{/if}
+			{/each}
 			<p class="muted">
-				Declared swap input. The order box also carries funding for other outputs.
+				Declared {isSwap
+					? 'swap input'
+					: order.kind === 'deposit'
+						? 'deposit amounts'
+						: 'LP input'}. The order box also carries funding for other outputs.
 			</p>
 			<dl>
-				<div>
-					<dt>Minimum quote</dt>
-					<dd>
-						<strong>{order.minimumQuote.toLocaleString('en-US')}</strong> raw units<br /><a
-							href={'/token/' + order.quoteId}
-							title={order.quoteId}>{short(order.quoteId)}</a
-						>
-					</dd>
-				</div>
+				{#if minimum}
+					<div>
+						<dt>Minimum quote</dt>
+						<dd>{@render assetDetail(minimum)}</dd>
+					</div>
+				{:else}
+					<div>
+						<dt>Return bound</dt>
+						<dd>Calculated from the pool reserves when the recorded spend is inspected.</dd>
+					</div>
+				{/if}
 				<div>
 					<dt>Pool identity token</dt>
 					<dd><a href={'/token/' + order.poolId} title={order.poolId}>{short(order.poolId)}</a></dd>
@@ -121,20 +206,42 @@
 					<p>No automatic retries run. Inspect again to recheck.</p>
 				</div>
 			{:else if matched && state.tx}
-				<div class="result-number">
-					<span>Recipient output</span><strong
-						>{BigInt(matched.recipient.tokens[0].amount).toLocaleString('en-US')}</strong
-					><span
-						>raw token units · <a href={'/token/' + order.quoteId}>{short(order.quoteId)}</a></span
-					>
-				</div>
+				{#each matched.received as asset (asset.id)}
+					<div class="result-number">
+						<span>Recipient output{order.kind === 'deposit' ? ' · LP tokens' : ''}</span>
+						<strong title={asset.amount + (asset.id === 'erg' ? ' nanoERG' : ' raw units')}
+							>{asset.id === 'erg'
+								? formatErg(asset.amount)
+								: BigInt(asset.amount).toLocaleString('en-US')}</strong
+						>
+						<span
+							>{#if asset.id === 'erg'}ERG · {asset.amount} nanoERG{:else}raw token units · <a
+									href={'/token/' + asset.id}>{short(asset.id)}</a
+								>{/if}</span
+						>
+					</div>
+				{/each}
 				<p class="result-caption">
-					This output can include returned execution-fee tokens. It is not an address’s net gain.
+					{order.kind === 'swap_sell'
+						? 'This output can include returned execution-fee tokens.'
+						: order.kind === 'deposit'
+							? 'LP tokens represent the observed pool-share output; other returned assets are in the full box record.'
+							: 'The ERG output includes returned order-box funding.'} It is not an address’s net gain.
 				</p>
 				<dl class="execution-facts">
 					<div>
-						<dt>Quote calculated by the contract</dt>
-						<dd>{BigInt(matched.contractQuote).toLocaleString('en-US')} raw units</dd>
+						<dt>
+							{isSwap
+								? 'Quote calculated by the contract'
+								: order.kind === 'deposit'
+									? 'Minimum LP return'
+									: 'Minimum redemption return'}
+						</dt>
+						<dd>
+							{#each matched.calculated as asset (asset.id)}<div>
+									{@render assetDetail(asset)}
+								</div>{/each}
+						</dd>
 					</div>
 					<div>
 						<dt>Spend included at</dt>
@@ -197,16 +304,17 @@
 	<details class="workflow-support">
 		<summary>What this interpretation supports</summary>
 		<p>
-			Decoder v1 recognizes the exact Spectrum v3 ERG → token contract, an SPF fee token and a P2PK
-			recipient. It checks the published pool, declared amounts, fee limits and recipient output.
-			Token names do not establish identity.
+			Decoder v2 recognizes pinned Spectrum v3 ERG → token and token → ERG swaps, liquidity deposits
+			and redemptions with P2PK recipients. It checks the exact published expressions, pool
+			transitions, declared amounts, fee limits and recipient outputs. Support is limited to the
+			documented contract forms and observed layouts. Token names do not establish identity.
 		</p>
 		<p>
 			The order-box and transaction reads are separate observations. Changed references clear the
 			result. This is an interpretation of indexed data, not a replay of consensus or proof of which
 			signature branch was used. Other versions, refunds and bridges remain unrecognized.
 		</p>
-		<a href={SPECTRUM_SOURCE} target="_blank" rel="noopener noreferrer"
+		<a href={order.source} target="_blank" rel="noopener noreferrer"
 			>Read the pinned contract source ↗</a
 		>
 	</details>
@@ -215,7 +323,7 @@
 <style>
 	.application-workflow {
 		margin-block: 28px;
-		border: 1px solid var(--border);
+		border: 1px solid var(--hairline);
 		border-radius: var(--radius-card);
 		overflow: hidden;
 		background: var(--surface-solid);
@@ -224,7 +332,7 @@
 	}
 	header {
 		padding: 24px;
-		border-bottom: 1px solid var(--border);
+		border-bottom: 1px solid var(--hairline);
 	}
 	.workflow-brand {
 		display: flex;
@@ -254,7 +362,7 @@
 		line-height: 1.7;
 	}
 	.stage {
-		border: 1px solid var(--border);
+		border: 1px solid var(--hairline);
 		border-radius: 99px;
 		padding: 8px 12px;
 		font-size: 11px;
@@ -275,7 +383,7 @@
 		min-width: 0;
 	}
 	.request-brief {
-		border-right: 1px solid var(--border);
+		border-right: 1px solid var(--hairline);
 	}
 	.step-label {
 		font: 10px var(--font-mono);
@@ -294,6 +402,17 @@
 		font: 12px var(--font-sans);
 		letter-spacing: 0;
 		color: var(--fg-muted);
+	}
+	.request-asset {
+		display: inline-block;
+		font: 11px var(--font-mono);
+		margin-bottom: 12px;
+	}
+	.result-number + .result-number {
+		margin-top: 18px;
+	}
+	.execution-facts dd > div + div {
+		margin-top: 10px;
 	}
 	.muted {
 		font-size: 11px;
@@ -376,7 +495,7 @@
 		max-width: 52ch;
 	}
 	.execution-facts {
-		border-top: 1px solid var(--border);
+		border-top: 1px solid var(--hairline);
 		padding-top: 16px;
 	}
 	.evidence-links {
@@ -407,7 +526,7 @@
 		cursor: wait;
 	}
 	.workflow-support {
-		border-top: 1px solid var(--border);
+		border-top: 1px solid var(--hairline);
 		padding: 16px 24px;
 		font-size: 11px;
 		line-height: 1.8;
@@ -427,7 +546,7 @@
 	}
 	:global([data-appearance='prism']) .request-brief {
 		margin: 18px;
-		border: 1px solid var(--border);
+		border: 1px solid var(--hairline);
 		border-radius: 16px;
 		background: var(--surface-solid);
 		box-shadow: 0 10px 22px color-mix(in srgb, var(--fg) 7%, transparent);
@@ -483,7 +602,7 @@
 	:global([data-appearance='aurora']) .request-brief,
 	:global([data-appearance='aurora']) .execution {
 		background: var(--surface-solid);
-		border: 1px solid var(--border);
+		border: 1px solid var(--hairline);
 		border-radius: 22px;
 	}
 	:global([data-appearance='aurora']) .workflow-support {
@@ -499,7 +618,7 @@
 		}
 		.request-brief {
 			border-right: 0;
-			border-bottom: 1px solid var(--border);
+			border-bottom: 1px solid var(--hairline);
 		}
 		header,
 		.request-brief,

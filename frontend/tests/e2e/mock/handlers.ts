@@ -25,6 +25,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import type { GroupBalances, GroupMember } from '../../../src/lib/addresses/groups.ts';
+import { range as networkRange } from '../../../src/lib/network/history.ts';
+import type { NetworkBucket } from '../../../src/lib/network/history.ts';
+import type { PendingTransaction } from '../../../src/lib/mempool/observations.ts';
 import type {
 	AddressActivityDto,
 	AddressActivityPageDto,
@@ -39,17 +42,62 @@ import { buildDataset, FIXTURE_HEIGHTS, registerKey, type Dataset } from './fixt
 /** Items per page, small enough that the app's 50-item requests still paginate. */
 export const PAGE_SIZE = 5;
 
+// Synthetic pending observations for the preview, separate from mined fixtures.
+const pendingFixtures: PendingTransaction[] = [
+	{
+		id: 'a1'.repeat(32),
+		input_count: 2,
+		data_input_count: 0,
+		output_count: 3,
+		size: 512,
+		fee: '1100000'
+	},
+	{
+		id: 'b2'.repeat(32),
+		input_count: 1,
+		data_input_count: 1,
+		output_count: 2,
+		size: null,
+		fee: '2200000'
+	},
+	{
+		id: 'c3'.repeat(32),
+		input_count: 4,
+		data_input_count: 0,
+		output_count: 5,
+		size: 1024,
+		fee: null
+	}
+];
+
 // A captured mainnet workflow for the local demo. Display-only size/rent values are
 // synthetic; workflow identities, scripts, registers and amounts come from the fixture.
-const appFixture = JSON.parse(
-	readFileSync(
-		new URL('../../../../tests/fixtures/apps/spectrum-v3-swap.json', import.meta.url),
-		'utf8'
-	)
-) as { order: BoxDto; settlement: TxDto };
+function applicationFixture<T>(name: string): T {
+	return JSON.parse(
+		readFileSync(new URL(`../../../../tests/fixtures/apps/${name}.json`, import.meta.url), 'utf8')
+	);
+}
+const appFixtures = [
+	'spectrum-v3-swap',
+	'spectrum-v3-swap-buy',
+	'spectrum-v3-deposit',
+	'spectrum-v3-redeem'
+].map((name) => applicationFixture<{ order: BoxDto; settlement: TxDto }>(name));
+const rosenFixture = applicationFixture<{
+	deposit: BoxDto;
+	sourceTx: TxDto;
+	event: BoxDto;
+	eventSpend: TxDto;
+}>('rosen-erg-cardano');
 function appBox(box: BoxDto): BoxDto {
+	const knownSpend = [
+		...appFixtures.map((fixture) => fixture.settlement),
+		rosenFixture.sourceTx,
+		rosenFixture.eventSpend
+	].find((tx) => tx.id === box.spent_by);
 	return {
 		...box,
+		spent_height: knownSpend?.height ?? box.spent_height,
 		size: 0,
 		kind: 'box',
 		rent: {
@@ -61,16 +109,29 @@ function appBox(box: BoxDto): BoxDto {
 		}
 	};
 }
-const appTransaction: TxDto = {
-	...appFixture.settlement,
-	inputs: appFixture.settlement.inputs.map((input) => ({ ...input, box: appBox(input.box!) })),
-	outputs: appFixture.settlement.outputs.map(appBox)
-};
+const appTransactions = new Map(
+	[
+		...appFixtures.map((fixture) => fixture.settlement),
+		rosenFixture.sourceTx,
+		rosenFixture.eventSpend
+	].map((tx): [string, TxDto] => [
+		tx.id,
+		{
+			...tx,
+			inputs: tx.inputs.map((input) => ({ ...input, box: input.box ? appBox(input.box) : null })),
+			outputs: tx.outputs.map(appBox)
+		}
+	])
+);
 const appBoxes = new Map(
 	[
-		appBox(appFixture.order),
-		...appTransaction.inputs.map((input) => input.box!),
-		...appTransaction.outputs
+		...appFixtures.map((fixture) => appBox(fixture.order)),
+		appBox(rosenFixture.deposit),
+		appBox(rosenFixture.event),
+		...[...appTransactions.values()].flatMap((tx) => [
+			...tx.inputs.flatMap((input) => (input.box ? [input.box] : [])),
+			...tx.outputs
+		])
 	].map((box) => [box.id, box])
 );
 
@@ -619,7 +680,46 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		return;
 	}
 	// --- status --------------------------------------------------------------------
-	if (path === '/v1/txs/' + appTransaction.id + '/status') {
+	if (path === '/v1/mempool') {
+		const checked = Date.now();
+		return sendJson(res, 200, {
+			scope: 'configured_node_mempool',
+			source: 'configured_primary_node',
+			checked_at_ms: checked,
+			expires_at_ms: checked + 5000,
+			cached: false,
+			limit: 100,
+			limit_reached: false,
+			observed_count: pendingFixtures.length,
+			items: pendingFixtures
+		});
+	}
+	const pendingFixture = pendingFixtures.find((tx) => path === `/v1/txs/${tx.id}/status`);
+	if (pendingFixture) {
+		const checked = Date.now();
+		return sendJson(res, 200, {
+			id: pendingFixture.id,
+			state: 'pending',
+			checked_at_ms: checked,
+			indexed_height: d.status.indexed,
+			inclusion: null,
+			previous_inclusion: null,
+			pending: pendingFixture,
+			conflicts: [],
+			mempool: {
+				observation: 'present',
+				checked_at_ms: checked,
+				first_seen_at_ms: checked,
+				last_seen_at_ms: checked,
+				error: null
+			},
+			history_scope: 'process_local_requested_transactions',
+			retention_seconds: 3600
+		});
+	}
+	const appStatusId = /^\/v1\/txs\/([a-f0-9]{64})\/status$/.exec(path)?.[1];
+	const appTransaction = appStatusId ? appTransactions.get(appStatusId) : undefined;
+	if (appTransaction) {
 		return sendJson(res, 200, {
 			id: appTransaction.id,
 			state: 'confirmed',
@@ -693,6 +793,66 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 			transactions_per_hour: bucket(3600000, 24, (b) => b.tx_count),
 			fees_per_hour: bucket(3600000, 24, (b) => Number(b.fees)).map(String),
 			blocks_per_ten_minutes: bucket(600000, 36, () => 1)
+		});
+	}
+	if (path === '/v1/network/history') {
+		let requested;
+		try {
+			requested = networkRange(
+				url.searchParams.get('from_height') ?? '',
+				url.searchParams.get('to_height') ?? '',
+				url.searchParams.get('buckets') ?? '60',
+				url.searchParams.get('end_block_id') ?? undefined
+			);
+		} catch {
+			return badRequest(res, 'Choose a positive range of at most 20,160 retained fixture blocks.');
+		}
+		const rows = d.blocks
+			.filter((b) => b.height >= requested.from_height && b.height <= requested.to_height)
+			.sort((a, b) => a.height - b.height);
+		if (rows.length !== requested.to_height - requested.from_height + 1)
+			return problem(
+				res,
+				422,
+				'Fixture history unavailable',
+				`This preview retains heights ${Math.min(...d.blocks.map((b) => b.height))}–${Math.max(...d.blocks.map((b) => b.height))}. Choose a range inside those heights.`
+			);
+		const last = rows.at(-1)!;
+		if (requested.end_block_id && requested.end_block_id !== last.id)
+			return problem(res, 409, 'Anchor changed', 'The pinned fixture end block differs.');
+		const aggregate = (blocks: typeof rows): NetworkBucket => {
+			const difficulties = blocks.map((b) => BigInt(b.difficulty));
+			return {
+				from_height: blocks[0].height,
+				to_height: blocks.at(-1)!.height,
+				block_count: blocks.length,
+				transaction_count: blocks.reduce((n, b) => n + BigInt(b.tx_count), 0n).toString(),
+				fees: blocks.reduce((n, b) => n + BigInt(b.fees), 0n).toString(),
+				size_bytes: blocks.reduce((n, b) => n + BigInt(b.size), 0n).toString(),
+				difficulty_min: difficulties.reduce((a, b) => (a < b ? a : b)).toString(),
+				difficulty_max: difficulties.reduce((a, b) => (a > b ? a : b)).toString(),
+				difficulty_end: blocks.at(-1)!.difficulty,
+				first_timestamp: blocks[0].timestamp,
+				last_timestamp: blocks.at(-1)!.timestamp,
+				earliest_timestamp: Math.min(...blocks.map((b) => b.timestamp)),
+				latest_timestamp: Math.max(...blocks.map((b) => b.timestamp))
+			};
+		};
+		const width = Math.ceil(rows.length / requested.buckets);
+		return sendJson(res, 200, {
+			scope: 'canonical_block_headers',
+			consistency: 'single_reader',
+			complete: true,
+			full_history: false,
+			partial_from: Math.min(...d.blocks.map((b) => b.height)),
+			indexed_height: d.status.indexed,
+			anchor: { height: last.height, block_id: last.id },
+			requested_buckets: requested.buckets,
+			bucket_width: width,
+			totals: aggregate(rows),
+			buckets: Array.from({ length: Math.ceil(rows.length / width) }, (_, i) =>
+				aggregate(rows.slice(i * width, (i + 1) * width))
+			)
 		});
 	}
 	const rewards = /^\/v1\/blocks\/([^/]+)\/rewards$/.exec(path);
@@ -770,7 +930,7 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 	const oneTx = /^\/v1\/txs\/([^/]+)$/.exec(path);
 	if (oneTx) {
 		const id = decodeURIComponent(oneTx[1]).toLowerCase();
-		const tx = id === appTransaction.id ? appTransaction : d.txById.get(id);
+		const tx = appTransactions.get(id) ?? d.txById.get(id);
 		return tx ? sendJson(res, 200, tx) : notFound(res);
 	}
 
@@ -957,6 +1117,17 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		if (!/^[0-9a-fA-F]+$/.test(value)) return badRequest(res, 'the register value must be hex');
 		if (value.length % 2 !== 0) {
 			return badRequest(res, 'the register value must be a whole number of bytes');
+		}
+		if (reg === 'R5' && value.toLowerCase() === rosenFixture.event.registers?.R5) {
+			const anchor = { height: 1880000, block_id: 'a'.repeat(64) };
+			return sendJson(res, 200, {
+				items: [appBox(rosenFixture.event)],
+				next_cursor: null,
+				next_snapshot: null,
+				consistency: 'strict',
+				anchor,
+				observed_anchor: anchor
+			});
 		}
 		const ids = d.boxIdsByRegister.get(registerKey(reg, value)) ?? [];
 		sendJson(res, 200, page(boxesOfIds(d, ids, url), cursor, limit));

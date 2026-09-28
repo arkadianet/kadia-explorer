@@ -13,7 +13,7 @@ mod metrics;
 mod observations;
 pub mod paging;
 
-use axum::http::StatusCode;
+use axum::http::{header, HeaderName, StatusCode};
 use axum::routing::{get, post};
 use axum::Router;
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
@@ -62,6 +62,7 @@ pub struct Counters {
     history_permits: Arc<Semaphore>,
     pub(crate) evidence_permits: Arc<Semaphore>,
     pub(crate) observations: observations::Observations,
+    pub(crate) mempool: handlers::mempool::Cache,
 }
 
 impl Default for Counters {
@@ -73,6 +74,7 @@ impl Default for Counters {
             history_permits: Arc::new(Semaphore::new(2)),
             evidence_permits: Arc::new(Semaphore::new(2)),
             observations: observations::Observations::default(),
+            mempool: handlers::mempool::Cache::default(),
         }
     }
 }
@@ -244,6 +246,11 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
             get(handlers::address_activity::list),
         )
         .route("/v1/network/summary", get(handlers::network::summary))
+        .route("/v1/mempool", get(handlers::mempool::snapshot))
+        .route(
+            "/v1/network/history",
+            get(handlers::network_history::history),
+        )
         .route(
             "/v1/blocks/{height_or_id}/rewards",
             get(handlers::rewards::get),
@@ -279,7 +286,10 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         // Outside the timeout, so a rejected request never enters the timeout budget…
         .layer(rate_limit)
         // …and inside CORS, so a browser can read the 429 body.
-        .layer(CorsLayer::permissive())
+        .layer(CorsLayer::permissive().expose_headers([
+            HeaderName::from_static("x-explorer-completeness"),
+            header::RETRY_AFTER,
+        ]))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             metrics::observe,

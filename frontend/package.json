@@ -9,13 +9,15 @@
 		"postbuild": "npm run budget",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check": "npm run contract:check && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
-		"budget": "node scripts/bundle-budget.mjs"
+		"budget": "node scripts/bundle-budget.mjs",
+		"contract:generate": "node scripts/api-contract.mjs",
+		"contract:check": "node scripts/api-contract.mjs --check"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
