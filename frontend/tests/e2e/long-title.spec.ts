@@ -15,16 +15,34 @@ for (const width of [320, 768, 1440]) {
 			);
 			await page.goto(`/token/${mainnet.long.id}`);
 			const title = page.locator('h1');
-			await expect(title).toHaveText(mainnet.long.name);
-			expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
-			const bounds = await title.boundingBox();
-			expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
-			await expect(title.locator('bdi')).toHaveAttribute('dir', 'auto');
-			const colours = await title.evaluate((element) => ({
-				fg: getComputedStyle(element).color,
-				bg: getComputedStyle(element.closest('header')!).backgroundColor
-			}));
-			expect(contrast(colours.fg, colours.bg)).toBeGreaterThanOrEqual(4.5);
+			for (const appearance of ['Prism', 'Original']) {
+				if (appearance === 'Original') {
+					await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+					const picker = page.getByRole('dialog', { name: 'Choose appearance', exact: true });
+					await picker.getByRole('radio', { name: appearance, exact: true }).check();
+					await picker.getByRole('button', { name: 'Close', exact: true }).click();
+				}
+				await expect(title).toHaveText(mainnet.long.name);
+				expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+				const bounds = await title.boundingBox();
+				expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+				await expect(title.locator('bdi')).toHaveAttribute('dir', 'auto');
+				const colours = await title.evaluate((element) => {
+					// Original paints the header; Prism lets the page ground show through.
+					// Its subtle body gradient is checked against the opaque base colour here.
+					let ancestor: Element | null = element.closest('header');
+					while (ancestor) {
+						const bg = getComputedStyle(ancestor).backgroundColor;
+						const channels = bg.match(/[\d.]+/g)?.map(Number);
+						if (channels && (channels.length === 3 || channels[3] === 1)) {
+							return { fg: getComputedStyle(element).color, bg };
+						}
+						ancestor = ancestor.parentElement;
+					}
+					throw new Error('Title has no opaque ancestor background');
+				});
+				expect(contrast(colours.fg, colours.bg)).toBeGreaterThanOrEqual(4.5);
+			}
 		});
 	}
 }

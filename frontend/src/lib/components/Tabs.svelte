@@ -65,7 +65,8 @@
 <style>
 	.tabs {
 		display: flex;
-		gap: var(--space-4);
+		flex-wrap: wrap;
+		gap: 0 var(--space-4);
 		border-bottom: var(--rule);
 	}
 	.tab {

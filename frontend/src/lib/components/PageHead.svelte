@@ -53,7 +53,8 @@
 		max-width: 100%;
 		overflow-wrap: anywhere;
 		font-size: var(--fs-page);
-		font-weight: 800;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 800);
 		letter-spacing: -0.045em;
 	}
 

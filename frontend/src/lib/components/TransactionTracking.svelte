@@ -143,9 +143,9 @@
 		overflow: hidden;
 		border-radius: 20px;
 		padding: 28px;
-		background: #103a28;
-		border-top: 3px solid #b7f25f;
-		color: #f4fff6;
+		background: var(--hero-bg, #103a28);
+		border-top: 3px solid var(--hero-highlight, #b7f25f);
+		color: var(--hero-fg, #f4fff6);
 	}
 	.tracking.confirmed {
 		display: grid;
@@ -158,7 +158,7 @@
 		border-radius: var(--radius-card);
 	}
 	.tracking:not(.confirmed) {
-		--accent-ink: #b7f25f;
+		--accent-ink: var(--tracking-link, #b7f25f);
 	}
 	.confirmed .tracking-top {
 		display: contents;
@@ -210,7 +210,7 @@
 		width: 7px;
 		flex: none;
 		border-radius: 50%;
-		background: #c4f6a1;
+		background: var(--hero-highlight, #c4f6a1);
 	}
 	.confirmed .dot {
 		background: var(--accent-ink);
@@ -236,7 +236,8 @@
 	h2 {
 		margin-top: 24px;
 		font-size: clamp(28px, 4vw, 42px);
-		font-weight: 800;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 800);
 		letter-spacing: -1px;
 		line-height: 1.15;
 	}
@@ -245,7 +246,7 @@
 		max-width: 80ch;
 		font-size: 14px;
 		line-height: 1.6;
-		color: #d1e5d8;
+		color: var(--hero-muted, #d1e5d8);
 	}
 	.confirmed .description {
 		color: var(--fg-muted);
@@ -257,13 +258,13 @@
 		margin-top: 28px;
 	}
 	.steps > div {
-		border-top: 2px solid #50715f;
+		border-top: 2px solid var(--hero-hairline, #50715f);
 		padding-top: 12px;
-		color: #bdcfc3;
+		color: var(--hero-muted, #bdcfc3);
 	}
 	.steps > div.reached {
-		color: #c4f6a1;
-		border-color: #c4f6a1;
+		color: var(--hero-highlight, #c4f6a1);
+		border-color: var(--hero-highlight, #c4f6a1);
 	}
 	.steps span {
 		font-size: 11px;
@@ -282,7 +283,7 @@
 	}
 	dt {
 		font-size: 12px;
-		color: #bdcfc3;
+		color: var(--hero-muted, #bdcfc3);
 	}
 	dd {
 		margin: 6px 0 0;

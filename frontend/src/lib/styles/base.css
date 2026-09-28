@@ -328,7 +328,8 @@ h4 {
 
 .card-title {
 	font-size: var(--fs-title);
-	font-weight: 750;
+	font-family: var(--font-display, var(--font-sans));
+	font-weight: var(--weight-display, 750);
 }
 
 /* A segmented switch: two or three words in one hairline track, the pressed one lifted onto

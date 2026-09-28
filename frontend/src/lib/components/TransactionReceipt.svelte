@@ -9,6 +9,7 @@
 	import Hash from './Hash.svelte';
 	import Icon from './Icon.svelte';
 	import Tabs from './Tabs.svelte';
+	import TransactionFlow from './TransactionFlow.svelte';
 	import { status } from '$lib/status/status.svelte';
 
 	let {
@@ -121,6 +122,7 @@
 	<Tabs
 		tabs={[
 			{ id: 'receipt', label: 'Receipt' },
+			{ id: 'flow', label: 'Box flow' },
 			{ id: 'changes', label: 'Balance changes' },
 			{ id: 'evidence', label: 'Evidence' }
 		]}
@@ -223,6 +225,21 @@
 					onclick={() => retry++}>Retry evidence</button
 				>
 			</p>{/if}
+	</div>
+	<div id="panel-flow" role="tabpanel" aria-labelledby="tab-flow" hidden={active !== 'flow'}>
+		{#if active === 'flow'}
+			{#key tx.id}
+				<TransactionFlow
+					{tx}
+					{addresses}
+					{selected}
+					selectedLabel={selected ? role(selected) : 'Address'}
+					complete={effects.complete}
+					missingInputs={effects.missingInputs}
+					onselect={(tree) => (selectedTree = tree)}
+				/>
+			{/key}
+		{/if}
 	</div>
 	<div
 		id="panel-changes"
@@ -365,7 +382,8 @@
 	}
 	h2 {
 		font-size: clamp(28px, 3vw, 38px);
-		font-weight: 800;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 800);
 		letter-spacing: -1px;
 		margin-top: 6px;
 	}
@@ -430,11 +448,12 @@
 		position: relative;
 		isolation: isolate;
 		overflow: hidden;
-		background: #103a28;
-		color: #f4fff6;
+		background: var(--receipt-bg, #103a28);
+		color: var(--receipt-fg, #f4fff6);
 		border-radius: 20px;
 		padding: 26px 30px;
-		border-left: 5px solid #b7f25f;
+		border-left: 5px solid var(--receipt-accent, #b7f25f);
+		box-shadow: var(--receipt-shadow, none);
 	}
 	.receipt::before {
 		content: '';
@@ -449,18 +468,18 @@
 		background: repeating-radial-gradient(
 			ellipse at center,
 			transparent 0 25px,
-			#436453 26px 27px,
+			var(--receipt-rule, #436453) 26px 27px,
 			transparent 28px 44px
 		);
-		opacity: 0.22;
+		opacity: var(--receipt-pattern-opacity, 0.22);
 		mask-image: linear-gradient(90deg, transparent, #000);
 	}
 	.receipt .eyebrow {
-		color: #bbd4c6;
+		color: var(--receipt-muted, #bbd4c6);
 		font-size: 11px;
 	}
 	.receipt :global(:focus-visible) {
-		outline-color: #b7f25f;
+		outline-color: var(--receipt-accent, #b7f25f);
 	}
 	.asset {
 		display: flex;
@@ -478,14 +497,15 @@
 		width: 52px;
 		height: 52px;
 		transform: rotate(-7deg);
-		background: #b7f25f;
-		color: #13392c;
+		background: var(--receipt-accent, #b7f25f);
+		color: var(--receipt-accent-fg, #13392c);
 		border-radius: 16px;
 		font-size: 26px;
 	}
 	.amount {
-		color: #caff8b;
-		font-weight: 750;
+		color: var(--receipt-positive, #caff8b);
+		font-family: var(--font-number, var(--font-sans));
+		font-weight: var(--weight-number, 750);
 		font-size: clamp(26px, 4vw, 52px);
 		letter-spacing: -1.5px;
 		font-variant-numeric: tabular-nums;
@@ -494,13 +514,13 @@
 	}
 	.asset-name {
 		display: block;
-		color: #f4fff6;
+		color: var(--receipt-fg, #f4fff6);
 		font-size: 18px;
 		margin-top: 6px;
 		overflow-wrap: anywhere;
 	}
 	.token-id {
-		color: #bbd4c6;
+		color: var(--receipt-muted, #bbd4c6);
 		font-size: 12px;
 		margin-top: 4px;
 	}
@@ -509,10 +529,10 @@
 		grid-template-columns: 1fr 1fr;
 		gap: 20px;
 		padding-top: 20px;
-		border-top: 1px solid #436453;
+		border-top: 1px solid var(--receipt-rule, #436453);
 	}
 	.receipt-facts p {
-		color: #bbd4c6;
+		color: var(--receipt-muted, #bbd4c6);
 		font-size: 12px;
 	}
 	.receipt-facts strong {
@@ -524,10 +544,10 @@
 		overflow-wrap: anywhere;
 	}
 	.receipt .negative {
-		color: #f6c1a6;
+		color: var(--receipt-negative, #f6c1a6);
 	}
 	.explanation {
-		color: #bbd4c6;
+		color: var(--receipt-muted, #bbd4c6);
 		font-size: 13px;
 		margin-top: 20px;
 		max-width: 80ch;

@@ -376,9 +376,9 @@
 	.discovery {
 		padding: 30px;
 		border-radius: 20px;
-		background: #103a28;
-		color: #eff8e8;
-		border-top: 4px solid #b7f25f;
+		background: var(--hero-bg, #103a28);
+		color: var(--hero-fg, #eff8e8);
+		border-top: 4px solid var(--hero-highlight, #b7f25f);
 	}
 	.discovery-head {
 		display: flex;
@@ -394,34 +394,35 @@
 		gap: 8px;
 	}
 	.discovery .eyebrow {
-		color: #c3e89a;
+		color: var(--hero-highlight, #c3e89a);
 	}
 	h1 {
 		font-size: clamp(30px, 4vw, 46px);
 		letter-spacing: -0.055em;
 		line-height: 1.1;
-		font-weight: 800;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 800);
 		margin-top: 14px;
 	}
 	h1 span {
-		color: #caff8b;
+		color: var(--hero-highlight, #caff8b);
 	}
 	.intro {
 		font-size: 13px;
 		line-height: 1.8;
-		color: #c4d8c8;
+		color: var(--hero-muted, #c4d8c8);
 	}
 	.intro strong {
 		font-weight: 500;
-		color: #eff8e8;
+		color: var(--hero-fg, #eff8e8);
 	}
 	.token-search {
 		display: flex;
 		gap: 0;
 		padding: 8px;
-		background: #f8fcf3;
+		background: var(--search-surface, #f8fcf3);
 		border-radius: 12px;
-		color: #10291e;
+		color: var(--search-fg, #10291e);
 		margin-top: 28px;
 	}
 	.query-field {
@@ -431,13 +432,13 @@
 	}
 	.match-field {
 		width: 146px;
-		border-left: 1px solid #d4e0d7;
+		border-left: 1px solid var(--search-line, #d4e0d7);
 		padding: 4px 12px;
 	}
 	.token-search label {
 		display: block;
 		font: 10px var(--font-mono);
-		color: #52665a;
+		color: var(--search-muted, #52665a);
 		text-transform: uppercase;
 		margin-bottom: 4px;
 	}
@@ -447,11 +448,11 @@
 		font: inherit;
 		background: transparent;
 		border: 0;
-		color: #10291e;
+		color: var(--search-fg, #10291e);
 		min-height: 28px;
 	}
 	.token-search input::placeholder {
-		color: #52665a;
+		color: var(--search-muted, #52665a);
 	}
 	.search-submit {
 		display: flex;
@@ -460,8 +461,8 @@
 		gap: 12px;
 		border: 0;
 		border-radius: 8px;
-		background: #b7f25f;
-		color: #10291e;
+		background: var(--hero-btn-fill, #b7f25f);
+		color: var(--hero-btn-fg, #10291e);
 		padding: 12px 20px;
 		font-weight: 750;
 		cursor: pointer;
@@ -469,7 +470,7 @@
 	.search-note {
 		margin-top: 12px;
 		font-size: 11px;
-		color: #c4d8c8;
+		color: var(--hero-muted, #c4d8c8);
 	}
 	.results {
 		overflow: hidden;
@@ -615,7 +616,7 @@
 		box-shadow: 0 24px 100px #0006;
 	}
 	dialog::backdrop {
-		background: #03160ecc;
+		background: var(--modal-backdrop, #03160ecc);
 		backdrop-filter: blur(5px);
 	}
 	.dialog-heading {
@@ -702,8 +703,8 @@
 	}
 	.identity-card-head {
 		padding: 22px;
-		background: #103a28;
-		color: #eff8e8;
+		background: var(--hero-bg, #103a28);
+		color: var(--hero-fg, #eff8e8);
 	}
 	.identity-card h3 {
 		font-size: 26px;
@@ -715,7 +716,7 @@
 	.identity-card-head p {
 		font: 9px var(--font-mono);
 		letter-spacing: 0.1em;
-		color: #c4d8c8;
+		color: var(--hero-muted, #c4d8c8);
 	}
 	dl {
 		display: grid;

@@ -1,11 +1,13 @@
 <script lang="ts">
 	import '$lib/styles/tokens.css';
 	import '$lib/styles/base.css';
+	import '$lib/styles/appearances.css';
 	import { page } from '$app/state';
-	import { theme } from '$lib/theme/theme.svelte';
+	import { appearance, theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import SearchBox from '$lib/components/SearchBox.svelte';
+	import AppearancePicker from '$lib/components/AppearancePicker.svelte';
 	import Icon, { type IconName } from '$lib/components/Icon.svelte';
 	import { onMount } from 'svelte';
 
@@ -80,6 +82,7 @@
 
 	onMount(() => {
 		theme.init();
+		appearance.init();
 		status.start();
 		return () => status.stop();
 	});
@@ -152,6 +155,7 @@
 			<div class="status-slot" data-testid="status-slot">
 				<StatusBadge />
 			</div>
+			<AppearancePicker />
 			<button
 				type="button"
 				class="theme-toggle"

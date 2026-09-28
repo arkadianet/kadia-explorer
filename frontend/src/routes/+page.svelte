@@ -177,7 +177,7 @@
 				<Sparkline
 					values={heroSeries}
 					kind="bars"
-					color="var(--accent)"
+					color="var(--hero-chart, var(--accent))"
 					height={40}
 					title="Blocks per 10-minute bucket over the six hours of chain below the indexed tip, counted from the loaded block timestamps."
 				/>
@@ -549,8 +549,8 @@
 	.hero {
 		margin: 8px 0 0;
 		border-radius: 20px;
-		background: #103a28;
-		color: #eef8e8;
+		background: var(--hero-bg, #103a28);
+		color: var(--hero-fg, #eef8e8);
 	}
 
 	.hero-in {
@@ -571,24 +571,25 @@
 	   competes with it, which is why the buttons underneath are small and quiet. */
 	h1 {
 		font-size: var(--fs-display);
-		font-weight: 800;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 800);
 		line-height: 1.02;
 		letter-spacing: -0.028em;
-		color: #e7ffc7;
+		color: var(--hero-fg, #e7ffc7);
 	}
 
 	.lede {
 		margin-top: var(--space-4);
 		font-size: 18px;
-		color: #c9dccd;
+		color: var(--hero-muted, #c9dccd);
 	}
 
 	:global(:root[data-theme='dark']) .hero h1 {
-		color: #f2f6f3;
+		color: var(--hero-fg, #f2f6f3);
 	}
 
 	:global(:root[data-theme='dark']) .hero .lede {
-		color: #c3d0c8;
+		color: var(--hero-muted, #c3d0c8);
 	}
 
 	.cta {
@@ -607,12 +608,12 @@
 		margin-bottom: 0;
 		padding: var(--space-4) var(--space-5) var(--space-5);
 		border-radius: var(--radius-card);
-		background: #071f16;
+		background: var(--hero-tip-bg, #071f16);
 		backdrop-filter: blur(16px) saturate(1.2);
 		-webkit-backdrop-filter: blur(16px) saturate(1.2);
-		border: 1px solid rgba(233, 238, 234, 0.16);
+		border: 1px solid var(--hero-hairline, rgba(233, 238, 234, 0.16));
 		box-shadow: var(--shadow-lift);
-		color: var(--ink-fg);
+		color: var(--hero-tip-fg, var(--ink-fg));
 	}
 
 	.tipcard-head {
@@ -621,20 +622,21 @@
 		gap: var(--space-2);
 		font-size: var(--fs-micro);
 		font-weight: 600;
-		color: var(--ink-fg-muted);
+		color: var(--hero-tip-muted, var(--ink-fg-muted));
 	}
 
 	.tipcard-height {
 		margin-top: var(--space-2);
 		font-size: var(--fs-key);
-		font-weight: 700;
+		font-family: var(--font-number, var(--font-sans));
+		font-weight: var(--weight-number, 700);
 		letter-spacing: -0.03em;
 		line-height: 1.1;
 	}
 
 	.tipcard-age {
 		font-size: var(--fs-micro);
-		color: var(--ink-fg-muted);
+		color: var(--hero-tip-muted, var(--ink-fg-muted));
 		margin-bottom: var(--space-3);
 	}
 
@@ -644,11 +646,11 @@
 		justify-content: space-between;
 		margin-top: var(--space-2);
 		font-size: var(--fs-micro);
-		color: var(--ink-fg-muted);
+		color: var(--hero-tip-muted, var(--ink-fg-muted));
 	}
 
 	.tipcard-foot b {
-		color: var(--ink-fg);
+		color: var(--hero-tip-fg, var(--ink-fg));
 		font-weight: 600;
 	}
 
@@ -681,7 +683,8 @@
 
 	.stat-value {
 		font-size: 26px;
-		font-weight: 600;
+		font-family: var(--font-number, var(--font-sans));
+		font-weight: var(--weight-number, 600);
 		letter-spacing: -0.03em;
 		line-height: 1.2;
 		white-space: nowrap;
@@ -975,7 +978,8 @@
 
 	.deeper-head h2 {
 		font-size: 34px;
-		font-weight: 300;
+		font-family: var(--font-display, var(--font-sans));
+		font-weight: var(--weight-display, 300);
 		letter-spacing: -0.025em;
 	}
 
@@ -999,7 +1003,7 @@
 		gap: 6px;
 		padding: var(--space-5) var(--space-4);
 		border-radius: var(--radius-card);
-		background: rgba(12, 20, 15, 0.55);
+		background: var(--tool-bg, rgba(12, 20, 15, 0.55));
 		backdrop-filter: blur(12px);
 		-webkit-backdrop-filter: blur(12px);
 		border: 1px solid rgba(233, 238, 234, 0.13);
@@ -1011,7 +1015,7 @@
 	.tool:focus-visible {
 		color: var(--ink-fg);
 		border-color: var(--accent);
-		background: rgba(12, 20, 15, 0.72);
+		background: var(--tool-hover, rgba(12, 20, 15, 0.72));
 	}
 
 	.tool-icon {
@@ -1088,21 +1092,23 @@
 	.kicker {
 		font: 11px var(--font-mono);
 		letter-spacing: 0.12em;
-		color: #b7f25f;
+		color: var(--hero-highlight, #b7f25f);
 		margin-bottom: 18px;
 	}
 	.hero .btn-fill {
-		background: #b7f25f;
-		color: #10291e;
+		background: var(--hero-btn-fill, #b7f25f);
+		color: var(--hero-btn-fg, #10291e);
 	}
-	.hero :global(:focus-visible),
+	.hero :global(:focus-visible) {
+		outline-color: var(--hero-focus, #b7f25f);
+	}
 	.deeper :global(:focus-visible) {
-		outline-color: #b7f25f;
+		outline-color: var(--accent);
 	}
 	.hero .btn-ghost {
 		background: transparent;
-		color: #eef8e8;
-		border-color: #6a8a73;
+		color: var(--hero-fg, #eef8e8);
+		border-color: var(--hero-hairline, #6a8a73);
 	}
 	.deeper {
 		background: var(--ink-panel);

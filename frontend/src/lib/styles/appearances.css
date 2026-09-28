@@ -1,0 +1,267 @@
+/* Visual style is independent of light/dark mode. Original inherits tokens.css unchanged.
+   Fonts are self-hosted Latin subsets; see the accompanying SIL OFL licenses. */
+@font-face {
+	font-family: 'Space Grotesk';
+	font-style: normal;
+	font-weight: 300 700;
+	font-display: swap;
+	src: url('/fonts/space-grotesk-latin-var.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Instrument Serif';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/instrument-serif-latin.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'Cormorant Garamond';
+	font-style: normal;
+	font-weight: 300 700;
+	font-display: swap;
+	src: url('/fonts/cormorant-garamond-latin-var.woff2') format('woff2');
+}
+
+:root[data-appearance='prism'] {
+	--bg: light-dark(#e9eef6, #080d18);
+	--bg-sunk: light-dark(#dfe7f3, #070b13);
+	--surface: light-dark(#f7faff, #111b2d);
+	--surface-solid: light-dark(#ffffff, #111b2d);
+	--surface-hover: light-dark(#edf3ff, #1a2a45);
+	--fg: light-dark(#15233e, #e9f1ff);
+	--fg-muted: light-dark(#53647f, #a5b5ce);
+	--hairline: light-dark(#cdd8e9, #2a3c59);
+	--accent: #a9c9ff;
+	--accent-ink: light-dark(#3659c7, #a9c9ff);
+	--accent-wash: light-dark(#e3ecff, #1a3154);
+	--ink-panel: #0a1428;
+	--ink-panel-soft: #152643;
+	--ink-fg: #edf4ff;
+	--ink-fg-muted: #b0c0db;
+	--ink-hairline: #2a3c59;
+	--btn-fill: light-dark(#213b72, #a9c9ff);
+	--btn-fill-fg: light-dark(#f5f8ff, #0a1428);
+	--btn-hover: light-dark(#345695, #c7dcff);
+	--btn-hover-fg: light-dark(#ffffff, #0a1428);
+	--font-display: 'Space Grotesk', var(--font-sans);
+	--font-number: 'Space Grotesk', var(--font-sans);
+	--weight-display: 500;
+	--weight-number: 500;
+	--radius-card: 16px;
+	--shadow-lift: 0 24px 48px light-dark(#19335a26, #00000060);
+	--shadow-rest:
+		0 12px 24px -10px light-dark(#19335a36, #00000070), inset 0 1px 0 light-dark(#ffffff, #d3e5ff14);
+	--shadow-hair: 0 4px 8px light-dark(#19335a12, #00000040);
+	--page-glow: light-dark(#cbdcfc8c, #20407430);
+	--hero-bg: linear-gradient(135deg, var(--surface-solid), var(--bg-sunk));
+	--receipt-bg: linear-gradient(125deg, var(--surface-solid) 35%, var(--accent-wash));
+	--flow-depth: 1;
+}
+
+:root[data-appearance='aurora'] {
+	--bg: light-dark(#e8f1ed, #071612);
+	--bg-sunk: light-dark(#dce9e2, #06110e);
+	--surface: light-dark(#f6fbf8, #102720);
+	--surface-solid: light-dark(#fbfffc, #102720);
+	--surface-hover: light-dark(#eaf8ee, #19392d);
+	--fg: light-dark(#173d30, #e5faee);
+	--fg-muted: light-dark(#516d60, #a4c6b5);
+	--hairline: light-dark(#c6ddd0, #2d5041);
+	--accent: #c6f5ab;
+	--accent-ink: light-dark(#2d673e, #c6f5ab);
+	--accent-wash: light-dark(#e2f3dd, #203c2a);
+	--ink-panel: #09221b;
+	--ink-panel-soft: #133b2c;
+	--ink-fg: #f1fff3;
+	--ink-fg-muted: #aecfbe;
+	--ink-hairline: #325044;
+	--btn-fill: light-dark(#244e3b, #c6f5ab);
+	--btn-fill-fg: light-dark(#f5fff1, #09221b);
+	--btn-hover: light-dark(#3d6950, #defacd);
+	--btn-hover-fg: light-dark(#ffffff, #09221b);
+	--font-display: 'Instrument Serif', Georgia, serif;
+	--weight-display: 400;
+	--weight-number: 500;
+	--radius-card: 24px;
+	--radius-control: 12px;
+	--shadow-lift: 0 26px 60px light-dark(#234c3430, #00000060);
+	--shadow-rest:
+		0 14px 40px -16px light-dark(#204b3840, #00000070), inset 0 1px 0 light-dark(#ffffff, #e4ffe524);
+	--shadow-hair: 0 4px 9px light-dark(#1f4e3812, #00000040);
+	--page-glow: light-dark(#d6edbfa8, #598b5333);
+	--hero-bg:
+		radial-gradient(ellipse at 80% 10%, var(--page-glow), transparent 65%),
+		linear-gradient(135deg, var(--surface-solid), var(--bg-sunk));
+	--receipt-bg:
+		radial-gradient(ellipse at 100% 0, var(--page-glow), transparent 70%), var(--surface-solid);
+	--flow-depth: 0.8;
+}
+
+:root[data-appearance='atelier'] {
+	--bg: light-dark(#e9e2d6, #1c1814);
+	--bg-sunk: light-dark(#dfd5c5, #16120f);
+	--surface: light-dark(#f7f1e6, #2b251e);
+	--surface-solid: light-dark(#fff9ee, #2b251e);
+	--surface-hover: light-dark(#f0e5d2, #393026);
+	--fg: light-dark(#382a20, #f7ebd8);
+	--fg-muted: light-dark(#72614e, #c2b19a);
+	--hairline: light-dark(#d4c5af, #504233);
+	--accent: #ebc29e;
+	--accent-ink: light-dark(#8c482e, #ebc29e);
+	--accent-wash: light-dark(#f2e2d3, #443021);
+	--ink-panel: #2b2019;
+	--ink-panel-soft: #3b2e24;
+	--ink-fg: #fbf1df;
+	--ink-fg-muted: #ccb99d;
+	--ink-hairline: #564230;
+	--btn-fill: light-dark(#50372b, #ebc29e);
+	--btn-fill-fg: light-dark(#fff7e9, #2b2019);
+	--btn-hover: light-dark(#72523e, #f3d4b9);
+	--btn-hover-fg: light-dark(#ffffff, #2b2019);
+	--font-display: 'Cormorant Garamond', Georgia, serif;
+	--font-number: 'Cormorant Garamond', Georgia, serif;
+	--weight-display: 500;
+	--weight-number: 600;
+	--radius-card: 4px;
+	--radius-control: 5px;
+	--shadow-lift: 0 22px 40px light-dark(#5740262b, #00000070);
+	--shadow-rest:
+		0 2px 0 var(--bg-sunk), 0 3px 0 var(--hairline), 0 10px 18px light-dark(#57402618, #00000040);
+	--shadow-hair: 0 2px 2px light-dark(#57402614, #00000040);
+	--page-glow: light-dark(#fffbeb70, #76533615);
+	--hero-bg: linear-gradient(115deg, var(--surface-solid), var(--bg));
+	--receipt-bg: linear-gradient(100deg, var(--surface-solid), var(--surface));
+	--flow-depth: 0.35;
+}
+
+/* These selectors deliberately exclude Original: saved and returning users can retain
+   the existing forest/lime design, including its compact typography and flat surfaces. */
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier']) {
+	--hero-fg: var(--fg);
+	--hero-muted: var(--fg-muted);
+	--hero-highlight: var(--accent-ink);
+	--hero-hairline: var(--hairline);
+	--hero-tip-bg: var(--surface-solid);
+	--hero-tip-fg: var(--fg);
+	--hero-tip-muted: var(--fg-muted);
+	--hero-chart: var(--accent-ink);
+	--hero-btn-fill: var(--btn-fill);
+	--hero-btn-fg: var(--btn-fill-fg);
+	--hero-focus: var(--accent-ink);
+	--tracking-link: var(--accent-ink);
+	--search-surface: var(--surface-solid);
+	--search-fg: var(--fg);
+	--search-muted: var(--fg-muted);
+	--search-line: var(--hairline);
+	--modal-backdrop: color-mix(in srgb, var(--ink-panel) 80%, transparent);
+	--tool-bg: color-mix(in srgb, var(--ink-panel) 55%, transparent);
+	--tool-hover: color-mix(in srgb, var(--ink-panel) 72%, transparent);
+	--receipt-fg: var(--fg);
+	--receipt-muted: var(--fg-muted);
+	--receipt-accent: var(--accent-ink);
+	--receipt-accent-ink: var(--surface-solid);
+	--receipt-line: var(--hairline);
+	--receipt-amount: var(--accent-ink);
+	--receipt-negative: var(--danger-ink);
+	--receipt-rule: var(--receipt-line);
+	--receipt-accent-fg: var(--receipt-accent-ink);
+	--receipt-positive: var(--receipt-amount);
+	--receipt-shadow: var(--shadow-lift);
+}
+
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier']) body {
+	background: radial-gradient(ellipse at 95% 0, var(--page-glow), transparent 60%) var(--bg);
+	background-attachment: fixed;
+}
+
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier']) .hero,
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier'])
+	.discovery {
+	border: var(--rule);
+	border-radius: var(--radius-card);
+	box-shadow: var(--shadow-lift);
+}
+
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier'])
+	.page-head {
+	background: transparent;
+	border: 0;
+	border-bottom: var(--rule);
+	border-radius: 0;
+}
+
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier'])
+	.receipt {
+	border: var(--rule);
+	border-radius: var(--radius-card);
+	box-shadow: var(--shadow-lift);
+}
+
+:root:is([data-appearance='prism'], [data-appearance='aurora']) .hero::before {
+	content: '';
+	position: absolute;
+	pointer-events: none;
+	width: 80%;
+	height: 80%;
+	right: -10%;
+	top: 40%;
+	border: 1px solid var(--hairline);
+	border-radius: 32px;
+	background: linear-gradient(135deg, var(--surface-solid), transparent);
+	box-shadow: var(--shadow-lift);
+	transform: perspective(650px) rotateX(55deg) rotateZ(-18deg);
+}
+
+:root[data-appearance='prism'] .receipt::before {
+	background:
+		repeating-linear-gradient(0deg, transparent 0 44px, var(--receipt-line) 44px 45px),
+		repeating-linear-gradient(90deg, transparent 0 44px, var(--receipt-line) 44px 45px);
+	transform: perspective(700px) rotateX(35deg) rotateZ(-20deg);
+	opacity: 0.35;
+}
+
+:root[data-appearance='aurora'] .receipt::before {
+	background: radial-gradient(ellipse, var(--page-glow), transparent 65%);
+	opacity: 1;
+}
+
+:root[data-appearance='atelier'] .receipt::before {
+	background: repeating-linear-gradient(0deg, transparent 0 3px, var(--receipt-line) 3px 4px);
+	transform: none;
+	opacity: 0.14;
+}
+
+:root[data-appearance='atelier'] .hero-in {
+	border: 1px solid var(--hairline);
+	margin: 8px;
+}
+
+:root[data-appearance='atelier'] .receipt {
+	border-top: 4px double var(--receipt-line);
+	border-bottom: 4px double var(--receipt-line);
+}
+
+:root[data-appearance='atelier'] .asset-icon {
+	border-radius: 50%;
+	background: var(--accent-wash);
+	color: var(--accent-ink);
+	border: 1px solid var(--hairline);
+}
+
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier'])
+	.topbar {
+	background: color-mix(in srgb, var(--bg) 92%, transparent);
+	backdrop-filter: blur(18px);
+}
+
+:root:is([data-appearance='prism'], [data-appearance='aurora'], [data-appearance='atelier']) .rail {
+	background: linear-gradient(160deg, var(--ink-panel-soft), var(--ink-panel) 55%);
+}
+
+@media (max-width: 600px) {
+	:root:is([data-appearance='prism'], [data-appearance='aurora']) .hero::before {
+		width: 110%;
+		right: -50%;
+		top: 65%;
+	}
+}

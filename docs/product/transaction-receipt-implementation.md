@@ -114,7 +114,29 @@ Protocol references: [Ergo node OpenAPI](https://github.com/ergoplatform/ergo/bl
 [transaction routes](https://github.com/ergoplatform/ergo/blob/master/src/main/scala/org/ergoplatform/http/api/TransactionsApiRoute.scala).
 Kadia's public node absence response was also checked on 2026-09-28.
 
-## Local validation (2026-09-28)
+## Selectable appearance and box flow (2026-09-28)
+
+The header's Style control offers Original (forest/lime), Aurora (emerald glass),
+Atelier (paper/copper), and Prism (blue spatial surfaces). Prism is the default.
+The browser saves appearance under `xp-appearance`, separately from the existing
+`xp-theme` light/dark preference. Both are validated and applied before first
+paint; unavailable storage still allows changes for the current session. The
+native appearance dialog supports radio-arrow navigation, contained Tab focus,
+Escape, and focus restoration. Display fonts are self-hosted, with their SIL OFL
+licenses alongside the files; table data and identifiers retain their legible
+shared typography. Reduced-motion preferences continue to apply.
+
+Box flow is an optional transaction tab available in every appearance. It uses the
+same resolved boxes and address effects as Receipt, without another request or a
+second balance calculation. Selecting a non-fee box changes the shared address
+perspective. The diagram shows transaction topology, never attributed paths or
+value-weighted lines; data inputs are explicitly excluded because they are read,
+not spent. Box amounts remain visible with incomplete inputs, but all exact net
+changes are withheld until every input is resolved. Each side initially shows
+four boxes, expands four at a time, and can collapse independently. The regular
+Receipt remains the default view.
+
+## Earlier local validation (2026-09-28)
 
 - Frontend: 148 unit tests and 94 Playwright tests passed; Svelte check reported no
   errors or warnings; lint passed. Desktop, mobile, and dark-mode browser review
