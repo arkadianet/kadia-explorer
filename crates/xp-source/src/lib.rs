@@ -26,6 +26,33 @@ pub trait BlockSource: Send + Sync {
     async fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, SourceError>;
     /// The raw block JSON body for header `id`, or `None` if the source doesn't have it.
     async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError>;
+    /// A block body for optional, request-driven lookups with a caller-selected byte limit.
+    /// The default checks after fetching; network sources should override this to stop
+    /// reading decompressed bytes at the limit. Ingest retains `full_block_json` semantics.
+    async fn full_block_json_bounded(
+        &self,
+        id: &Hash32,
+        max_bytes: usize,
+    ) -> Result<Option<String>, SourceError> {
+        let body = self.full_block_json(id).await?;
+        if body.as_ref().is_some_and(|body| body.len() > max_bytes) {
+            return Err(SourceError::Decode(format!(
+                "block body exceeds {max_bytes} bytes"
+            )));
+        }
+        Ok(body)
+    }
+    /// A transaction currently in this source's mempool. `None` means an explicit
+    /// transaction-absence response, never an unsupported endpoint or a source outage.
+    /// This observation is local to one node and says nothing about other nodes' pools.
+    async fn unconfirmed_transaction_json(
+        &self,
+        _id: &Hash32,
+    ) -> Result<Option<String>, SourceError> {
+        Err(SourceError::Capability(
+            "unconfirmed transaction lookup is unsupported".into(),
+        ))
+    }
     /// The raw JSON array of the chain-spec genesis boxes (`/utxo/genesis`). These boxes are
     /// created by the chain spec rather than by any block, so they are the one piece of
     /// indexable state that cannot be reached through the block endpoints.

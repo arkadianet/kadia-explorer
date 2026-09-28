@@ -110,6 +110,11 @@
 		</ul>
 	{:else if data.q}
 		<EmptyState message={`No match for "${data.q}". ${hint}`} />
+		{#if data.trackId}<p class="tracking-link">
+				Expecting a newly sent transaction? <a href={`/tx/${data.trackId}`}
+					>Track this ID as a transaction</a
+				>. An unknown ID may also refer to another kind of entity.
+			</p>{/if}
 	{:else}
 		<EmptyState message={hint} />
 	{/if}
@@ -182,6 +187,11 @@
 </Panel>
 
 <style>
+	.tracking-link {
+		margin-top: var(--space-4);
+		font-size: var(--fs-data);
+		color: var(--fg-muted);
+	}
 	.retry {
 		margin-top: var(--space-4);
 	}

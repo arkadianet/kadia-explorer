@@ -10,6 +10,7 @@ pub mod error;
 pub mod handlers;
 pub mod limit;
 mod metrics;
+mod observations;
 pub mod paging;
 
 use axum::http::StatusCode;
@@ -60,6 +61,7 @@ pub struct Counters {
     pub inflight_reads: AtomicU32,
     history_permits: Arc<Semaphore>,
     pub(crate) evidence_permits: Arc<Semaphore>,
+    pub(crate) observations: observations::Observations,
 }
 
 impl Default for Counters {
@@ -70,6 +72,7 @@ impl Default for Counters {
             inflight_reads: AtomicU32::new(0),
             history_permits: Arc::new(Semaphore::new(2)),
             evidence_permits: Arc::new(Semaphore::new(2)),
+            observations: observations::Observations::default(),
         }
     }
 }
@@ -198,6 +201,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .route("/v1/register-capacity", get(handlers::registers::capacity))
         .route("/v1/status", get(handlers::status::status))
         .route("/v1/txs/{id}/evidence", get(handlers::evidence::get_one))
+        .route("/v1/txs/{id}/status", get(handlers::tx_status::get_one))
         .route("/v1/blocks", get(handlers::blocks::list))
         .route("/v1/blocks/{height_or_id}", get(handlers::blocks::get_one))
         .route(

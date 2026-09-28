@@ -335,3 +335,186 @@ async fn malformed_and_contradictory_chain_slice_are_decode_errors() {
         ));
     }
 }
+
+const PENDING_ROUTE: &str = "/transactions/unconfirmed/byTransactionId/{id}";
+
+#[tokio::test]
+async fn pending_lookup_uses_the_read_only_id_route() {
+    let expected = [0x42; 32];
+    let body = serde_json::json!({
+        "id": xp_types::hex32(&expected), "inputs": [], "dataInputs": [], "outputs": []
+    });
+    let served = body.clone();
+    let base = serve(Router::new().route(
+        PENDING_ROUTE,
+        get(move |Path(id): Path<String>| {
+            assert_eq!(id, xp_types::hex32(&expected));
+            let body = served.clone();
+            async move { Json(body) }
+        }),
+    ))
+    .await;
+    let received = RustNode::new(&base)
+        .unconfirmed_transaction_json(&expected)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&received).unwrap(),
+        body
+    );
+}
+
+#[tokio::test]
+async fn pending_absence_requires_the_nodes_transaction_not_found_response() {
+    for detail in [
+        serde_json::Value::Null,
+        serde_json::json!("unconfirmed transaction not found"),
+    ] {
+        let body = serde_json::json!({"error":404, "reason":"not-found", "detail":detail});
+        let base = serve(Router::new().route(
+            PENDING_ROUTE,
+            get(move || {
+                let body = body.clone();
+                async move { (axum::http::StatusCode::NOT_FOUND, Json(body)) }
+            }),
+        ))
+        .await;
+        assert_eq!(
+            RustNode::new(&base)
+                .unconfirmed_transaction_json(&[0; 32])
+                .await
+                .unwrap(),
+            None
+        );
+    }
+}
+
+#[tokio::test]
+async fn pending_unsupported_and_proxy_404s_are_not_transaction_absence() {
+    use axum::http::StatusCode;
+    for (status, body) in [
+        (StatusCode::NOT_FOUND, ""),
+        (StatusCode::NOT_FOUND, "<h1>Not found</h1>"),
+        (
+            StatusCode::NOT_FOUND,
+            r#"{"error":404,"reason":"not-found","detail":"route not found"}"#,
+        ),
+        (
+            StatusCode::NOT_FOUND,
+            r#"{"error":404,"reason":"not-found"}"#,
+        ),
+        (StatusCode::METHOD_NOT_ALLOWED, ""),
+        (StatusCode::NOT_IMPLEMENTED, ""),
+    ] {
+        let base =
+            serve(Router::new().route(PENDING_ROUTE, get(move || async move { (status, body) })))
+                .await;
+        assert!(matches!(
+            RustNode::new(&base)
+                .unconfirmed_transaction_json(&[0; 32])
+                .await,
+            Err(xp_source::SourceError::Capability(_))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn pending_outage_and_rate_limit_are_errors() {
+    use axum::http::StatusCode;
+    for status in [
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::FORBIDDEN,
+    ] {
+        let base =
+            serve(Router::new().route(PENDING_ROUTE, get(move || async move { status }))).await;
+        assert!(matches!(
+            RustNode::new(&base)
+                .unconfirmed_transaction_json(&[0; 32])
+                .await,
+            Err(xp_source::SourceError::Http(_))
+        ));
+    }
+    assert!(matches!(
+        RustNode::new("http://127.0.0.1:1")
+            .unconfirmed_transaction_json(&[0; 32])
+            .await,
+        Err(xp_source::SourceError::Unavailable | xp_source::SourceError::Http(_))
+    ));
+}
+
+#[tokio::test]
+async fn pending_chunked_body_stops_at_two_mib() {
+    use axum::body::{Body, Bytes};
+    let base = serve(Router::new().route(
+        PENDING_ROUTE,
+        get(|| async {
+            let chunks =
+                (0..33).map(|_| Ok::<_, std::convert::Infallible>(Bytes::from(vec![b'x'; 65536])));
+            Body::from_stream(futures::stream::iter(chunks))
+        }),
+    ))
+    .await;
+    let err = RustNode::new(&base)
+        .unconfirmed_transaction_json(&[0; 32])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, xp_source::SourceError::Decode(_)));
+    assert!(err.to_string().contains("2097152 bytes"));
+}
+
+#[tokio::test]
+async fn bounded_block_reads_limit_decompressed_bytes_and_leave_ingest_unchanged() {
+    // Gzip of exactly 1,024 ASCII x bytes. Its 29 wire bytes fit below the test limit.
+    let compressed =
+        hex::decode("1f8b080000000000000aaba81805a36014548c50000063f0d74800040000").unwrap();
+    let base = serve(Router::new().route(
+        "/blocks/{id}",
+        get(move || {
+            let compressed = compressed.clone();
+            async move { ([(axum::http::header::CONTENT_ENCODING, "gzip")], compressed) }
+        }),
+    ))
+    .await;
+    let source = RustNode::new(&base);
+    assert!(matches!(
+        source.full_block_json_bounded(&[0; 32], 1000).await,
+        Err(xp_source::SourceError::Decode(_))
+    ));
+    assert_eq!(
+        source
+            .full_block_json_bounded(&[0; 32], 1024)
+            .await
+            .unwrap(),
+        Some("x".repeat(1024))
+    );
+    assert_eq!(
+        source.full_block_json(&[0; 32]).await.unwrap(),
+        Some("x".repeat(1024))
+    );
+}
+
+#[tokio::test]
+async fn optional_block_limit_does_not_cap_ingestion_at_sixteen_mib() {
+    let size = 16 * 1024 * 1024 + 1;
+    let base =
+        serve(Router::new().route("/blocks/{id}", get(move || async move { "x".repeat(size) })))
+            .await;
+    let source = RustNode::new(&base);
+    assert!(matches!(
+        source
+            .full_block_json_bounded(&[0; 32], 16 * 1024 * 1024)
+            .await,
+        Err(xp_source::SourceError::Decode(_))
+    ));
+    assert_eq!(
+        source
+            .full_block_json(&[0; 32])
+            .await
+            .unwrap()
+            .unwrap()
+            .len(),
+        size
+    );
+}

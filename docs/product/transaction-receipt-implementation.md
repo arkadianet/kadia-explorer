@@ -1,4 +1,4 @@
-# Transaction receipt: first implementation
+# Transaction receipts and live tracking
 
 The confirmed transaction page now leads with an address-specific receipt, all-address
 balance changes, and inspectable evidence. Raw input/output boxes remain on the page.
@@ -24,8 +24,8 @@ and after fetching, the local header is checked again, and ordered transaction
 inputs/outputs are matched to the store. It reports `trusted_node_response`;
 proof commitments and consensus are not independently replayed. Source failure
 does not break the underlying transaction page. No on-disk migration is needed.
-The body limit also applies to ingestion through `RustNode`; it is an operational
-guard, not a consensus maximum, and a larger node body would be rejected.
+The body limit applies to the optional evidence lookup through
+`full_block_json_bounded`; ordinary block ingestion retains its existing behavior.
 
 Automatic rent recognition supports confirmed, mature standard P2PK inputs with
 an explicitly empty proof and a canonical nonnegative Short selector pointing to
@@ -57,20 +57,75 @@ that motivated the receipt. Unit, route and browser regressions cover its exact
 effects, signed old boxes, missing proofs, forks, partial input coverage, large
 integer values, mint/burn, duplicate names, and mobile layout.
 
-Mempool observation, arbitrary-contract rent classification, user ownership,
-application decoding, and automated confirmation polling are follow-up work.
+Live transaction tracking is described below. Arbitrary-contract rent classification,
+user ownership, application decoding, and a network-wide mempool archive remain
+follow-up work.
+
+## Pending-to-confirmed tracking
+
+`GET /v1/txs/{id}/status` returns a small, uncached status response. Confirmation
+height, block ID and count come from one store Reader; the expanded transaction is
+still served separately. The browser polls every five seconds while visible,
+pauses while hidden, resumes immediately, and discards responses from disposed
+routes. Automatic polling does not repeatedly expand inputs/outputs or fetch rent
+proofs. Explicit refresh reloads mutable box details; their snapshot is distinct
+from live confirmation counts.
+
+For an unindexed transaction, the API makes a read-only lookup against the primary
+node's `/transactions/unconfirmed/byTransactionId/{id}` endpoint. Fallback block
+sources are never used as fallback mempools. A transaction-specific 404 response
+means absent; proxy/HTML/ambiguous 404, unsupported endpoints and outages mean
+unavailable. Returned transaction IDs and input references are validated. A fresh
+store read after node I/O gives any newly indexed inclusion precedence.
+
+States are `confirmed`, `pending`, `not_observed`, `no_longer_observed`,
+`unavailable`, and `conflicted`. Disappearance never establishes rejection.
+Conflicts are positive findings from canonical indexed spending of remembered
+inputs, not exhaustive network-wide detection. A previous inclusion that is no
+longer in the local index remains visible without claiming a network reorg when
+the index may simply be behind. Pending summaries show counts and the standard
+fee-output total; they do not fabricate receipt balances.
+
+Observation history is process-local and records only requested transaction IDs.
+It holds at most 1,024 entries, expires after 60 minutes without a request, may be
+evicted earlier under capacity pressure, and resets on process restart. Continuous
+requests can retain an entry longer. `retention_seconds` describes idle expiry,
+not a guaranteed archival period. First observed is this explorer's observation,
+not the transaction's broadcast time. At most 512 complete input references are
+remembered per transaction, including transactions first seen after confirmation;
+larger confirmed transactions retain confirmation status without remembered input
+coverage. Pending responses beyond the parser limits are unavailable, not partially
+reported. A missing conflict is never proof that none exists.
+
+Node lookups have two independent admission slots, a two-second timeout and a
+2 MiB decompressed-body bound. Successful observations are shared for five seconds;
+errors are shared for two. Concurrent requests for the same ID coalesce. The
+per-entry lock and admission permit are released on cancellation; parsing keeps
+its permit until the blocking worker finishes. Existing API rate/reader limits
+still apply. No mempool database migration or background archival process is added.
+
+The existing confirmed detail route keeps its response contract. Valid unknown IDs
+can be followed on `/tx/{id}` without an initial 404 dead end. Search resolves a
+known pending transaction and offers an explicit tracking link for an unknown
+64-hex ID, without assuming every unknown hash identifies a transaction. Older
+servers without the status route retain their original confirmed receipt.
+
+Protocol references: [Ergo node OpenAPI](https://github.com/ergoplatform/ergo/blob/master/src/main/resources/api/openapi.yaml),
+[transaction routes](https://github.com/ergoplatform/ergo/blob/master/src/main/scala/org/ergoplatform/http/api/TransactionsApiRoute.scala).
+Kadia's public node absence response was also checked on 2026-09-28.
 
 ## Local validation (2026-09-28)
 
-- Frontend: 138 unit tests and 84 Playwright tests passed; Svelte check reported no
+- Frontend: 148 unit tests and 94 Playwright tests passed; Svelte check reported no
   errors or warnings; lint passed. Desktop, mobile, and dark-mode browser review
   found no layout problems or console errors.
 - A clean Windows `npm ci` followed by the production build passed. Home-route
   JavaScript was 49.54 KiB gzipped against the existing 120 KiB budget.
-- Rust: workspace check, formatting, and Clippy with warnings denied passed.
-  The complete workspace test run passed every target except two five-second
-  ingestion timeouts in `fork.rs`. Both passed unchanged in an isolated serial
-  rerun using a local temporary directory (2 tests, 0.70 seconds). The initial
-  workspace run therefore exited nonzero; it is not recorded as a clean full run.
+- Rust: workspace check, formatting, Clippy with warnings denied, and the complete
+  workspace test run passed. Tests used a local temporary directory and four test
+  threads. Existing ignored tests that require external services or snapshots were
+  not run. The suite includes nine status-route tests and 31 source tests covering
+  confirmation races, rollback/re-inclusion, canonical conflicts, same-ID request
+  coalescing, unavailable sources, and decompressed response limits.
 - Existing Python rent-classifier (14 tests) and capacity-collector (3 tests)
   checks passed.

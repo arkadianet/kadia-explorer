@@ -64,7 +64,19 @@ export const load: PageLoad = async ({ url, fetch }) => {
 	} catch (e) {
 		if (e instanceof ApiError) {
 			if (e.status === 400) return { q, reason: 'unknown-format' as NotFoundReason, registers };
-			if (e.status === 404) return { q, reason: 'not-found' as NotFoundReason, registers };
+			if (e.status === 404) {
+				if (classified.kind === 'hex32') {
+					let pending = false;
+					try {
+						pending = (await api.txStatus(classified.value, fetch)).state === 'pending';
+					} catch {
+						/* Search still offers an explicit tracking link during an outage. */
+					}
+					if (pending) throw redirect(302, `/tx/${classified.value}`);
+					return { q, reason: 'not-found' as NotFoundReason, registers, trackId: classified.value };
+				}
+				return { q, reason: 'not-found' as NotFoundReason, registers };
+			}
 			throw error(e.status, e.detail);
 		}
 		throw e;

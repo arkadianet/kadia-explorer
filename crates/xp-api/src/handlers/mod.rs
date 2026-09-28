@@ -10,6 +10,7 @@ pub mod status;
 pub mod supply;
 pub mod templates;
 pub mod tokens;
+pub mod tx_status;
 pub mod txs;
 
 pub mod history;

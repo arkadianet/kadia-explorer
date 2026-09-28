@@ -182,3 +182,131 @@ async fn primary_error_also_falls_back() {
     let body = src.full_block_json(&hole_id).await.unwrap().unwrap();
     assert_eq!(decode_block(&body).unwrap().header.height, HOLE);
 }
+
+#[derive(Clone, Copy)]
+enum PendingAnswer {
+    Found,
+    Missing,
+    Unavailable,
+    Unsupported,
+}
+
+struct ObservedSource {
+    pending: PendingAnswer,
+    pending_calls: Arc<std::sync::atomic::AtomicUsize>,
+    bounded_calls: Arc<std::sync::Mutex<Vec<usize>>>,
+    body: &'static str,
+}
+
+impl ObservedSource {
+    fn new(pending: PendingAnswer, body: &'static str) -> Self {
+        Self {
+            pending,
+            pending_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            bounded_calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+            body,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl BlockSource for ObservedSource {
+    fn name(&self) -> &str {
+        "observed"
+    }
+    async fn best_height(&self) -> Result<u32, xp_source::SourceError> {
+        Ok(0)
+    }
+    async fn header_id_at(
+        &self,
+        _height: u32,
+    ) -> Result<Option<xp_types::Hash32>, xp_source::SourceError> {
+        Ok(None)
+    }
+    async fn full_block_json(
+        &self,
+        _id: &xp_types::Hash32,
+    ) -> Result<Option<String>, xp_source::SourceError> {
+        Ok(Some(self.body.to_owned()))
+    }
+    async fn full_block_json_bounded(
+        &self,
+        id: &xp_types::Hash32,
+        max_bytes: usize,
+    ) -> Result<Option<String>, xp_source::SourceError> {
+        self.bounded_calls.lock().unwrap().push(max_bytes);
+        if self.body.len() > max_bytes {
+            Err(xp_source::SourceError::Decode("too large".into()))
+        } else {
+            self.full_block_json(id).await
+        }
+    }
+    async fn unconfirmed_transaction_json(
+        &self,
+        _id: &xp_types::Hash32,
+    ) -> Result<Option<String>, xp_source::SourceError> {
+        self.pending_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self.pending {
+            PendingAnswer::Found => Ok(Some("primary transaction".into())),
+            PendingAnswer::Missing => Ok(None),
+            PendingAnswer::Unavailable => Err(xp_source::SourceError::Unavailable),
+            PendingAnswer::Unsupported => {
+                Err(xp_source::SourceError::Capability("unsupported".into()))
+            }
+        }
+    }
+    async fn genesis_boxes_json(&self) -> Result<String, xp_source::SourceError> {
+        Ok("[]".into())
+    }
+}
+
+#[tokio::test]
+async fn pending_observations_never_use_the_fallback_even_on_outage_or_absence() {
+    use std::sync::atomic::Ordering;
+    for answer in [
+        PendingAnswer::Found,
+        PendingAnswer::Missing,
+        PendingAnswer::Unavailable,
+        PendingAnswer::Unsupported,
+    ] {
+        let primary = Arc::new(ObservedSource::new(answer, "primary"));
+        let fallback = ObservedSource::new(PendingAnswer::Found, "fallback");
+        let fallback_calls = fallback.pending_calls.clone();
+        let source = Fallback::new(primary.clone(), fallback);
+        let result = source.unconfirmed_transaction_json(&[0; 32]).await;
+        match answer {
+            PendingAnswer::Found => assert_eq!(result.unwrap(), Some("primary transaction".into())),
+            PendingAnswer::Missing => assert_eq!(result.unwrap(), None),
+            PendingAnswer::Unavailable => {
+                assert!(matches!(result, Err(xp_source::SourceError::Unavailable)))
+            }
+            PendingAnswer::Unsupported => {
+                assert!(matches!(result, Err(xp_source::SourceError::Capability(_))))
+            }
+        }
+        assert_eq!(primary.pending_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(fallback_calls.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn bounded_requests_forward_the_same_limit_to_both_sources() {
+    let primary = Arc::new(ObservedSource::new(
+        PendingAnswer::Missing,
+        "long primary body",
+    ));
+    let fallback = ObservedSource::new(PendingAnswer::Missing, "small");
+    let fallback_limits = fallback.bounded_calls.clone();
+    let source = Fallback::new(primary.clone(), fallback);
+    assert_eq!(
+        source.full_block_json_bounded(&[0; 32], 5).await.unwrap(),
+        Some("small".into())
+    );
+    assert_eq!(*primary.bounded_calls.lock().unwrap(), [5]);
+    assert_eq!(*fallback_limits.lock().unwrap(), [5]);
+    assert_eq!(
+        source.full_block_json(&[0; 32]).await.unwrap(),
+        Some("long primary body".into())
+    );
+}

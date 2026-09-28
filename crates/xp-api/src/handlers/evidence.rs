@@ -169,7 +169,7 @@ pub async fn get_one(
             return Err(ApiError::Overloaded);
         }
         let raw = source
-            .full_block_json(&anchor)
+            .full_block_json_bounded(&anchor, 16 * 1024 * 1024)
             .await
             .map_err(|_| ApiError::Overloaded)?
             .ok_or(ApiError::Overloaded)?;

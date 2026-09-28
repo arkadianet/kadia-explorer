@@ -100,3 +100,15 @@ test('mobile receipt and evidence stay within the page', async ({ page }) => {
 		).toBe(true);
 	}
 });
+
+test('manual refresh recognizes newly resolved historical inputs', async ({ page }) => {
+	let current = structuredClone(tx);
+	current.inputs[0].box = null;
+	await page.route(`**/v1/txs/${tx.id}`, (route) => route.fulfill({ json: current }));
+	await page.goto(`/tx/${tx.id}`);
+	await expect(page.getByRole('heading', { name: 'Balance changes unavailable' })).toBeVisible();
+	current = tx;
+	await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Storage rent claim' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Balance changes unavailable' })).toHaveCount(0);
+});

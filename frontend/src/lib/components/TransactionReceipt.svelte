@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { TxDto, TxEvidence } from '$lib/api/types';
 	import { api } from '$lib/api/endpoints';
 	import { transactionEffects, type AddressEffect } from '$lib/tx/effects';
@@ -43,9 +44,15 @@
 			status.current?.indexed != null &&
 			tx.indexed_height !== status.current.indexed
 	);
+	// Newly resolved historical inputs can make rent evidence relevant. Confirmation-only
+	// updates do not change this key and must not fetch the block body again.
+	const evidenceKey = $derived(
+		`${tx.id}:${tx.block_id}:${tx.height}:${tx.inputs.map((i) => i.box?.creation_height ?? '?').join(',')}`
+	);
 
 	$effect(() => {
-		const current = tx;
+		void evidenceKey;
+		const current = untrack(() => tx);
 		void retry;
 		let cancelled = false;
 		evidence = null;
@@ -194,8 +201,8 @@
 				<p class="explanation">
 					{#if kind.kind === 'rent'}Storage rent was collected without a signature for {claims.length}
 						mature input{claims.length === 1 ? '' : 's'}.
-					{/if}{' '}These changes include returned change. The transaction fee is already reflected
-					across address changes; do not add it again.
+					{/if} These changes include returned change. The transaction fee is already reflected across
+					address changes; do not add it again.
 				</p>
 			</div>
 			<div class="selected-address">

@@ -111,6 +111,34 @@ export interface TxEvidence {
 	inputs: { id: string; proof: 'empty' | 'nonempty'; extension_127: string | null }[];
 }
 
+/** A single local-index and configured-node observation, not network-wide acceptance. */
+export interface TxStatusDto {
+	id: string;
+	state:
+		'confirmed' | 'pending' | 'not_observed' | 'no_longer_observed' | 'unavailable' | 'conflicted';
+	checked_at_ms: number;
+	indexed_height: number | null;
+	inclusion: { block_id: string; height: number; confirmations: number } | null;
+	previous_inclusion: { block_id: string; height: number } | null;
+	mempool: {
+		observation: 'present' | 'absent' | 'unavailable' | 'not_checked';
+		checked_at_ms: number | null;
+		first_seen_at_ms: number | null;
+		last_seen_at_ms: number | null;
+		error: 'unsupported' | 'unavailable' | 'busy' | null;
+	};
+	pending: {
+		input_count: number;
+		output_count: number;
+		data_input_count: number;
+		size: number | null;
+		fee: string | null;
+	} | null;
+	conflicts: { input_id: string; tx_id: string; height: number }[];
+	history_scope: 'process_local_requested_transactions';
+	retention_seconds: number;
+}
+
 /** Transaction summary routes and address history: counts without expanded inputs/outputs. */
 export interface TxSummaryDto {
 	id: string;

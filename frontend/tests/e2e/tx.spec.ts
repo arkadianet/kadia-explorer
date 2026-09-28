@@ -31,8 +31,18 @@ test('a transaction page lists its inputs and outputs', async ({ page }) => {
 	await expect(page).toHaveURL(`/blocks/${tx.height}`);
 });
 
-test('an unknown transaction id renders the 404 error page', async ({ page }) => {
+test('an unknown transaction id remains watchable on older servers', async ({ page }) => {
 	await page.goto(`/tx/${'a'.repeat(64)}`);
-	await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
-	await expect(page.getByText('Transaction not found')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Transaction', exact: true })).toBeVisible();
+	await expect(
+		page.getByText('This server does not provide live transaction status.', { exact: false })
+	).toBeVisible();
+});
+
+test('an invalid transaction id receives a format error', async ({ page }) => {
+	await page.goto('/tx/not-a-transaction');
+	await expect(page.getByRole('heading', { name: '400' })).toBeVisible();
+	await expect(
+		page.getByText('A transaction ID must contain 64 hexadecimal characters')
+	).toBeVisible();
 });

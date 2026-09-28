@@ -30,6 +30,67 @@ impl RustNode {
             SourceError::Http(e.to_string())
         }
     }
+
+    async fn fetch_block_json(
+        &self,
+        id: &Hash32,
+        max_bytes: Option<usize>,
+    ) -> Result<Option<String>, SourceError> {
+        let url = format!("{}/blocks/{}", self.base, xp_types::hex32(id));
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(Self::map_reqwest_err)?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            return Err(SourceError::Http(format!(
+                "GET {url}: status {}",
+                resp.status()
+            )));
+        }
+        let body = match max_bytes {
+            Some(max) => bounded_text(resp, max).await?,
+            None => resp
+                .text()
+                .await
+                .map_err(|e| SourceError::Decode(e.to_string()))?,
+        };
+        Ok(Some(body))
+    }
+}
+
+/// Read decompressed chunks without trusting Content-Length (including gzip/chunked bodies).
+async fn bounded_text(
+    mut resp: reqwest::Response,
+    max_bytes: usize,
+) -> Result<String, SourceError> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(RustNode::map_reqwest_err)? {
+        if chunk.len() > max_bytes - bytes.len() {
+            return Err(SourceError::Decode(format!(
+                "response body exceeds {max_bytes} bytes"
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|e| SourceError::Decode(e.to_string()))
+}
+
+/// Scala's ApiResponse turns an absent transaction into this specific JSON error. Kadia's
+/// Rust node adds the explicit detail below. A bare/proxy/missing-route 404 is inconclusive.
+fn is_transaction_absent(body: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    value.get("error").and_then(|v| v.as_u64()) == Some(404)
+        && value.get("reason").and_then(|v| v.as_str()) == Some("not-found")
+        && (matches!(value.get("detail"), Some(serde_json::Value::Null))
+            || value.get("detail").and_then(|v| v.as_str())
+                == Some("unconfirmed transaction not found"))
 }
 
 #[async_trait::async_trait]
@@ -103,35 +164,55 @@ impl BlockSource for RustNode {
     }
 
     async fn full_block_json(&self, id: &Hash32) -> Result<Option<String>, SourceError> {
-        let url = format!("{}/blocks/{}", self.base, xp_types::hex32(id));
+        self.fetch_block_json(id, None).await
+    }
+
+    async fn full_block_json_bounded(
+        &self,
+        id: &Hash32,
+        max_bytes: usize,
+    ) -> Result<Option<String>, SourceError> {
+        self.fetch_block_json(id, Some(max_bytes)).await
+    }
+
+    async fn unconfirmed_transaction_json(
+        &self,
+        id: &Hash32,
+    ) -> Result<Option<String>, SourceError> {
+        let url = format!(
+            "{}/transactions/unconfirmed/byTransactionId/{}",
+            self.base,
+            xp_types::hex32(id)
+        );
         let resp = self
             .http
             .get(&url)
             .send()
             .await
             .map_err(Self::map_reqwest_err)?;
-        if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
+        let status = resp.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            let body = bounded_text(resp, 2 * 1024 * 1024).await?;
+            return if is_transaction_absent(&body) {
+                Ok(None)
+            } else {
+                Err(SourceError::Capability(format!(
+                    "GET {url}: ambiguous 404; unconfirmed lookup support is not established"
+                )))
+            };
         }
-        if !resp.status().is_success() {
-            return Err(SourceError::Http(format!(
-                "GET {url}: status {}",
-                resp.status()
+        if matches!(
+            status,
+            reqwest::StatusCode::METHOD_NOT_ALLOWED | reqwest::StatusCode::NOT_IMPLEMENTED
+        ) {
+            return Err(SourceError::Capability(format!(
+                "GET {url}: status {status}; unconfirmed lookup is unsupported"
             )));
         }
-        // Bound decompressed bodies before allocation, including chunked responses.
-        // The API's optional proof lookup shares this source with ingest.
-        let mut resp = resp;
-        let mut bytes = Vec::new();
-        while let Some(chunk) = resp.chunk().await.map_err(Self::map_reqwest_err)? {
-            if chunk.len() > 16 * 1024 * 1024 - bytes.len() {
-                return Err(SourceError::Decode("block body exceeds 16 MiB".into()));
-            }
-            bytes.extend_from_slice(&chunk);
+        if !status.is_success() {
+            return Err(SourceError::Http(format!("GET {url}: status {status}")));
         }
-        String::from_utf8(bytes)
-            .map(Some)
-            .map_err(|e| SourceError::Decode(e.to_string()))
+        bounded_text(resp, 2 * 1024 * 1024).await.map(Some)
     }
 
     async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
