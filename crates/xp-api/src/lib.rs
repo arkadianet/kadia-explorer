@@ -233,6 +233,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .route("/v1/addresses/{addr}/txs", get(handlers::addresses::txs))
         .route("/v1/addresses/{addr}/rent", get(handlers::addresses::rent))
         .route("/v1/tokens", get(handlers::tokens::list))
+        .route("/v1/tokens/search", get(handlers::token_search::search))
         .route("/v1/tokens/{id}", get(handlers::tokens::get_one))
         .route("/v1/tokens/{id}/holders", get(handlers::tokens::holders))
         .route("/v1/tokens/{id}/boxes", get(handlers::tokens::boxes))

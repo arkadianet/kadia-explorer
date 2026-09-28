@@ -30,20 +30,23 @@ function destinationFor(
 export const load: PageLoad = async ({ url, fetch }) => {
 	const q = url.searchParams.get('q') ?? '';
 	const trimmed = q.trim();
+	const tokenQuery = q.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
+	const match =
+		url.searchParams.get('match') === 'exact' ? ('exact' as const) : ('prefix' as const);
 
 	// The register lookup lives in the query string beside `q`, so a result list survives a
 	// reload and can be linked to. It is read on every path: a lookup and a failed `q` search
 	// can be on screen at the same time.
 	const registers = parseRegisterQuery(url.searchParams.get('reg'), url.searchParams.get('value'));
 
-	if (!trimmed) return { q, reason: 'empty' as NotFoundReason, registers };
+	if (!tokenQuery) return { q, reason: 'empty' as NotFoundReason, registers };
 
 	const classified = classify(trimmed);
 	const direct = routeFor(classified);
 	if (direct) throw redirect(302, direct);
 
 	if (classified.kind !== 'hex32' && classified.kind !== 'address') {
-		return { q, reason: 'unknown-format' as NotFoundReason, registers };
+		return { q, reason: 'empty' as NotFoundReason, registers, tokenQuery, match };
 	}
 
 	// Resolve IDs and validate address candidates on the server.
@@ -63,7 +66,14 @@ export const load: PageLoad = async ({ url, fetch }) => {
 		throw redirect(302, destinationFor(result.kind, result.id));
 	} catch (e) {
 		if (e instanceof ApiError) {
-			if (e.status === 400) return { q, reason: 'unknown-format' as NotFoundReason, registers };
+			if (e.status === 400)
+				return {
+					q,
+					reason: 'unknown-format' as NotFoundReason,
+					registers,
+					tokenQuery,
+					match
+				};
 			if (e.status === 404) {
 				if (classified.kind === 'hex32') {
 					let pending = false;

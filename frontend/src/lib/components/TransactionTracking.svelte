@@ -27,6 +27,15 @@
 	);
 </script>
 
+{#snippet checkedAt()}
+	<p>
+		{observation
+			? `Checked ${absTime(observation.checked_at_ms)}.`
+			: 'Awaiting a successful live observation.'}
+		{tracking.unsupported ? '' : 'Checks every 5 seconds while this page is visible.'}
+	</p>
+{/snippet}
+
 <section class="tracking" class:confirmed aria-label="Live transaction status">
 	<div class="tracking-top">
 		<p class="eyebrow">
@@ -42,7 +51,7 @@
 		>
 	</div>
 	{#if !confirmed}
-		<h2>{title}</h2>
+		<h2 aria-live="polite" aria-atomic="true">{title}</h2>
 		<p class="description">
 			{#if tracking.checking && !observation}Looking for this ID in the local index and our node’s
 				mempool.
@@ -111,14 +120,10 @@
 		</ul>
 	{/if}
 	<div class="observation-note">
-		<p>
-			{observation
-				? `Checked ${absTime(observation.checked_at_ms)}.`
-				: 'Awaiting a successful live observation.'}
-			{tracking.unsupported ? '' : 'Checks every 5 seconds while this page is visible.'}
-		</p>
+		{#if !confirmed}{@render checkedAt()}{/if}
 		{#if observation}<details>
-				<summary>What this observation covers</summary>
+				<summary>{confirmed ? 'Observation details' : 'What this observation covers'}</summary>
+				{#if confirmed}{@render checkedAt()}{/if}
 				<p>
 					Pending status reflects one configured node. First observed means when this explorer
 					observed a requested ID, not when the transaction was broadcast. Observation history is
@@ -138,15 +143,53 @@
 		overflow: hidden;
 		border-radius: 20px;
 		padding: 28px;
-		background: #13392c;
+		background: #103a28;
+		border-top: 3px solid #b7f25f;
 		color: #f4fff6;
 	}
 	.tracking.confirmed {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		gap: 0 20px;
 		background: var(--surface-solid);
 		color: var(--fg);
 		border: var(--rule);
-		padding: 16px 20px;
+		padding: 12px 20px;
 		border-radius: var(--radius-card);
+	}
+	.tracking:not(.confirmed) {
+		--accent-ink: #b7f25f;
+	}
+	.confirmed .tracking-top {
+		display: contents;
+	}
+	.confirmed .eyebrow {
+		grid-column: 1;
+		grid-row: 1;
+		align-self: center;
+	}
+	.confirmed button {
+		grid-column: 3;
+		grid-row: 1;
+	}
+	.confirmed .observation-note {
+		grid-column: 2;
+		grid-row: 1;
+		align-self: center;
+		margin-top: 0;
+	}
+	.confirmed details {
+		margin-top: 0;
+	}
+	.confirmed .observation-note:has(details[open]) {
+		grid-column: 1 / -1;
+		grid-row: auto;
+		margin-top: 10px;
+	}
+	.confirmed .warning,
+	.confirmed .description,
+	.confirmed .conflicts {
+		grid-column: 1 / -1;
 	}
 	.tracking-top {
 		display: flex;
@@ -192,7 +235,8 @@
 	}
 	h2 {
 		margin-top: 24px;
-		font-size: clamp(26px, 4vw, 38px);
+		font-size: clamp(28px, 4vw, 42px);
+		font-weight: 800;
 		letter-spacing: -1px;
 		line-height: 1.15;
 	}
@@ -287,6 +331,11 @@
 		}
 		.eyebrow {
 			font-size: 10px;
+		}
+		.confirmed .observation-note {
+			grid-column: 1 / -1;
+			grid-row: auto;
+			margin-top: 8px;
 		}
 	}
 </style>

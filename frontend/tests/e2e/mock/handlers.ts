@@ -349,6 +349,44 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 	}
 
 	// --- tokens ------------------------------------------------------------------------
+	if (path === '/v1/tokens/search') {
+		const q = url.searchParams.get('q') ?? '';
+		const normalize = (value: string) =>
+			value
+				.trim()
+				.replace(/[\t\n\v\f\r ]+/g, ' ')
+				.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+		const normalized = normalize(q);
+		if (!normalized) return badRequest(res, 'q must not be empty');
+		const match = url.searchParams.get('match') ?? 'prefix';
+		const matches = d.tokens
+			.filter(
+				(token) =>
+					token.name &&
+					(match === 'exact'
+						? normalize(token.name) === normalized
+						: normalize(token.name).startsWith(normalized))
+			)
+			.sort(
+				(a, b) => normalize(a.name).localeCompare(normalize(b.name)) || a.id.localeCompare(b.id)
+			);
+		const result = page(matches, cursor, limit);
+		return sendJson(res, 200, {
+			...result,
+			next_snapshot: result.next_cursor ? 'mock-name-snapshot' : null,
+			search: {
+				query: q,
+				normalized_query: normalized,
+				match,
+				index_version: 1,
+				coverage: 'complete',
+				partial_from: null,
+				indexed_names: d.tokens.filter((t) => t.name).length,
+				total_tokens: d.tokens.length,
+				unindexed_tokens: 0
+			}
+		});
+	}
 	if (path === '/v1/tokens') {
 		const sort = url.searchParams.get('sort');
 		if (sort !== null && sort !== 'newest' && sort !== 'holders') {

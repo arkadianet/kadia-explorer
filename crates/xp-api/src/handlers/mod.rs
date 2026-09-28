@@ -9,6 +9,7 @@ pub mod search;
 pub mod status;
 pub mod supply;
 pub mod templates;
+pub mod token_search;
 pub mod tokens;
 pub mod tx_status;
 pub mod txs;

@@ -215,6 +215,20 @@ export interface TokenInfoDto {
 	mint_height: number;
 }
 
+export interface TokenSearchDto extends PageDto<TokenInfoDto> {
+	search: {
+		query: string;
+		normalized_query: string;
+		match: 'prefix' | 'exact';
+		index_version: 1;
+		coverage: 'complete' | 'partial';
+		partial_from: number | null;
+		indexed_names: number;
+		total_tokens: number;
+		unindexed_tokens: number;
+	};
+}
+
 export interface TokenHolderDto {
 	address: string | null;
 	tree_hash: string;

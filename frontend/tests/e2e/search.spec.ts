@@ -64,15 +64,19 @@ test('an invalid address checksum receives a format hint', async ({ page }) => {
 		route.fulfill({ status: 400, json: { detail: 'Invalid address' } })
 	);
 	await page.goto(`/search?q=${MOCK_ADDRESS.slice(0, -1)}1`);
-	await expect(page.getByText('Enter a block height, an id or an address.')).toBeVisible();
+	await expect(
+		page.getByText('This is not a valid indexed address or ID.', { exact: false })
+	).toBeVisible();
 });
 
-test('an unparseable query lands on the search page with a format hint', async ({ page }) => {
+test('ordinary text searches minted token names without claiming a match', async ({ page }) => {
 	await page.goto('/');
 	await search(page, 'not a real query!');
 	await expect(page).toHaveURL(/\/search\?q=/);
-	await expect(page.getByText(/No match for "not a real query!"/)).toBeVisible();
-	await expect(page.getByText(/Enter a block height, an id or an address\./)).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'No indexed name matches' })).toBeVisible();
+	await expect(page.getByRole('textbox', { name: 'Token name', exact: true })).toHaveValue(
+		'not a real query!'
+	);
 });
 
 test('a well-formed but unknown id reports not found', async ({ page }) => {

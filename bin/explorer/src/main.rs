@@ -10,6 +10,7 @@ use config::Config;
 use std::future::IntoFuture;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -80,6 +81,64 @@ async fn wait_for_shutdown_signal() {
 /// `RestartPreventExitStatus=3` rather than looping the unit forever.
 const EXIT_REINDEX_REQUIRED: i32 = 3;
 
+const TOKEN_NAME_BACKFILL_BATCH: usize = 500;
+const TOKEN_NAME_BACKFILL_PAUSE: Duration = Duration::from_millis(25);
+const TOKEN_NAME_ANCHOR_PAUSE: Duration = Duration::from_secs(1);
+
+/// One bounded blocking batch at a time, leaving the writer available to ingest between
+/// batches. Cancellation never drops a running blocking task: the caller joins this worker
+/// before shutdown completes, including the last commit that was already in progress.
+async fn backfill_token_names<F>(batch: F, shutdown: CancellationToken)
+where
+    F: Fn() -> Result<xp_store::token_search::TokenNameIndexStatus, xp_store::StoreError>
+        + Send
+        + Sync
+        + 'static,
+{
+    let batch = Arc::new(batch);
+    loop {
+        if shutdown.is_cancelled() {
+            return;
+        }
+        let run_batch = batch.clone();
+        let batch_shutdown = shutdown.clone();
+        // Do not select cancellation against this await: spawn_blocking cannot be aborted
+        // once running. A queued task also checks cancellation before touching the store.
+        let result = tokio::task::spawn_blocking(move || {
+            (!batch_shutdown.is_cancelled()).then(|| run_batch())
+        })
+        .await;
+        let pause = match result {
+            Ok(Some(Ok(status))) if status.ready => {
+                info!(
+                    indexed_names = status.indexed_names,
+                    unindexed_tokens = status.unindexed_tokens,
+                    "token-name search index ready"
+                );
+                return;
+            }
+            Ok(Some(Ok(_))) => TOKEN_NAME_BACKFILL_PAUSE,
+            // A partial start can legitimately have no indexed header until ingest commits
+            // its first block. Keep search unavailable and wait for that canonical anchor.
+            Ok(Some(Err(xp_store::StoreError::TokenSearchNotReady))) => TOKEN_NAME_ANCHOR_PAUSE,
+            Ok(Some(Err(error))) => {
+                warn!(%error, "token-name backfill stopped; search remains unavailable, ordinary indexing continues");
+                return;
+            }
+            Ok(None) => return,
+            Err(error) => {
+                warn!(%error, "token-name backfill worker failed; ordinary indexing continues");
+                return;
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return,
+            _ = tokio::time::sleep(pause) => {}
+        }
+    }
+}
+
 /// Runs the explorer to completion and returns the process exit code: `0` on a clean
 /// signal-triggered shutdown, [`EXIT_REINDEX_REQUIRED`] if ingest halted because the store
 /// needs a reindex, `1` for any other halt.
@@ -130,9 +189,8 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         }
     };
 
-    // Bind before spawning ingest: a bad `bind` address must fail fast without the ingest
-    // task ever having touched the store, so there is nothing running yet to cancel or wait
-    // out when `?` returns early here.
+    // Bind before spawning ingest or backfill: a bad address must fail fast before any
+    // background writer starts, so there is nothing running to cancel when `?` returns.
     let listener = tokio::net::TcpListener::bind(&cfg.bind)
         .await
         .with_context(|| format!("binding {}", cfg.bind))?;
@@ -158,6 +216,11 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         source.clone(),
         ingest_cfg,
         status_tx,
+        shutdown.clone(),
+    ));
+    let backfill_store = store.clone();
+    let backfill_handle = tokio::spawn(backfill_token_names(
+        move || backfill_store.backfill_token_names_batch(TOKEN_NAME_BACKFILL_BATCH),
         shutdown.clone(),
     ));
 
@@ -233,6 +296,12 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
         }
     };
 
+    // The signal/server/ingest paths above all cancel shutdown. Wait out an admitted
+    // backfill batch as well, so the process never exits with a detached database write.
+    if let Err(error) = backfill_handle.await {
+        warn!(%error, "token-name backfill task failed while joining shutdown");
+    }
+
     Ok(explorer_exit_code(ingest_outcome, server_failed))
 }
 
@@ -285,6 +354,199 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn build_status(ready: bool) -> xp_store::token_search::TokenNameIndexStatus {
+        xp_store::token_search::TokenNameIndexStatus {
+            version: xp_store::token_search::TOKEN_NAME_INDEX_VERSION,
+            ready,
+            phase: if ready { "ready" } else { "building" },
+            scanned_tokens: 0,
+            total_tokens: 0,
+            indexed_names: 0,
+            unindexed_tokens: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn token_name_worker_reaches_ready_with_the_real_store() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "kadia-token-name-worker-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let store = Arc::new(Store::open(&directory.join("explorer.redb")).unwrap());
+        let worker_store = store.clone();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            backfill_token_names(
+                move || worker_store.backfill_token_names_batch(TOKEN_NAME_BACKFILL_BATCH),
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .expect("ready store must finish promptly");
+        assert!(
+            xp_store::Reader::new(&store)
+                .unwrap()
+                .token_name_index_status()
+                .unwrap()
+                .ready
+        );
+        drop(store);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn token_name_worker_repeats_bounded_batches_and_stops_at_ready() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = calls.clone();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            backfill_token_names(
+                move || {
+                    Ok(build_status(
+                        worker_calls.fetch_add(1, Ordering::SeqCst) == 2,
+                    ))
+                },
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .expect("three bounded batches must finish");
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn token_name_worker_retries_until_ingest_provides_an_anchor() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = calls.clone();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            backfill_token_names(
+                move || {
+                    if worker_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        Err(xp_store::StoreError::TokenSearchNotReady)
+                    } else {
+                        Ok(build_status(true))
+                    }
+                },
+                CancellationToken::new(),
+            ),
+        )
+        .await
+        .expect("missing initial anchor must be retried");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn token_name_worker_cancels_during_the_anchor_wait() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = calls.clone();
+        let shutdown = CancellationToken::new();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let started = std::sync::Mutex::new(Some(started_tx));
+        let handle = tokio::spawn(backfill_token_names(
+            move || {
+                worker_calls.fetch_add(1, Ordering::SeqCst);
+                if let Some(started) = started.lock().unwrap().take() {
+                    started.send(()).unwrap();
+                }
+                Err(xp_store::StoreError::TokenSearchNotReady)
+            },
+            shutdown.clone(),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), started_rx)
+            .await
+            .expect("anchor check starts")
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            !handle.is_finished(),
+            "worker must keep waiting for an anchor"
+        );
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_millis(500), handle)
+            .await
+            .expect("cancellation must interrupt the anchor retry delay")
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn token_name_worker_cancellation_joins_an_inflight_write() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let shutdown = CancellationToken::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = calls.clone();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let started = std::sync::Mutex::new(Some(started_tx));
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        let release = std::sync::Mutex::new(release_rx);
+        let mut handle = tokio::spawn(backfill_token_names(
+            move || {
+                worker_calls.fetch_add(1, Ordering::SeqCst);
+                started.lock().unwrap().take().unwrap().send(()).unwrap();
+                release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap();
+                Ok(build_status(false))
+            },
+            shutdown.clone(),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), started_rx)
+            .await
+            .expect("batch starts")
+            .unwrap();
+        shutdown.cancel();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), &mut handle)
+                .await
+                .is_err(),
+            "cancellation must wait for an already admitted write"
+        );
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("worker joins after admitted write completes")
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn token_name_worker_cancelled_before_start_does_not_write() {
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            backfill_token_names(|| panic!("cancelled worker must not write"), shutdown),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn token_name_worker_failure_preserves_service_cancellation_state() {
+        let shutdown = CancellationToken::new();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            backfill_token_names(
+                || Err(xp_store::StoreError::ReadLimit("test batch failure")),
+                shutdown.clone(),
+            ),
+        )
+        .await
+        .expect("failed optional index worker must return");
+        assert!(!shutdown.is_cancelled());
+    }
 
     #[test]
     fn parse_args_defaults_and_flag() {

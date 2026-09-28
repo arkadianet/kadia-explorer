@@ -96,6 +96,7 @@ fn undo_tokens(txn: &redb::WriteTransaction, undo: &UndoRow) -> Result<(), Store
     }
     for id in &undo.new_tokens {
         let cur = token_row_now(&tokens, id, "undo: new token row missing")?;
+        crate::token_search::remove_name(txn, id, &cur.name)?;
         by_holders.remove(k_by_count(cur.holder_count, id).as_slice())?;
         by_gidx.remove(k_u64(cur.mint_gidx).as_slice())?;
         tokens.remove(id.as_slice())?;
@@ -141,6 +142,7 @@ impl Store {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let txn = self.db.begin_write()?;
+        crate::token_search::prepare_write(&txn)?;
         for h in (target + 1..=tip).rev() {
             // Scoped so the `AccessGuard` (and the table handle it borrows) drop before the
             // next `txn.open_table` call opens a different table for writing. The binding is
@@ -351,6 +353,7 @@ impl Store {
             }
         }
         let entries = txn.open_table(REGISTER_IDX)?.len()?;
+        crate::token_search::finish_write(&txn)?;
         txn.commit()?;
         self.register_entries_cache
             .store(entries, std::sync::atomic::Ordering::Relaxed);

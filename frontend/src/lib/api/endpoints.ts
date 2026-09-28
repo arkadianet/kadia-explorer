@@ -14,6 +14,7 @@ import type {
 	TemplateDto,
 	TokenHolderDto,
 	TokenInfoDto,
+	TokenSearchDto,
 	TxDto,
 	TxEvidence,
 	TxStatusDto,
@@ -141,6 +142,18 @@ export const api = {
 
 	token: (id: string, f?: Fetch) =>
 		apiGet<TokenInfoDto>(`/tokens/${encodeURIComponent(id)}`, undefined, f),
+	tokenSearch: (
+		q: string,
+		match: 'prefix' | 'exact' = 'prefix',
+		cursor?: string,
+		snapshot?: string,
+		f?: Fetch
+	) =>
+		apiGet<TokenSearchDto>(
+			'/tokens/search',
+			{ q, match, cursor, snapshot, limit: 20, consistency: 'strict' },
+			f
+		),
 
 	tokenHolders: (id: string, cursor?: string, limit = 50, f?: Fetch, snapshot?: string) =>
 		apiGet<PageDto<TokenHolderDto>>(

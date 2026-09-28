@@ -1,97 +1,40 @@
-/* Design tokens — "light, photographic product page" (design v2).
- *
- * Light is the product's primary theme; dark is the same layout with the surfaces inverted.
- * Neither is forced: `prefers-color-scheme` decides, and the header toggle overrides it and
- * persists the choice as `xp-theme` (see src/app.html and $lib/theme/theme.svelte.ts).
- *
- * Two families of tone colour exist on purpose:
- *   --ok / --warn / --danger / --accent   fills, rules, bars, dots, primary buttons
- *   --*-ink                               the same tone used as TEXT
- * Ergo green at full saturation (#1fb56b) is a 2.2:1 fill, never a text colour — that is what
- * the ink pair is for. Never set text to a non-ink tone.
- *
- * Contrast (WCAG 2.x sRGB relative luminance, computed with a node script over these exact
- * hex values). Every text pairing clears 4.5:1.
- *
- *   LIGHT                       on --bg #f5f6f4   on --surface-solid #ffffff
- *     --fg          #14201b          15.47             16.77
- *     --fg-muted    #5f6d66           5.01              5.43
- *     --accent-ink  #0d7a4c           4.96              5.38
- *     --warn-ink    #8a5d00           5.31              5.76
- *     --danger-ink  #b23434           5.64              6.12
- *     --btn-fill-fg on --btn-fill: 16.77; #ffffff on the hover fill #0d7a4c: 5.38
- *     hero display #14201b on the palest dawn ridge 15.60, on the deepest 8.05
- *     hero lede    #2f4038 on those two: 10.22 / 5.28
- *
- *   DARK                        on --bg #0f1512   on --surface-solid #16201b
- *     --fg          #e9eeea          15.74             14.23
- *     --fg-muted    #93a49a           7.06              6.38
- *     --accent-ink  #43d492           9.74              8.81
- *     --warn-ink    #e6b455           9.70              8.77
- *     --danger-ink  #f08b8b           7.72              6.98
- *     --btn-fill-fg on --btn-fill: 15.74; #0f1512 on the hover fill #43d492: 9.74
- *     hero display #f2f6f3 on the dusk ridges: 9.73 / 17.31
- *
- *   INK PANELS (rail, live transactions, go-deeper), on #0f1512 / #0b100d
- *     --ink-fg      #e9eeea    15.74 / 16.34      --ink-fg-muted #93a49a  7.06 / 7.33
- *     rent chip     #6fdca7    10.98 / 11.40      token chip     #e8be6a 10.56 / 10.97
- *     live dot      #1fb56b     6.93 /  7.20      danger chip    #f0a0a0  9.01 / 9.36
- */
-
+/* Kadia: deep forest, signal lime, and sharp data-first surfaces. */
 :root {
 	color-scheme: light;
-
-	/* Page ground and the two surface weights: glass (over the backdrop) and solid (over the
-	   page ground, where blur would only cost paint time). */
-	--bg: #f5f6f4;
-	--bg-sunk: #eceeea;
-	--surface: rgba(255, 255, 255, 0.72);
+	--bg: #eef3ef;
+	--bg-sunk: #e2ebe4;
+	--surface: #ffffff;
 	--surface-solid: #ffffff;
-	--surface-hover: #f2f4f1;
-	/* The dark panel used for the sidebar, the live-transaction panel and the go-deeper band. */
-	--ink-panel: #0f1512;
-	--ink-panel-soft: rgba(20, 28, 24, 0.66);
-	--ink-fg: #e9eeea;
-	--ink-fg-muted: #93a49a;
-	--ink-hairline: rgba(233, 238, 234, 0.12);
-
-	--fg: #14201b;
-	--fg-muted: #5f6d66;
-	--hairline: #e3e8e4;
-
-	--accent: #1fb56b;
-	--accent-ink: #0d7a4c;
-	--accent-wash: rgba(31, 181, 107, 0.12);
-	--ok: #1fb56b;
-	--ok-ink: #0d7a4c;
+	--surface-hover: #f0f7ee;
+	--ink-panel: #071b15;
+	--ink-panel-soft: #102b21;
+	--ink-fg: #f0f7ee;
+	--ink-fg-muted: #a9bfb2;
+	--ink-hairline: #294438;
+	--fg: #10291e;
+	--fg-muted: #52665a;
+	--hairline: #d4e0d7;
+	--accent: #b7f25f;
+	--accent-ink: #28600e;
+	--accent-wash: #e8f5d9;
+	--ok: #35b475;
+	--ok-ink: #176b40;
 	--warn: #c98a00;
-	--warn-ink: #8a5d00;
+	--warn-ink: #805000;
 	--danger: #d24b4b;
-	--danger-ink: #b23434;
-
-	/* Buttons: the filled one is near-black with white text, as in the reference. */
-	--btn-fill: #14201b;
-	--btn-fill-fg: #ffffff;
-	/* Hover swaps the fill for the accent; the pair is chosen per theme because white on a
-	   light-theme green passes and on a dark-theme green does not. */
-	--btn-hover: #0d7a4c;
+	--danger-ink: #a62b2b;
+	--btn-fill: #10291e;
+	--btn-fill-fg: #effadb;
+	--btn-hover: #244a30;
 	--btn-hover-fg: #ffffff;
-
 	--rule: 1px solid var(--hairline);
-	/* Alpha of a tone behind its own badge text (Badge.svelte). */
 	--wash: 0.14;
-
-	/* Three radii, three jobs: cards, controls, pills. Nothing else gets a radius. */
-	--radius-card: 14px;
-	--radius-control: 10px;
+	--radius-card: 16px;
+	--radius-control: 9px;
 	--radius-pill: 999px;
-
-	/* Shadows are layered and deliberately unequal: a hero card lifts, a list card barely
-	   leaves the page. A single grey drop under everything is the tell of a template. */
-	--shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(20, 32, 27, 0.08);
-	--shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 12px rgba(20, 32, 27, 0.05);
-	--shadow-hair: 0 1px 1px rgba(20, 32, 27, 0.04);
-
+	--shadow-lift: 0 12px 38px #10291e12;
+	--shadow-rest: 0 2px 0 #10291e05;
+	--shadow-hair: 0 1px 0 #10291e06;
 	--space-1: 4px;
 	--space-2: 8px;
 	--space-3: 12px;
@@ -102,75 +45,62 @@
 	--space-10: 40px;
 	--space-12: 56px;
 	--space-16: 80px;
-
 	--fs-micro: 12px;
 	--fs-data: 13px;
 	--fs-label: 13px;
 	--fs-body: 15px;
-	--fs-title: 17px;
-	--fs-page: 24px;
-	--fs-key: 30px;
-	--fs-display: 64px;
-
+	--fs-title: 18px;
+	--fs-page: 36px;
+	--fs-key: 32px;
+	--fs-display: 60px;
 	--gutter: 32px;
-	--sidebar-w: 232px;
-	--topbar-h: 72px;
-
-	--font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
-	/* Ids and hashes still need a fixed advance width; Manrope has no mono cut. */
+	--sidebar-w: 228px;
+	--topbar-h: 88px;
+	--font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-
 :root[data-theme='dark'] {
 	color-scheme: dark;
-
-	--bg: #0f1512;
-	--bg-sunk: #0b100d;
-	--surface: rgba(24, 33, 28, 0.72);
-	--surface-solid: #16201b;
-	--surface-hover: #1d2822;
-	--ink-panel: #0b100d;
-	--ink-panel-soft: rgba(11, 16, 13, 0.72);
-	--ink-fg: #e9eeea;
-	--ink-fg-muted: #93a49a;
-	--ink-hairline: rgba(233, 238, 234, 0.1);
-
-	--fg: #e9eeea;
-	--fg-muted: #93a49a;
-	--hairline: #26312b;
-
-	--accent: #2ec27e;
-	--accent-ink: #43d492;
-	--accent-wash: rgba(46, 194, 126, 0.16);
-	--ok: #2ec27e;
-	--ok-ink: #43d492;
+	--bg: #081a13;
+	--bg-sunk: #05120d;
+	--surface: #10271c;
+	--surface-solid: #10271c;
+	--surface-hover: #193726;
+	--ink-panel: #05120d;
+	--ink-panel-soft: #102b21;
+	--fg: #eaf3e8;
+	--fg-muted: #a6bcae;
+	--hairline: #294637;
+	--accent-ink: #b7f25f;
+	--accent-wash: #253f22;
+	--ok: #58d292;
+	--ok-ink: #74dfa4;
 	--warn: #d9a441;
-	--warn-ink: #e6b455;
+	--warn-ink: #efc26d;
 	--danger: #e07070;
-	--danger-ink: #f08b8b;
-
-	--btn-fill: #e9eeea;
-	--btn-fill-fg: #0f1512;
-	--btn-hover: #43d492;
-	--btn-hover-fg: #0f1512;
-
-	--shadow-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.45);
-	--shadow-rest: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 16px rgba(0, 0, 0, 0.28);
-	--shadow-hair: 0 1px 1px rgba(0, 0, 0, 0.3);
+	--danger-ink: #ffaaaa;
+	--btn-fill: #b7f25f;
+	--btn-fill-fg: #10291e;
+	--btn-hover: #cafa89;
+	--btn-hover-fg: #10291e;
+	--shadow-lift: 0 16px 40px #0005;
+	--shadow-rest: 0 2px 0 #0002;
+	--shadow-hair: 0 1px 0 #0002;
 }
-
 @media (max-width: 900px) {
 	:root {
 		--gutter: 18px;
 		--fs-display: 40px;
+		--fs-page: 28px;
+		--topbar-h: 76px;
 	}
 }
-
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,
 	*::after {
 		animation: none !important;
 		transition: none !important;
+		scroll-behavior: auto !important;
 	}
 }

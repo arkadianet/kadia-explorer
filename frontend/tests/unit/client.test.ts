@@ -11,6 +11,16 @@ function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
 }
 
 describe('apiGet', () => {
+	it('preserves a machine-readable preparation code without treating it as no results', async () => {
+		const fetchFn = vi
+			.fn()
+			.mockResolvedValue(
+				jsonResponse({ code: 'token_search_preparing', detail: 'Building index' }, 503)
+			);
+		await expect(
+			api.tokenSearch('sig', 'prefix', undefined, undefined, fetchFn)
+		).rejects.toMatchObject({ status: 503, code: 'token_search_preparing' });
+	});
 	it('rejects with ApiError on a 404 problem response', async () => {
 		const fetchFn = vi.fn().mockResolvedValue(
 			jsonResponse(
@@ -70,6 +80,19 @@ describe('api.rentUpcoming', () => {
 });
 
 describe('api.tokens', () => {
+	it('binds token-name matching and pagination to a strict snapshot', async () => {
+		const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ items: [], next_cursor: null }));
+		await api.tokenSearch('Sigma +', 'exact', 'cursor', 'anchor', fetchFn);
+		const params = new URL(fetchFn.mock.calls[0][0], 'http://localhost').searchParams;
+		expect(Object.fromEntries(params)).toEqual({
+			q: 'Sigma +',
+			match: 'exact',
+			cursor: 'cursor',
+			snapshot: 'anchor',
+			limit: '20',
+			consistency: 'strict'
+		});
+	});
 	it('requests /v1/tokens with sort, cursor and limit', async () => {
 		const body = { items: [], next_cursor: null };
 		const fetchFn = vi.fn().mockResolvedValue(jsonResponse(body));

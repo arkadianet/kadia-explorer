@@ -25,7 +25,9 @@ for (const theme of ['light', 'dark']) {
 			]) {
 				await more.press('Space');
 				const link = nav.getByRole('link', { name: label, exact: true });
+				await expect(link).toBeVisible();
 				await link.focus();
+				await expect(link).toBeFocused();
 				const colours = await link.evaluate((element) => {
 					const style = getComputedStyle(element);
 					return {

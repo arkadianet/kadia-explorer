@@ -286,7 +286,7 @@
 		height: 34px;
 		flex: none;
 		border-radius: 11px;
-		background: var(--ink-fg);
+		background: var(--accent);
 		color: var(--ink-panel);
 		font-size: 19px;
 		font-weight: 700;
@@ -301,7 +301,7 @@
 	}
 
 	.name {
-		font-size: var(--fs-title);
+		font-size: 25px;
 		font-weight: 700;
 		letter-spacing: -0.02em;
 	}
@@ -339,7 +339,7 @@
 	/* The active item is a filled pill, the only light shape in a dark column. */
 	.nav a.current {
 		color: var(--ink-panel);
-		background: var(--ink-fg);
+		background: var(--accent);
 		font-weight: 600;
 	}
 
@@ -431,6 +431,8 @@
 		gap: var(--space-3);
 		height: var(--topbar-h);
 		padding: 0 var(--gutter);
+		background: var(--bg);
+		border-bottom: var(--rule);
 	}
 
 	.search-slot {
@@ -506,12 +508,12 @@
 		flex: 1;
 		min-width: 0;
 		width: 100%;
-		max-width: 1240px;
+		max-width: 1480px;
 		padding: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-2)) var(--gutter)
 			var(--space-16);
 		display: flex;
 		flex-direction: column;
-		gap: var(--space-10);
+		gap: var(--space-8);
 	}
 
 	.content > :global(*) {
@@ -646,6 +648,10 @@
 
 	.more-links a:hover {
 		background: var(--ink-hairline);
+	}
+	.nav :focus-visible,
+	.tabbar :focus-visible {
+		outline-color: var(--accent);
 	}
 
 	@media (min-width: 900px) {

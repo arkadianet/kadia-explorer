@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Backdrop from '$lib/components/Backdrop.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import Sparkline from '$lib/components/Sparkline.svelte';
 	import Table from '$lib/components/Table.svelte';
@@ -150,9 +149,9 @@
 
 <!-- ------------------------------------------------------------------------------- hero -->
 <section class="hero">
-	<Backdrop variant="hero" />
 	<div class="hero-in">
 		<div class="hero-copy">
+			<p class="kicker">KADIA / ERGO MAINNET</p>
 			<h1>Transparent<br />by design.</h1>
 			<p class="lede">Explore, understand, and build on Ergo.</p>
 			<div class="cta">
@@ -206,6 +205,7 @@
 		</p>
 		<Sparkline
 			values={txPerHour}
+			color="var(--accent-ink)"
 			kind="bars"
 			title="Transactions per hour across the last 24 hours of indexed chain."
 		/>
@@ -228,6 +228,7 @@
 		</p>
 		<Sparkline
 			values={blocksPerHour}
+			color="var(--accent-ink)"
 			kind="line"
 			title="Blocks per hour across the last 24 hours of indexed chain."
 		/>
@@ -248,6 +249,7 @@
 		</p>
 		<Sparkline
 			values={rewardPerHour}
+			color="var(--accent-ink)"
 			kind="line"
 			title="Reward paid per hour, in ERG, across the last 24 hours of indexed chain."
 		/>
@@ -516,7 +518,6 @@
 
 <!-- -------------------------------------------------------------------------- go deeper -->
 <section class="deeper">
-	<Backdrop variant="band" uid="band" />
 	<div class="deeper-in">
 		<div class="deeper-head">
 			<h2>Go deeper</h2>
@@ -546,8 +547,10 @@
 	}
 
 	.hero {
-		margin-top: calc((var(--topbar-h) + var(--banner-h, 0px) + var(--space-2)) * -1);
-		border-radius: 0 0 var(--radius-card) var(--radius-card);
+		margin: 8px 0 0;
+		border-radius: 20px;
+		background: #103a28;
+		color: #eef8e8;
 	}
 
 	.hero-in {
@@ -556,9 +559,8 @@
 		align-items: flex-end;
 		justify-content: space-between;
 		gap: var(--space-8);
-		padding: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-12)) var(--gutter)
-			var(--space-10);
-		min-height: 420px;
+		padding: 36px;
+		min-height: 280px;
 	}
 
 	.hero-copy {
@@ -569,16 +571,16 @@
 	   competes with it, which is why the buttons underneath are small and quiet. */
 	h1 {
 		font-size: var(--fs-display);
-		font-weight: 300;
+		font-weight: 800;
 		line-height: 1.02;
 		letter-spacing: -0.028em;
-		color: #14201b;
+		color: #e7ffc7;
 	}
 
 	.lede {
 		margin-top: var(--space-4);
 		font-size: 18px;
-		color: #2f4038;
+		color: #c9dccd;
 	}
 
 	:global(:root[data-theme='dark']) .hero h1 {
@@ -602,10 +604,10 @@
 		width: 250px;
 		/* The stat row rises 68 px into the hero; this keeps a clear 28 px of sky between the
 		   card's bottom edge and the top of those cards at every desktop width. */
-		margin-bottom: 56px;
+		margin-bottom: 0;
 		padding: var(--space-4) var(--space-5) var(--space-5);
 		border-radius: var(--radius-card);
-		background: var(--ink-panel-soft);
+		background: #071f16;
 		backdrop-filter: blur(16px) saturate(1.2);
 		-webkit-backdrop-filter: blur(16px) saturate(1.2);
 		border: 1px solid rgba(233, 238, 234, 0.16);
@@ -655,7 +657,7 @@
 		display: grid;
 		grid-template-columns: repeat(5, minmax(0, 1fr));
 		gap: var(--space-6);
-		margin-top: calc(var(--space-10) * -1 - 28px);
+		margin-top: 0;
 		position: relative;
 		z-index: 5;
 	}
@@ -1064,7 +1066,7 @@
 			flex-direction: column;
 			align-items: stretch;
 			gap: var(--space-8);
-			padding-top: calc(var(--topbar-h) + var(--banner-h, 0px) + var(--space-8));
+			padding: 24px;
 			min-height: 0;
 		}
 		.tipcard {
@@ -1080,7 +1082,30 @@
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 		.hero {
-			border-radius: 0;
+			border-radius: 16px;
 		}
+	}
+	.kicker {
+		font: 11px var(--font-mono);
+		letter-spacing: 0.12em;
+		color: #b7f25f;
+		margin-bottom: 18px;
+	}
+	.hero .btn-fill {
+		background: #b7f25f;
+		color: #10291e;
+	}
+	.hero :global(:focus-visible),
+	.deeper :global(:focus-visible) {
+		outline-color: #b7f25f;
+	}
+	.hero .btn-ghost {
+		background: transparent;
+		color: #eef8e8;
+		border-color: #6a8a73;
+	}
+	.deeper {
+		background: var(--ink-panel);
+		border-top: 3px solid var(--accent);
 	}
 </style>

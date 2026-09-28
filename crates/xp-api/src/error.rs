@@ -137,11 +137,21 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// Every store failure is a server-side fault: a caller cannot provoke one with a
-/// well-formed request, so it maps to 500 (and is logged when rendered).
+/// Preserve actionable request/readiness failures; unexpected store failures stay private.
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> ApiError {
         match e {
+            StoreError::ReadLimit("token_search_bytes") => ApiError::History {
+                status: StatusCode::UNPROCESSABLE_ENTITY,
+                code: "token_search_bytes",
+                detail: "token metadata exceeds the search page byte limit; reduce the page limit or open a token by ID".into(),
+            },
+            StoreError::TokenSearchNotReady => ApiError::History {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                code: "token_search_preparing",
+                detail: "token-name search is preparing its index; retry shortly".into(),
+            },
+            StoreError::InvalidTokenSearch(detail) => ApiError::BadRequest(detail.into()),
             StoreError::ReadLimit(code) => ApiError::Expansion(code),
             StoreError::Corrupt(_) => ApiError::Integrity(format!("store: {e}")),
             _ => ApiError::Internal(format!("store: {e}")),

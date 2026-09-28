@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import Panel from '$lib/components/Panel.svelte';
+	import TokenDiscovery from '$lib/components/TokenDiscovery.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import SearchBox from '$lib/components/SearchBox.svelte';
 	import InfiniteList from '$lib/components/InfiniteList.svelte';
@@ -92,38 +93,44 @@
 	<title>{query ? `Boxes with ${query.reg} = ${shortValue}` : 'Search'} — Ergo Explorer</title>
 </svelte:head>
 
-<Panel title="Search">
-	{#if data.matches}
-		<p>This ID identifies multiple entities. Choose a result:</p>
-		<ul>
-			{#each data.matches as match (match.kind)}
-				<li>
-					<a href={match.href}
-						>{match.kind === 'token'
-							? 'Token'
-							: match.kind === 'box'
-								? 'Mint input box'
-								: match.kind}</a
-					>
-				</li>
-			{/each}
-		</ul>
-	{:else if data.q}
-		<EmptyState message={`No match for "${data.q}". ${hint}`} />
-		{#if data.trackId}<p class="tracking-link">
-				Expecting a newly sent transaction? <a href={`/tx/${data.trackId}`}
-					>Track this ID as a transaction</a
-				>. An unknown ID may also refer to another kind of entity.
-			</p>{/if}
-	{:else}
-		<EmptyState message={hint} />
-	{/if}
-	<div class="retry">
-		<!-- A distinct id keeps `#global-search` unique to the header box, and the header box
+{#if data.tokenQuery}<TokenDiscovery query={data.tokenQuery} match={data.match} />
+	{#if data.reason === 'unknown-format'}<p class="tracking-link">
+			This is not a valid indexed address or ID. Showing token-name matches instead.
+		</p>{/if}
+{:else}
+	<Panel title="Search">
+		{#if data.matches}
+			<p>This ID identifies multiple entities. Choose a result:</p>
+			<ul>
+				{#each data.matches as match (match.kind)}
+					<li>
+						<a href={match.href}
+							>{match.kind === 'token'
+								? 'Token'
+								: match.kind === 'box'
+									? 'Mint input box'
+									: match.kind}</a
+						>
+					</li>
+				{/each}
+			</ul>
+		{:else if data.q}
+			<EmptyState message={`No match for "${data.q}". ${hint}`} />
+			{#if data.trackId}<p class="tracking-link">
+					Expecting a newly sent transaction? <a href={`/tx/${data.trackId}`}
+						>Track this ID as a transaction</a
+					>. An unknown ID may also refer to another kind of entity.
+				</p>{/if}
+		{:else}
+			<EmptyState message={hint} />
+		{/if}
+		<div class="retry">
+			<!-- A distinct id keeps `#global-search` unique to the header box, and the header box
 		     keeps sole ownership of the "/" shortcut. -->
-		<SearchBox id="search-page-search" globalShortcut={false} />
-	</div>
-</Panel>
+			<SearchBox id="search-page-search" globalShortcut={false} />
+		</div>
+	</Panel>
+{/if}
 
 <!-- The other way in: not "what is this id", but "which boxes carry this value". The global
      box cannot answer that — a register value is not a unique identifier — so it gets a form

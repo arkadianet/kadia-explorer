@@ -65,6 +65,7 @@ impl Store {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let mut txn = self.db.begin_write()?;
+        crate::token_search::prepare_write(&txn)?;
         txn.set_durability(if durable {
             Durability::Immediate
         } else {
@@ -177,6 +178,7 @@ impl Store {
             meta.insert(META_NEXT_TX_GIDX, k_u64(next_tx).as_slice())?;
         }
         let entries = txn.open_table(REGISTER_IDX)?.len()?;
+        crate::token_search::finish_write(&txn)?;
         txn.commit()?;
         self.register_entries_cache
             .store(entries, std::sync::atomic::Ordering::Relaxed);

@@ -345,7 +345,7 @@
 	.receipt-section {
 		min-width: 0;
 		display: grid;
-		gap: var(--space-4);
+		gap: 10px;
 	}
 	.receipt-heading {
 		display: flex;
@@ -364,7 +364,8 @@
 		align-items: center;
 	}
 	h2 {
-		font-size: clamp(24px, 3vw, 32px);
+		font-size: clamp(28px, 3vw, 38px);
+		font-weight: 800;
 		letter-spacing: -1px;
 		margin-top: 6px;
 	}
@@ -409,7 +410,7 @@
 		justify-content: space-between;
 		align-items: center;
 		gap: 12px;
-		margin: 4px 0 16px;
+		margin: 0 0 12px;
 		flex-wrap: wrap;
 	}
 	.perspective label {
@@ -422,17 +423,18 @@
 		color: var(--fg);
 		border: var(--rule);
 		border-radius: var(--radius-control);
-		padding: 12px;
+		padding: 9px 12px;
 		max-width: 100%;
 	}
 	.receipt {
 		position: relative;
 		isolation: isolate;
 		overflow: hidden;
-		background: #13392c;
+		background: #103a28;
 		color: #f4fff6;
 		border-radius: 20px;
-		padding: 28px;
+		padding: 26px 30px;
+		border-left: 5px solid #b7f25f;
 	}
 	.receipt::before {
 		content: '';
@@ -457,11 +459,14 @@
 		color: #bbd4c6;
 		font-size: 11px;
 	}
+	.receipt :global(:focus-visible) {
+		outline-color: #b7f25f;
+	}
 	.asset {
 		display: flex;
 		gap: 18px;
 		align-items: center;
-		margin: 24px 0;
+		margin: 18px 0;
 	}
 	.asset-value {
 		min-width: 0;
@@ -473,13 +478,14 @@
 		width: 52px;
 		height: 52px;
 		transform: rotate(-7deg);
-		background: #c4f6a1;
+		background: #b7f25f;
 		color: #13392c;
 		border-radius: 16px;
 		font-size: 26px;
 	}
 	.amount {
-		color: #c4f6a1;
+		color: #caff8b;
+		font-weight: 750;
 		font-size: clamp(26px, 4vw, 52px);
 		letter-spacing: -1.5px;
 		font-variant-numeric: tabular-nums;

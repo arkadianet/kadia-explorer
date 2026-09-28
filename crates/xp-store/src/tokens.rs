@@ -399,6 +399,7 @@ impl<'txn> Tokens<'txn> {
                     self.undo.prev_tokens.push((id, p));
                 }
                 None => {
+                    crate::token_search::insert_name(self.txn, &id, &row.name)?;
                     self.tokens_by_holders
                         .insert(k_by_count(row.holder_count, &id).as_slice(), &[][..])?;
                     self.undo.new_tokens.push(id);

@@ -81,7 +81,7 @@
 	}
 	.selected {
 		color: var(--fg);
-		border-bottom-color: var(--accent);
+		border-bottom-color: var(--accent-ink);
 	}
 	.count {
 		margin-left: var(--space-1);

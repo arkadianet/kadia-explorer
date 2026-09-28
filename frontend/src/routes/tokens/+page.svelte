@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import Panel from '$lib/components/Panel.svelte';
+	import TokenDiscovery from '$lib/components/TokenDiscovery.svelte';
 	import InfiniteList from '$lib/components/InfiniteList.svelte';
 	import TokenBadge from '$lib/components/TokenBadge.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
@@ -41,6 +42,12 @@
 	let pagerSort: TokenSort | null = null;
 
 	$effect(() => {
+		if (data.query) {
+			pager?.reset();
+			pager = null;
+			pagerSort = null;
+			return;
+		}
 		if (pagerSort === sort) return;
 		pagerSort = sort;
 		const p = createPager<TokenInfoDto>((cursor, snapshot) =>
@@ -55,58 +62,63 @@
 	<title>Tokens — Ergo Explorer</title>
 </svelte:head>
 
-<Panel title="Tokens">
-	{#snippet actions()}
-		<div class="seg" role="group" aria-label="Sort tokens">
-			{#each SORTS as option (option.id)}
-				<button
-					type="button"
-					class="seg-btn"
-					aria-pressed={option.id === sort}
-					title={option.hint}
-					onclick={() => selectSort(option.id)}
-				>
-					{option.label}
-				</button>
-			{/each}
-		</div>
-	{/snippet}
+<TokenDiscovery query={data.query} match={data.match} />
+{#if !data.query}
+	<Panel title="Tokens">
+		{#snippet actions()}
+			<div class="seg" role="group" aria-label="Sort tokens">
+				{#each SORTS as option (option.id)}
+					<button
+						type="button"
+						class="seg-btn"
+						aria-pressed={option.id === sort}
+						title={option.hint}
+						onclick={() => selectSort(option.id)}
+					>
+						{option.label}
+					</button>
+				{/each}
+			</div>
+		{/snippet}
 
-	{#if pager}
-		<InfiniteList
-			table
-			columns={5}
-			dense
-			{pager}
-			empty="No tokens indexed yet — they appear as the indexer reaches the blocks that mint them."
-		>
-			{#snippet head()}
-				<tr>
-					<th>Name</th>
-					<th>Kind</th>
-					<th class="num">Supply</th>
-					<th class="num">Holders</th>
-					<th class="num">Minted at</th>
-				</tr>
-			{/snippet}
-			{#snippet children(token: TokenInfoDto)}
-				<tr>
-					<td class="name">
-						<a href={`/token/${token.id}`} title={token.name.trim() || token.id}>
-							{tokenDisplayName(token.name, token.id)}
-						</a>
-					</td>
-					<td><TokenBadge kind={token.kind} /></td>
-					<td class="num mono">{formatTokenAmount(token.supply, token.decimals)}</td>
-					<td class="num mono">{token.holder_count.toLocaleString('en-US')}</td>
-					<td class="num mono"><a href={`/blocks/${token.mint_height}`}>{token.mint_height}</a></td>
-				</tr>
-			{/snippet}
-		</InfiniteList>
-	{:else}
-		<Skeleton />
-	{/if}
-</Panel>
+		{#if pager}
+			<InfiniteList
+				table
+				columns={5}
+				dense
+				{pager}
+				empty="No tokens indexed yet — they appear as the indexer reaches the blocks that mint them."
+			>
+				{#snippet head()}
+					<tr>
+						<th>Name</th>
+						<th>Kind</th>
+						<th class="num">Supply</th>
+						<th class="num">Holders</th>
+						<th class="num">Minted at</th>
+					</tr>
+				{/snippet}
+				{#snippet children(token: TokenInfoDto)}
+					<tr>
+						<td class="name">
+							<a href={`/token/${token.id}`} title={token.name.trim() || token.id}>
+								{tokenDisplayName(token.name, token.id)}
+							</a>
+						</td>
+						<td><TokenBadge kind={token.kind} /></td>
+						<td class="num mono">{formatTokenAmount(token.supply, token.decimals)}</td>
+						<td class="num mono">{token.holder_count.toLocaleString('en-US')}</td>
+						<td class="num mono"
+							><a href={`/blocks/${token.mint_height}`}>{token.mint_height}</a></td
+						>
+					</tr>
+				{/snippet}
+			</InfiniteList>
+		{:else}
+			<Skeleton />
+		{/if}
+	</Panel>
+{/if}
 
 <style>
 	/* A name is prose, not a hash: it keeps the body face and the row's only real weight. */

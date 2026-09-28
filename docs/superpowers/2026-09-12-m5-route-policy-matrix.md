@@ -1,6 +1,6 @@
 # M5 ordinary route policy matrix
 
-Step 1 evidence, before codec implementation. Counts: **4 immutable membership, 10 current-state** (14 route/order entries, 13 distinct paged paths). Both supported directions share a policy; both unspent filter values share a policy. Policy tests live in `crates/xp-api/src/paging.rs`.
+Counts: **4 immutable membership, 11 current-state** (15 route/order entries, 14 distinct paged paths). Both supported directions share a policy; both unspent filter values share a policy. Policy tests live in `crates/xp-api/src/paging.rs`.
 
 Immutable membership means canonical membership below the original height/transaction bound survives appends; continuation requires the anchor to survive. Current-state means ANY observed tip change invalidates continuation, even a normal append. Steps 1–2 established this contract; steps 3–4 now integrate and exercise it in the backend handlers.
 
@@ -16,6 +16,7 @@ Immutable membership means canonical membership below the original height/transa
 | `template_boxes` | /v1/templates/{hash}/boxes, asc/desc, unspent=false/true | current-state | `handlers/templates.rs::boxes`: same mutable BoxDto fields. Bind template hash and unspent. |
 | `tokens_newest` | /v1/tokens, sort=newest, desc | current-state | `handlers/tokens.rs::list`, `dto.rs::token_info_dto`: mint order is stable but `burned`, `supply`, `holder_count`, `box_count` are mutable TokenRow enrichment. |
 | `tokens_holders` | /v1/tokens, sort=holders, desc | current-state | Same TokenInfoDto enrichment; `read_tokens.rs::tokens_by_holders` also ranks by mutable holder count. Sort is a separate binding. |
+| `tokens_search` | /v1/tokens/search, normalized name + id, asc | current-state | Mutable TokenInfoDto enrichment. Bind normalized query hash, exact/prefix match, normalization version, cursor and canonical anchor. Index readiness and results share one Reader. |
 | `holders` | /v1/tokens/{id}/holders, desc | current-state | `handlers/tokens.rs::holders`: `amount` changes ranking; `share_pct` depends on current emission minus burned. Bind token id. |
 | `richlist` | /v1/richlist, desc | current-state | `handlers/richlist.rs::list`: `nano` changes both value and ranking. Legacy dir is ignored; strict binding must use effective desc order. |
 | `register_boxes` | /v1/registers/{reg}/{value}/boxes, asc/desc | current-state | `handlers/registers.rs::boxes`: register membership below gidx is stable but returned BoxDto spent/rent fields change. Bind register number and hash of decoded value bytes. |
@@ -27,7 +28,7 @@ The subtle classifications are newest token listings (immutable ordering with mu
 
 ## Steps 3–4 implementation evidence
 
-All 14 entries above now use `paging::Request` with the page's own Reader. `consistency=strict` requires a bound `snapshot`/legacy `cursor` pair after page one. Responses add `consistency`, `observed_anchor`, original `anchor`, and `next_snapshot`. Bare cursors remain `best_effort`, with no claimed original anchor or continuation token. A null anchor reports unavailable canonical identity; missing required in-range headers still fail as corruption.
+All 15 entries above now use `paging::Request` with the page's own Reader. `consistency=strict` requires a bound `snapshot`/legacy `cursor` pair after page one. Responses add `consistency`, `observed_anchor`, original `anchor`, and `next_snapshot`. Bare cursors remain `best_effort`, with no claimed original anchor or continuation token. A null anchor reports unavailable canonical identity; missing required in-range headers still fail as corruption.
 
 Immutable global/address summary reads cap the store range at the original header's exclusive transaction allocation end before resolving rows. Blocks cap heights; block summaries retain their selected block's range and bind its canonical id. Current-state projection reads run only after exact height/id tip validation. Address/block selector resolution first checks token route/order/cursor and anchor availability, so a reorg removing an address or rebinding a height produces 409; complete normalized filter binding is still required before projection reads. This is the awkward case beyond the matrix's mutable-enrichment classifications.
 

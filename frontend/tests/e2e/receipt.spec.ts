@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import type { TxDto, TxEvidence } from '../../src/lib/api/types.ts';
+import type { TxDto, TxEvidence, TxStatusDto } from '../../src/lib/api/types.ts';
 
 const tx: TxDto = JSON.parse(
 	readFileSync(
@@ -59,6 +59,43 @@ test('rent receipt explains exact effects from either address perspective', asyn
 	await expect(receipt.getByText('All ERG changes sum to zero.', { exact: false })).toBeVisible();
 	await receipt.getByRole('tab', { name: 'Evidence', exact: true }).click();
 	await expect(receipt.getByText('Empty proof · rent selector: 0300')).toBeVisible();
+});
+
+test('a confirmed receipt leads with its net amount and keeps observation detail expandable', async ({
+	page
+}) => {
+	await page.setViewportSize({ width: 1265, height: 714 });
+	const status: TxStatusDto = {
+		id: tx.id,
+		state: 'confirmed',
+		checked_at_ms: Date.now(),
+		indexed_height: tx.indexed_height!,
+		inclusion: { block_id: tx.block_id!, height: tx.height, confirmations: tx.confirmations! },
+		previous_inclusion: null,
+		mempool: {
+			observation: 'not_checked',
+			checked_at_ms: null,
+			first_seen_at_ms: null,
+			last_seen_at_ms: null,
+			error: null
+		},
+		pending: null,
+		conflicts: [],
+		history_scope: 'process_local_requested_transactions',
+		retention_seconds: 3600
+	};
+	await page.route(`**/v1/txs/${tx.id}/status`, (route) => route.fulfill({ json: status }));
+	await page.goto(`/tx/${tx.id}`);
+	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
+	await expect(receipt.getByRole('heading', { name: 'Storage rent claim' })).toBeVisible();
+	const amount = receipt.getByRole('tabpanel').getByText('+2,000', { exact: true });
+	const bounds = await amount.boundingBox();
+	expect(bounds!.y + bounds!.height).toBeLessThan(714);
+	const live = page.getByRole('region', { name: 'Live transaction status' });
+	expect((await live.boundingBox())!.height).toBeLessThan(85);
+	await live.getByText('Observation details', { exact: true }).click();
+	await expect(live.getByText('Checks every 5 seconds', { exact: false })).toBeVisible();
+	await expect(live.getByText('Absence from one node’s mempool', { exact: false })).toBeVisible();
 });
 
 test('source failure preserves exact balances without inventing a claim label', async ({
