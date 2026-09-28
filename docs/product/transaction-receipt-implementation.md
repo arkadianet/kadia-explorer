@@ -162,8 +162,8 @@ is preserved when switching designs during the current transaction visit.
 
 ## Design revision validation (2026-09-28)
 
-- All 141 browser cases passed across a 139-pass full run and two targeted passes
-  after fixing Prism's narrow error-page sizing. The new matrix visits 14 route
+- All 141 browser cases passed in Linux CI after fixing narrow error-page sizing
+  and selected navigation contrast. The new matrix visits 14 route
   families in four presets, two modes and two widths (320 and 1440), checks page
   bounds, runtime errors and address-tab/table overlap. Long token titles also
   retain their bounds and 4.5:1 contrast checks in all four presets.
@@ -173,7 +173,8 @@ is preserved when switching designs during the current transaction visit.
   undersized primary metrics, narrow description columns, duplicated state-page
   compositions, table margins overlapping neighboring content, and layered
   home-scene cards obscuring block labels. Prism's cards now occupy separate
-  columns on wide screens and compact rows below 1200px.
+  columns on wide screens and compact rows below 1200px. Selected desktop Prism
+  navigation also has a 4.5:1 text contrast regression check in both modes.
 - Linux CI exposed an Original recovery-form intrinsic-width overflow at 320px.
   Shared error-card children and the search form now fit the available width
   without clipping; the follow-up home and appearance suite passed all 32 cases

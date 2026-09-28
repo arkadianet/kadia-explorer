@@ -338,9 +338,12 @@ mod inflight_guard_tests {
         assert_eq!(state.counters.inflight_reads.load(Ordering::Relaxed), 1);
         unblock_tx.send(()).unwrap();
 
-        // Give the still-running spawn_blocking task a moment to finish and drop its guard.
+        // The guard and read permit drop separately. Wait for both cleanup effects rather
+        // than treating the counter decrement as proof that the permit has also dropped.
         for _ in 0..200 {
-            if state.counters.inflight_reads.load(Ordering::Relaxed) == 0 {
+            if state.counters.inflight_reads.load(Ordering::Relaxed) == 0
+                && state.read_permits.available_permits() == 2
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -383,19 +386,27 @@ mod inflight_guard_tests {
         assert_eq!(state.read_permits.available_permits(), 3);
         drop(second);
         finish_tx.send(()).unwrap();
+        // The inner history closure releases its permit before the outer blocking worker
+        // drops its reader, inflight guard, and read permit. Observe the complete cleanup.
         for _ in 0..200 {
-            if state.counters.history_permits.available_permits() == 2 {
+            if state.counters.history_permits.available_permits() == 2
+                && state.read_permits.available_permits() == 4
+                && state.counters.inflight_reads.load(Ordering::Relaxed) == 0
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(state.counters.history_permits.available_permits(), 2);
         assert_eq!(state.read_permits.available_permits(), 4);
+        assert_eq!(state.counters.inflight_reads.load(Ordering::Relaxed), 0);
         assert!(
             history_blocking::<(), _>(&state, |_| Err(ApiError::NotFound))
                 .await
                 .is_err()
         );
         assert_eq!(state.counters.history_permits.available_permits(), 2);
+        assert_eq!(state.read_permits.available_permits(), 4);
+        assert_eq!(state.counters.inflight_reads.load(Ordering::Relaxed), 0);
     }
 }
