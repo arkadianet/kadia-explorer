@@ -223,9 +223,21 @@ impl Reader {
     }
 
     pub fn header_at(&self, height: u32) -> Result<Option<HeaderRow>, StoreError> {
+        self.header_at_admitted(height, |_| Ok(()))
+    }
+
+    /// Admit the encoded header, including raw JSON, before any owned decode/copy.
+    pub fn header_at_admitted(
+        &self,
+        height: u32,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Option<HeaderRow>, StoreError> {
         let table = self.txn.open_table(HEADERS)?;
         match table.get(k_u32(height).as_slice())? {
-            Some(v) => Ok(Some(HeaderRow::decode(v.value())?)),
+            Some(v) => {
+                admit(v.value().len())?;
+                Ok(Some(HeaderRow::decode(v.value())?))
+            }
             None => {
                 let start = self.partial_from()?.unwrap_or(1);
                 if height >= start && self.indexed_height()?.is_some_and(|tip| height <= tip) {
@@ -251,6 +263,22 @@ impl Reader {
             }
             None => Ok(None),
         }
+    }
+
+    /// Canonical identity without copying the header's raw JSON. HeaderRow starts with
+    /// the fixed 32-byte id; a short row is corruption, never an absent header.
+    pub fn header_id_at(&self, height: u32) -> Result<Option<Hash32>, StoreError> {
+        let headers = self.txn.open_table(HEADERS)?;
+        headers
+            .get(k_u32(height).as_slice())?
+            .map(|v| {
+                as_hash32(
+                    v.value()
+                        .get(..32)
+                        .ok_or(StoreError::Corrupt("truncated header id"))?,
+                )
+            })
+            .transpose()
     }
 
     /// Headers strictly below `before_height` (or below the tip when `None`), newest first,
@@ -513,9 +541,28 @@ impl Reader {
     }
 
     pub fn balance(&self, tree: &Hash32) -> Result<Option<BalanceRow>, StoreError> {
+        self.balance_admitted(tree, |_, _| Ok(()))
+    }
+
+    /// Admit encoded bytes and the declared token count before allocating balance tokens.
+    /// This uses the same read transaction for admission and decoding.
+    pub fn balance_admitted(
+        &self,
+        tree: &Hash32,
+        mut admit: impl FnMut(usize, usize) -> Result<(), StoreError>,
+    ) -> Result<Option<BalanceRow>, StoreError> {
         let table = self.txn.open_table(TREE_BALANCE)?;
         match table.get(tree.as_slice())? {
-            Some(v) => Ok(Some(BalanceRow::decode(v.value())?)),
+            Some(v) => {
+                let bytes = v.value();
+                // BalanceRow begins with nano:u64 and token_count:u32, both big-endian.
+                let count = bytes
+                    .get(8..12)
+                    .ok_or(StoreError::Corrupt("truncated balance row"))?;
+                let count = u32::from_be_bytes(count.try_into().unwrap()) as usize;
+                admit(bytes.len(), count)?;
+                Ok(Some(BalanceRow::decode(bytes)?))
+            }
             None => Ok(None),
         }
     }
@@ -646,6 +693,19 @@ impl Reader {
         tree: &Hash32,
         after: Option<Gidx>,
         unspent_only: bool,
+        visit: impl FnMut(Hash32, BoxRow) -> Result<bool, E>,
+    ) -> Result<(), E> {
+        self.visit_history_candidates_admitted(tree, after, unspent_only, |_| Ok(()), visit)
+    }
+
+    /// Admit encoded box bytes before allocation and check cooperatively during decode.
+    /// The callback receives zero bytes for deadline checks within each admitted row.
+    pub fn visit_history_candidates_admitted<E: From<StoreError>>(
+        &self,
+        tree: &Hash32,
+        after: Option<Gidx>,
+        unspent_only: bool,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
         mut visit: impl FnMut(Hash32, BoxRow) -> Result<bool, E>,
     ) -> Result<(), E> {
         let index = self
@@ -670,7 +730,7 @@ impl Reader {
         {
             let (k, _) = entry.map_err(StoreError::from)?;
             let gidx = crate::keys::gidx_of_composite(k.value())?;
-            let (id, row) = boxes.get(gidx)?;
+            let (id, row) = boxes.get_admitted(gidx, &mut admit)?;
             if row.gidx != gidx || row.tree_hash != *tree {
                 return Err(StoreError::Corrupt("historical box index mismatch").into());
             }
@@ -700,6 +760,20 @@ impl Reader {
         dir: Dir,
         end: Option<Gidx>,
     ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        self.tree_txs_bounded_admitted(tree, cursor, limit, dir, end, |_| Ok(()))
+    }
+
+    /// Admit each encoded row before decoding; zero-byte callbacks during decoding
+    /// allow the caller to enforce a deadline without copying an unbounded row.
+    pub fn tree_txs_bounded_admitted(
+        &self,
+        tree: &Hash32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
         let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
         let txs = self.txn.open_table(TXS)?;
         self.page_composite_bounded(
@@ -710,7 +784,45 @@ impl Reader {
             dir,
             |gidx| {
                 let tx_id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
-                self.resolve_tx(&txs, tx_id)
+                let result = self.resolve_tx_admitted(&txs, tx_id, &mut admit)?;
+                if result.1.gidx != gidx {
+                    return Err(StoreError::Corrupt("address transaction gidx mismatch"));
+                }
+                Ok(result)
+            },
+        )
+    }
+
+    /// Token history is served only from a fully anchored auxiliary index, never boxes.
+    pub fn token_txs_bounded_admitted(
+        &self,
+        token: &Hash32,
+        cursor: Option<Gidx>,
+        limit: usize,
+        dir: Dir,
+        end: Option<Gidx>,
+        mut admit: impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<Page<(Hash32, TxRow)>, StoreError> {
+        if !self.token_history_status()?.ready {
+            return Err(StoreError::TokenHistoryNotReady);
+        }
+        let by_gidx = self.txn.open_table(TX_BY_GIDX)?;
+        let txs = self.txn.open_table(TXS)?;
+        self.page_composite_bounded(
+            crate::token_history::TOKEN_TXS,
+            token.as_slice(),
+            (cursor, end),
+            limit,
+            dir,
+            |gidx| {
+                let id = as_hash32(tx_by_gidx_lookup(&by_gidx, gidx)?.as_slice())?;
+                let result = self.resolve_tx_admitted(&txs, id, &mut admit)?;
+                if result.1.gidx != gidx {
+                    return Err(StoreError::Corrupt(
+                        "token-history transaction gidx mismatch",
+                    ));
+                }
+                Ok(result)
             },
         )
     }
@@ -845,11 +957,22 @@ impl BoxResolver {
     /// The `(box_id, BoxRow)` a composite index entry's trailing gidx names. A gidx with no
     /// `BOX_BY_GIDX` entry, or one naming a box with no `BOXES` row, is [`StoreError::Corrupt`].
     pub(crate) fn get(&self, gidx: Gidx) -> Result<(Hash32, BoxRow), StoreError> {
+        self.get_admitted(gidx, &mut |_| Ok(()))
+    }
+
+    fn get_admitted(
+        &self,
+        gidx: Gidx,
+        admit: &mut impl FnMut(usize) -> Result<(), StoreError>,
+    ) -> Result<(Hash32, BoxRow), StoreError> {
         let box_id = as_hash32(box_by_gidx_lookup(&self.by_gidx, gidx)?.as_slice())?;
         let row = self
             .boxes
             .get(box_id.as_slice())?
-            .map(|v| BoxRow::decode(v.value()))
+            .map(|v| {
+                admit(v.value().len())?;
+                BoxRow::decode_checked(v.value(), || admit(0))
+            })
             .transpose()?
             .ok_or(StoreError::Corrupt("dangling gidx->box_id entry"))?;
         Ok((box_id, row))

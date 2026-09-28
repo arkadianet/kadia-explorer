@@ -8,6 +8,7 @@ use crate::paging::{Binding, Filter, Order, Route};
 use crate::{blocking, ApiError, AppState};
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use serde::Serialize;
 use xp_store::rows::TokenRow;
 use xp_store::Reader;
 use xp_types::{hex32, Hash32};
@@ -92,24 +93,44 @@ pub async fn get_one(
 ///
 /// The ordering is the `TOKEN_HOLDERS` index's own, so there is no `dir`: the params struct
 /// omits it rather than accepting one and ignoring it.
+#[derive(Serialize)]
+pub struct TokenHoldersPage {
+    #[serde(flatten)]
+    page: PageDto<TokenHolderDto>,
+    holder_context: TokenHolderContext,
+}
+
+#[derive(Serialize)]
+struct TokenHolderContext {
+    supply: String,
+    holder_count: u64,
+    definition: &'static str,
+}
+
 pub async fn holders(
     State(state): State<AppState>,
     Path(raw): Path<String>,
     Query(p): Query<CursorParams>,
-) -> Result<Json<PageDto<TokenHolderDto>>, ApiError> {
+) -> Result<Json<TokenHoldersPage>, ApiError> {
     let limit = parse_limit(p.limit.as_deref())?;
     let cursor = parse_u64_id_cursor(p.cursor.as_deref())?;
     let page = blocking(&state, move |rd| {
         let id = parse_id(&raw)?;
-        p.paging.read(
+        let mut holder_context = None;
+        let page = p.paging.read(
             rd,
             Binding::new(Route::Holders, Order::Desc, Filter::Entity(id))?,
             p.cursor.as_deref(),
             |ctx| {
                 let rd = ctx.reader();
                 let token = token_of(rd, &id)?;
-                // Shares are of the circulating supply, so burned units do not dilute a holder.
+                // The denominator is indexed issuance minus burns, not liquid/circulating supply.
                 let supply = token.emission.saturating_sub(token.burned);
+                holder_context = Some(TokenHolderContext {
+                    supply: supply.to_string(),
+                    holder_count: token.holder_count,
+                    definition: "indexed_emission_minus_burned",
+                });
                 let (rows, next) = rd.token_holders(&id, cursor, limit)?;
                 let mut items = Vec::with_capacity(rows.len());
                 for (tree, amount) in rows {
@@ -126,7 +147,12 @@ pub async fn holders(
                     next_cursor: next.map(|(amount, tree)| format_u64_id_cursor(amount, &tree)),
                 })
             },
-        )
+        )?;
+        Ok(TokenHoldersPage {
+            page,
+            holder_context: holder_context
+                .ok_or_else(|| ApiError::Internal("missing holder snapshot context".into()))?,
+        })
     })
     .await?;
     Ok(Json(page))

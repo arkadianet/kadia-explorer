@@ -1,0 +1,230 @@
+{
+  "provenance": {
+    "captured_at": "2026-09-28",
+    "source_order": "https://api.ergoplatform.com/api/v1/boxes/f027c8ec3632686b6f13a3f9bc7841114db759d0901c3efe5976ea6d3729c905",
+    "source_transaction": "https://api.ergoplatform.com/api/v1/transactions/3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+    "contract_commit": "8fe94e1f8b4e1ab9402fca6fbc3955e3ad1415f7",
+    "note": "Public mainnet facts projected into Kadia field names. Amounts are decimal strings. Unused size/rent fields are omitted; browser tests add explicitly synthetic display fields. Mutable spend observations are fixture data, not a live view."
+  },
+  "order": {
+    "id": "f027c8ec3632686b6f13a3f9bc7841114db759d0901c3efe5976ea6d3729c905",
+    "tx_id": "4b9a9ab331777a51a2f1d706ffa47688ff0c48441385a0005ba382071d0514b3",
+    "index": 0,
+    "value": "300400000",
+    "creation_height": 952305,
+    "ergo_tree": "199505210400058080d0d88bdea2e30205a2d4e0f5a18c87da0205808c8d9e0204ca0f08cd034153f4c52b1d3e301236cfc939f27dc6c58822c160387865ee1e41d407827cb40404040604020400010105e2f81304000e20f40afb6f877c40a30c8637dd5362227285738174151ce66d6684bc1b727ab6cf0e240008cd034153f4c52b1d3e301236cfc939f27dc6c58822c160387865ee1e41d407827cb40e209a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d05a0d780050101010105f015060100040404020e209a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d0101040406010104d00f0e691005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a5730405000500058092f4010100d804d601b2a4730000d6027301d6037302d6049c73037e730405eb027305d195ed92b1a4730693b1db630872017307d806d605db63087201d606b2a5730800d607db63087206d608b27207730900d6098c720802d60a95730a9d9c7e997209730b067e7202067e7203067e720906edededededed938cb27205730c0001730d93c27206730e938c720801730f92720a7e7310069573117312d801d60b997e7313069d9c720a7e7203067e72020695ed91720b731492b172077315d801d60cb27207731600ed938c720c017317927e8c720c0206720b7318909c7e8cb2720573190002067e7204069c9a720a731a9a9c7ec17201067e731b067e72040690b0ada5d9010b639593c2720b731cc1720b731d731ed9010b599a8c720b018c720b02731f7320",
+    "address": "9u7gKQspeuiD4PLaxV56gsMncqj7VxhF19n8t9HzQE1n8w4oCbgfYEQvqfpuDQhVGAinQtgpyym5SsBt8aqynZE2uDeBcbKpovxfRuzirXcDWxk97BXCYXgcyqZb9wxphG5L3ZyWbWTRFGvh8XU9N3zVHsk6gYAuwctus6KRGQCMueSigGLWv6S94nMAKu2iiThMQQ5Er4BaG4ePXP2P3t1fngRfFupqBcw77tLDUipD9wsBsWcsaf766356ikZ1jaPZkX4aJPnVJsHNhxRWgb7yZqG8NJEdepXyvh2yqFmRXo4gmugYryAE9UfpKmaKJ6E2BZfyUFn4tyEemPUb7FDrp1s1kSYpa2v2BcYbGkQeiRVPa5ipEJ2bpfAtjaTVQkstoLqNL4SwepaVGHfjDC5X2bJ3YdNAxSiKuPPikEkuHoY5G3WZGcsZRceQ5AYgmi34pAPzHqHTRKfRMvwcPfrEdmsuBCHi9dvANxHShMLNEV6cULYBjRx4b78TocwNb6LHo87YgFm7C4jXM1NAQT4Dt74SfrmyA8AW3QyvV4a7T2uHhrkRucMXHkW4UiQdRT1iV99WEp5AP8zwvfaLo13JE7sNYR49XQVHd21p1WsV3Am8GrSAMmA9LUMLmkvgKngh2TbyEu14rrdmGCpBWnWYq1XVQiBWHferyzaDjscLkdhckNZKzSjBpF9rDRZLRTjcqFwsJxmevNkhi2MwTjXernXVJVY1Bakr1LrnycRdH7HyV35nBauoqJrC3jLuJgE8VMAF2cAtdSSkYGXDSEPLZpLkyN5KnbHtNcMmKz6PBZodyWeVkpbGjMce7uv6LdWhGABSDbvtZj5ty3FY3K4QGGfBcTz4c7mod6g8bP2fVqLXDJkbB2mMPUFxXHZqjc1FudHRTuo1ZREw4",
+    "tree_hash": "48a4fb324d99e2313422f014e9dddfcfcf7a69a03d2867f2aafb4a67515552c2",
+    "template_hash": null,
+    "tokens": [
+      {
+        "id": "9a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d",
+        "amount": "163377",
+        "name": "SPF",
+        "decimals": 6
+      }
+    ],
+    "registers": {},
+    "spent_by": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+    "spent_height": 952324
+  },
+  "settlement": {
+    "id": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+    "height": 952324,
+    "block_id": "3d4257abaddc1cd9fd42808d480cf3d13d5854ffa986efe30205fb78bfaced12",
+    "indexed_height": 952324,
+    "index": 2,
+    "timestamp": 1677852058130,
+    "size": 1028,
+    "fee": "2000000",
+    "inputs": [
+      {
+        "id": "672b65c7a61a6d0cd6d45074beea46d06ae59ce524d1a5c10b8de4689e69fa29",
+        "box": {
+          "id": "672b65c7a61a6d0cd6d45074beea46d06ae59ce524d1a5c10b8de4689e69fa29",
+          "tx_id": "6f0fcfa7e7c5efae3af93da67ce8b90a4af76596eae12284d917e6866da385d0",
+          "index": 0,
+          "value": "91751356564130",
+          "creation_height": 952322,
+          "ergo_tree": "1999030f0400040204020404040405feffffffffffffffff0105feffffffffffffffff01050004d00f040004000406050005000580dac409d819d601b2a5730000d602e4c6a70404d603db63087201d604db6308a7d605b27203730100d606b27204730200d607b27203730300d608b27204730400d6099973058c720602d60a999973068c7205027209d60bc17201d60cc1a7d60d99720b720cd60e91720d7307d60f8c720802d6107e720f06d6117e720d06d612998c720702720fd6137e720c06d6147308d6157e721206d6167e720a06d6177e720906d6189c72117217d6199c72157217d1ededededededed93c27201c2a793e4c672010404720293b27203730900b27204730a00938c7205018c720601938c7207018c72080193b17203730b9593720a730c95720e929c9c721072117e7202069c7ef07212069a9c72137e7214067e9c720d7e72020506929c9c721372157e7202069c7ef0720d069a9c72107e7214067e9c72127e7202050695ed720e917212730d907216a19d721872139d72197210ed9272189c721672139272199c7216721091720b730e",
+          "address": "5vSUZRZbdVbnk4sJWjg2uhL94VZWRg4iatK9VgMChufzUgdihgvhR8yWSUEJKszzV7Vmi6K8hCyKTNhUaiP8p5ko6YEU9yfHpjVuXdQ4i5p4cRCzch6ZiqWrNukYjv7Vs5jvBwqg5hcEJ8u1eerr537YLWUoxxi1M4vQxuaCihzPKMt8NDXP4WcbN6mfNxxLZeGBvsHVvVmina5THaECosCWozKJFBnscjhpr3AJsdaL8evXAvPfEjGhVMoTKXAb2ZGGRmR8g1eZshaHmgTg2imSiaoXU5eiF3HvBnDuawaCtt674ikZ3oZdekqswcVPGMwqqUKVsGY4QuFeQoGwRkMqEYTdV2UDMMsfrjrBYQYKUBFMwsQGMNBL1VoY78aotXzdeqJCBVKbQdD3ZZWvukhSe4xrz8tcF3PoxpysDLt89boMqZJtGEHTV9UBTBEac6sDyQP693qT3nKaErN8TCXrJBUmHPqKozAg9bwxTqMYkpmb9iVKLSoJxG7MjAj72SRbcqQfNCVTztSwN3cRxSrVtz4p87jNFbVtFzhPg7UqDwNFTaasySCqM",
+          "tree_hash": "99f30ad579a2c98ad31b432676627fcd9e303d43c06e898725f6155d8ac40aa9",
+          "template_hash": null,
+          "tokens": [
+            {
+              "id": "f40afb6f877c40a30c8637dd5362227285738174151ce66d6684bc1b727ab6cf",
+              "amount": "1",
+              "name": null,
+              "decimals": null
+            },
+            {
+              "id": "c7e22029868ecba3d43c385bb42b8a1c96d0114ad5261ec7e0d27a6f24254f92",
+              "amount": "9223359717007728454",
+              "name": "Ergo_Spectrum Finance_LP",
+              "decimals": 0
+            },
+            {
+              "id": "9a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d",
+              "amount": "1658313824281",
+              "name": "SPF",
+              "decimals": 6
+            }
+          ],
+          "registers": {
+            "R4": "04ca0f"
+          },
+          "spent_by": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+          "spent_height": 952324
+        }
+      },
+      {
+        "id": "f027c8ec3632686b6f13a3f9bc7841114db759d0901c3efe5976ea6d3729c905",
+        "box": {
+          "id": "f027c8ec3632686b6f13a3f9bc7841114db759d0901c3efe5976ea6d3729c905",
+          "tx_id": "4b9a9ab331777a51a2f1d706ffa47688ff0c48441385a0005ba382071d0514b3",
+          "index": 0,
+          "value": "300400000",
+          "creation_height": 952305,
+          "ergo_tree": "199505210400058080d0d88bdea2e30205a2d4e0f5a18c87da0205808c8d9e0204ca0f08cd034153f4c52b1d3e301236cfc939f27dc6c58822c160387865ee1e41d407827cb40404040604020400010105e2f81304000e20f40afb6f877c40a30c8637dd5362227285738174151ce66d6684bc1b727ab6cf0e240008cd034153f4c52b1d3e301236cfc939f27dc6c58822c160387865ee1e41d407827cb40e209a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d05a0d780050101010105f015060100040404020e209a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d0101040406010104d00f0e691005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a5730405000500058092f4010100d804d601b2a4730000d6027301d6037302d6049c73037e730405eb027305d195ed92b1a4730693b1db630872017307d806d605db63087201d606b2a5730800d607db63087206d608b27207730900d6098c720802d60a95730a9d9c7e997209730b067e7202067e7203067e720906edededededed938cb27205730c0001730d93c27206730e938c720801730f92720a7e7310069573117312d801d60b997e7313069d9c720a7e7203067e72020695ed91720b731492b172077315d801d60cb27207731600ed938c720c017317927e8c720c0206720b7318909c7e8cb2720573190002067e7204069c9a720a731a9a9c7ec17201067e731b067e72040690b0ada5d9010b639593c2720b731cc1720b731d731ed9010b599a8c720b018c720b02731f7320",
+          "address": "9u7gKQspeuiD4PLaxV56gsMncqj7VxhF19n8t9HzQE1n8w4oCbgfYEQvqfpuDQhVGAinQtgpyym5SsBt8aqynZE2uDeBcbKpovxfRuzirXcDWxk97BXCYXgcyqZb9wxphG5L3ZyWbWTRFGvh8XU9N3zVHsk6gYAuwctus6KRGQCMueSigGLWv6S94nMAKu2iiThMQQ5Er4BaG4ePXP2P3t1fngRfFupqBcw77tLDUipD9wsBsWcsaf766356ikZ1jaPZkX4aJPnVJsHNhxRWgb7yZqG8NJEdepXyvh2yqFmRXo4gmugYryAE9UfpKmaKJ6E2BZfyUFn4tyEemPUb7FDrp1s1kSYpa2v2BcYbGkQeiRVPa5ipEJ2bpfAtjaTVQkstoLqNL4SwepaVGHfjDC5X2bJ3YdNAxSiKuPPikEkuHoY5G3WZGcsZRceQ5AYgmi34pAPzHqHTRKfRMvwcPfrEdmsuBCHi9dvANxHShMLNEV6cULYBjRx4b78TocwNb6LHo87YgFm7C4jXM1NAQT4Dt74SfrmyA8AW3QyvV4a7T2uHhrkRucMXHkW4UiQdRT1iV99WEp5AP8zwvfaLo13JE7sNYR49XQVHd21p1WsV3Am8GrSAMmA9LUMLmkvgKngh2TbyEu14rrdmGCpBWnWYq1XVQiBWHferyzaDjscLkdhckNZKzSjBpF9rDRZLRTjcqFwsJxmevNkhi2MwTjXernXVJVY1Bakr1LrnycRdH7HyV35nBauoqJrC3jLuJgE8VMAF2cAtdSSkYGXDSEPLZpLkyN5KnbHtNcMmKz6PBZodyWeVkpbGjMce7uv6LdWhGABSDbvtZj5ty3FY3K4QGGfBcTz4c7mod6g8bP2fVqLXDJkbB2mMPUFxXHZqjc1FudHRTuo1ZREw4",
+          "tree_hash": "48a4fb324d99e2313422f014e9dddfcfcf7a69a03d2867f2aafb4a67515552c2",
+          "template_hash": null,
+          "tokens": [
+            {
+              "id": "9a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d",
+              "amount": "163377",
+              "name": "SPF",
+              "decimals": 6
+            }
+          ],
+          "registers": {},
+          "spent_by": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+          "spent_height": 952324
+        }
+      },
+      {
+        "id": "dac367edd29e5700fd74723130a47463b2eb5e786740f2289012cdabef96bb09",
+        "box": {
+          "id": "dac367edd29e5700fd74723130a47463b2eb5e786740f2289012cdabef96bb09",
+          "tx_id": "6f0fcfa7e7c5efae3af93da67ce8b90a4af76596eae12284d917e6866da385d0",
+          "index": 2,
+          "value": "998000000",
+          "creation_height": 952322,
+          "ergo_tree": "0008cd0384f2e933dfd4e5c917550868bb2ac9e5eaacb00d9257d11dc6ba636aa70545b1",
+          "address": "9hUMh5q6WsBp5RsDUkEdnUMf9Ppsr2iXxiVdP9UekynHPqGPd76",
+          "tree_hash": "f1e011d238cda38bc8fadec334fc9d1b7e4dc6abe420f584af6698c84147744d",
+          "template_hash": null,
+          "tokens": [
+            {
+              "id": "9a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d",
+              "amount": "140230",
+              "name": "SPF",
+              "decimals": 6
+            }
+          ],
+          "registers": {},
+          "spent_by": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+          "spent_height": 952324
+        }
+      }
+    ],
+    "data_inputs": [],
+    "outputs": [
+      {
+        "id": "f5dfeb40e0bc761e243c9656c33b2675416bb7c890894ff4255bc246b2779a71",
+        "tx_id": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+        "index": 0,
+        "value": "91751656564130",
+        "creation_height": 952322,
+        "ergo_tree": "1999030f0400040204020404040405feffffffffffffffff0105feffffffffffffffff01050004d00f040004000406050005000580dac409d819d601b2a5730000d602e4c6a70404d603db63087201d604db6308a7d605b27203730100d606b27204730200d607b27203730300d608b27204730400d6099973058c720602d60a999973068c7205027209d60bc17201d60cc1a7d60d99720b720cd60e91720d7307d60f8c720802d6107e720f06d6117e720d06d612998c720702720fd6137e720c06d6147308d6157e721206d6167e720a06d6177e720906d6189c72117217d6199c72157217d1ededededededed93c27201c2a793e4c672010404720293b27203730900b27204730a00938c7205018c720601938c7207018c72080193b17203730b9593720a730c95720e929c9c721072117e7202069c7ef07212069a9c72137e7214067e9c720d7e72020506929c9c721372157e7202069c7ef0720d069a9c72107e7214067e9c72127e7202050695ed720e917212730d907216a19d721872139d72197210ed9272189c721672139272199c7216721091720b730e",
+        "address": "5vSUZRZbdVbnk4sJWjg2uhL94VZWRg4iatK9VgMChufzUgdihgvhR8yWSUEJKszzV7Vmi6K8hCyKTNhUaiP8p5ko6YEU9yfHpjVuXdQ4i5p4cRCzch6ZiqWrNukYjv7Vs5jvBwqg5hcEJ8u1eerr537YLWUoxxi1M4vQxuaCihzPKMt8NDXP4WcbN6mfNxxLZeGBvsHVvVmina5THaECosCWozKJFBnscjhpr3AJsdaL8evXAvPfEjGhVMoTKXAb2ZGGRmR8g1eZshaHmgTg2imSiaoXU5eiF3HvBnDuawaCtt674ikZ3oZdekqswcVPGMwqqUKVsGY4QuFeQoGwRkMqEYTdV2UDMMsfrjrBYQYKUBFMwsQGMNBL1VoY78aotXzdeqJCBVKbQdD3ZZWvukhSe4xrz8tcF3PoxpysDLt89boMqZJtGEHTV9UBTBEac6sDyQP693qT3nKaErN8TCXrJBUmHPqKozAg9bwxTqMYkpmb9iVKLSoJxG7MjAj72SRbcqQfNCVTztSwN3cRxSrVtz4p87jNFbVtFzhPg7UqDwNFTaasySCqM",
+        "tree_hash": "99f30ad579a2c98ad31b432676627fcd9e303d43c06e898725f6155d8ac40aa9",
+        "template_hash": null,
+        "tokens": [
+          {
+            "id": "f40afb6f877c40a30c8637dd5362227285738174151ce66d6684bc1b727ab6cf",
+            "amount": "1",
+            "name": null,
+            "decimals": null
+          },
+          {
+            "id": "c7e22029868ecba3d43c385bb42b8a1c96d0114ad5261ec7e0d27a6f24254f92",
+            "amount": "9223359717007728454",
+            "name": "Ergo_Spectrum Finance_LP",
+            "decimals": 0
+          },
+          {
+            "id": "9a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d",
+            "amount": "1658308418366",
+            "name": "SPF",
+            "decimals": 6
+          }
+        ],
+        "registers": {
+          "R4": "04ca0f"
+        },
+        "spent_by": "1995ebdf6dbd282340c5a287d37a75ad75570a21f2eb21513351e390ca0abda5",
+        "spent_height": null
+      },
+      {
+        "id": "24463f86e838bc1e79b50ed1cf27f7d50e676703ce7920182000ebfeb751b248",
+        "tx_id": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+        "index": 1,
+        "value": "400000",
+        "creation_height": 952322,
+        "ergo_tree": "0008cd034153f4c52b1d3e301236cfc939f27dc6c58822c160387865ee1e41d407827cb4",
+        "address": "9gxaQXAAHpkvoUtQDFenQEWAG7JUmFB4ZDj6icqF93VgV1RJnPL",
+        "tree_hash": "2e7c87514de4a4790ab0537526595646cc133936b2d5c294f402fc0490bc9e40",
+        "template_hash": null,
+        "tokens": [
+          {
+            "id": "9a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d",
+            "amount": "5429060",
+            "name": "SPF",
+            "decimals": 6
+          }
+        ],
+        "registers": {},
+        "spent_by": "662fd710d00ac86176db242d660f10aa5b817ec379e628873bb604ac59602a5e",
+        "spent_height": null
+      },
+      {
+        "id": "181c99dbcd7ac5c06755253a08916a83965ea01dc7943eecce0c5c379eb1d850",
+        "tx_id": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+        "index": 2,
+        "value": "996000000",
+        "creation_height": 952322,
+        "ergo_tree": "0008cd0384f2e933dfd4e5c917550868bb2ac9e5eaacb00d9257d11dc6ba636aa70545b1",
+        "address": "9hUMh5q6WsBp5RsDUkEdnUMf9Ppsr2iXxiVdP9UekynHPqGPd76",
+        "tree_hash": "f1e011d238cda38bc8fadec334fc9d1b7e4dc6abe420f584af6698c84147744d",
+        "template_hash": null,
+        "tokens": [
+          {
+            "id": "9a06d9e545a41fd51eeffc5e20d818073bf820c635e2a9d922269913e0de369d",
+            "amount": "280462",
+            "name": "SPF",
+            "decimals": 6
+          }
+        ],
+        "registers": {},
+        "spent_by": "3152712489fbe06362eec6d3188a29df850cdad3c6a302c0ecb891d61a5aebe2",
+        "spent_height": null
+      },
+      {
+        "id": "af169169603338916a52cbdc5385a67525b7c539d3e18f08efd070d84355443f",
+        "tx_id": "3e9d39dba8d67644572407c5a1d4ebaa0992bb0edfe561fc44872aa5e7180ac3",
+        "index": 3,
+        "value": "2000000",
+        "creation_height": 952322,
+        "ergo_tree": "1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a57304",
+        "address": "2iHkR7CWvD1R4j1yZg5bkeDRQavjAaVPeTDFGGLZduHyfWMuYpmhHocX8GJoaieTx78FntzJbCBVL6rf96ocJoZdmWBL2fci7NqWgAirppPQmZ7fN9V6z13Ay6brPriBKYqLp1bT2Fk4FkFLCfdPpe",
+        "tree_hash": "e540cceffd3b8dd0f401193576cc413467039695969427df94454193dddfb375",
+        "template_hash": null,
+        "tokens": [],
+        "registers": {},
+        "spent_by": "5f80f075f7628e7a5b5d21e93388ae831389e497f1c2827010f265b1ef49ae2a",
+        "spent_height": null
+      }
+    ]
+  }
+}

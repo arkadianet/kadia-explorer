@@ -16,6 +16,9 @@
 	import EmptyState from '$lib/components/EmptyState.svelte';
 	import ErrorState from '$lib/components/ErrorState.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
+	import SaveAddress from '$lib/components/SaveAddress.svelte';
+	import AddressActivity from '$lib/components/AddressActivity.svelte';
+	import AddressHistory from '$lib/components/AddressHistory.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager, type Pager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
@@ -27,6 +30,8 @@
 	const PAGE_SIZE = 50;
 
 	const TABS = [
+		{ id: 'activity', label: 'Activity' },
+		{ id: 'history', label: 'Historical snapshot' },
 		{ id: 'txs', label: 'Transactions' },
 		{ id: 'unspent', label: 'Unspent boxes' },
 		{ id: 'boxes', label: 'All boxes' },
@@ -43,7 +48,7 @@
 	/** Active tab, driven by the URL hash so a tab is linkable and survives reload. */
 	const active = $derived.by(() => {
 		const id = page.url.hash.replace(/^#/, '');
-		return TAB_IDS.includes(id) ? id : 'txs';
+		return TAB_IDS.includes(id) ? id : 'activity';
 	});
 
 	function selectTab(id: string) {
@@ -52,7 +57,7 @@
 	}
 
 	// Each tab's data source is created on first activation, so opening the page costs one
-	// request (the txs page) rather than four.
+	// activity request rather than fetching each tab in advance.
 	let txPager = $state<Pager<TxSummaryDto> | null>(null);
 	let unspentPager = $state<Pager<BoxDto> | null>(null);
 	let boxPager = $state<Pager<BoxDto> | null>(null);
@@ -144,6 +149,7 @@
 			message="Address not seen yet — no boxes for it in the index. It may never have been funded, or the indexer may not have reached its first transaction."
 		/>
 	</div>
+	<Panel title="Historical snapshot"><AddressHistory address={addr} /></Panel>
 {:else}
 	<div class="head">
 		<PageHead title="Address" id={info.address}>
@@ -151,6 +157,7 @@
 				<span class="balance"><Amount nano={info.balance.nano} maxFrac={9} /></span>
 			{/snippet}
 		</PageHead>
+		<SaveAddress address={info.address} />
 
 		<Facts>
 			<Fact label="Boxes"><span class="mono">{info.box_count}</span></Fact>
@@ -198,7 +205,11 @@
 		<Tabs tabs={TABS} {active} onchange={selectTab} label="Address sections" />
 
 		<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
-			{#if active === 'txs'}
+			{#if active === 'activity'}
+				<AddressActivity address={addr} />
+			{:else if active === 'history'}
+				<AddressHistory address={addr} />
+			{:else if active === 'txs'}
 				{#if txPager}
 					<InfiniteList
 						table
@@ -217,7 +228,13 @@
 						{/snippet}
 						{#snippet children(tx: TxSummaryDto)}
 							<tr>
-								<td><Hash value={tx.id} href={`/tx/${tx.id}`} copy={false} /></td>
+								<td
+									><Hash
+										value={tx.id}
+										href={`/tx/${tx.id}?address=${encodeURIComponent(addr)}`}
+										copy={false}
+									/></td
+								>
 								<td class="num mono"><a href={`/blocks/${tx.height}`}>{tx.height}</a></td>
 								<td><Age ms={tx.timestamp} /></td>
 								<td class="num"><Amount nano={tx.fee} maxFrac={3} /></td>

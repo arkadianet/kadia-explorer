@@ -1,6 +1,8 @@
 import { apiGet } from './client';
 import type {
 	AddressDto,
+	AddressActivityFilters,
+	AddressActivityPageDto,
 	AddressRentDto,
 	BlockDto,
 	BoxDto,
@@ -12,7 +14,7 @@ import type {
 	StatusDto,
 	SupplyDto,
 	TemplateDto,
-	TokenHolderDto,
+	TokenHoldersPageDto,
 	TokenInfoDto,
 	TokenSearchDto,
 	TxDto,
@@ -103,6 +105,19 @@ export const api = {
 
 	addressRent: (addr: string, f?: Fetch) =>
 		apiGet<AddressRentDto>(`/addresses/${encodeURIComponent(addr)}/rent`, undefined, f),
+	addressActivity: (
+		addr: string,
+		filters: AddressActivityFilters = {},
+		cursor?: string,
+		snapshot?: string,
+		limit = 20,
+		f?: Fetch
+	) =>
+		apiGet<AddressActivityPageDto>(
+			`/addresses/${encodeURIComponent(addr)}/activity`,
+			{ ...filters, cursor, snapshot, limit, dir: 'desc', consistency: 'strict' },
+			f
+		),
 
 	richlist: (cursor?: string, limit = 50, f?: Fetch, snapshot?: string) =>
 		apiGet<PageDto<RichlistItemDto>>(
@@ -156,7 +171,7 @@ export const api = {
 		),
 
 	tokenHolders: (id: string, cursor?: string, limit = 50, f?: Fetch, snapshot?: string) =>
-		apiGet<PageDto<TokenHolderDto>>(
+		apiGet<TokenHoldersPageDto>(
 			`/tokens/${encodeURIComponent(id)}/holders`,
 			{ cursor, limit, consistency: 'strict', snapshot },
 			f

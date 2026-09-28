@@ -1,41 +1,13 @@
 import { api } from '$lib/api/endpoints';
 import type {
-	BlockDto,
 	PageDto,
 	RichlistItemDto,
 	StatusDto,
 	TokenInfoDto,
-	TxDto
+	TxSummaryDto
 } from '$lib/api/types';
+import { networkSummary } from '$lib/home/api';
 import type { PageLoad } from './$types';
-
-/** Largest page `/v1/blocks` will serve. */
-const PAGE = 500;
-/** The home page's figures are all "over the last 24 hours of the indexed chain". */
-const DAY_MS = 86_400_000;
-
-/**
- * Walks the `/v1/blocks` cursor until a day of chain is in hand (or the chain runs out).
- * The 24 h statistics on the home page are sums over exactly these blocks, so the window has
- * to be fetched rather than estimated.
- */
-async function blockWindow(fetch: typeof globalThis.fetch): Promise<BlockDto[]> {
-	const items: BlockDto[] = [];
-	let cursor: string | undefined;
-	let snapshot: string | undefined;
-	for (let round = 0; round < 6; round++) {
-		const page = await api.blocks(cursor, PAGE, undefined, fetch, snapshot);
-		items.push(...page.items);
-		const newest = items[0]?.timestamp ?? 0;
-		const oldest = items[items.length - 1]?.timestamp ?? 0;
-		if (page.next_cursor === null || newest - oldest >= DAY_MS || page.items.length === 0) {
-			break;
-		}
-		cursor = page.next_cursor;
-		snapshot = page.next_snapshot ?? undefined;
-	}
-	return items;
-}
 
 async function topHolders(fetch: typeof globalThis.fetch): Promise<RichlistItemDto[]> {
 	const page = await api.richlist(undefined, 5, fetch);
@@ -66,10 +38,10 @@ export const load: PageLoad = async ({ fetch }) => {
 	// Each call is wrapped so one section's failure can't reject the whole `Promise.all` and
 	// take down the page — every section gets its own success/error result to render from.
 	const [blocks, txs, rent, tokens, richlist, status] = await Promise.all([
-		safe<BlockDto[]>(blockWindow(fetch)),
-		// Expanded by design: bounded at 12, and the card needs output values absent from summaries.
-		safe<PageDto<TxDto>>(api.txs(undefined, 12, undefined, fetch)),
-		safe(api.rentUpcoming(720, 500, fetch)),
+		safe(networkSummary(fetch)),
+		// Compact rows keep the overview independent of transaction expansion budgets.
+		safe<PageDto<TxSummaryDto>>(api.txSummaries(undefined, 6, undefined, fetch)),
+		safe(api.rentUpcoming(720, 5, fetch)),
 		safe<TokenInfoDto[]>(topTokens(fetch)),
 		safe<RichlistItemDto[]>(topHolders(fetch)),
 		safe<StatusDto>(api.status(fetch))

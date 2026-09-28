@@ -8,6 +8,9 @@
 	import Amount from '$lib/components/Amount.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import RegistersTable from '$lib/components/RegistersTable.svelte';
+	import BoxLineage from '$lib/components/BoxLineage.svelte';
+	import ApplicationWorkflow from '$lib/components/ApplicationWorkflow.svelte';
+	import { spectrumOrder } from '$lib/tx/spectrum';
 	import { hasDisplayableRegisters } from '$lib/registers/decode';
 	import { status } from '$lib/status/status.svelte';
 	import { formatTokenAmount } from '$lib/format/amount';
@@ -22,6 +25,7 @@
 	let { data }: { data: PageData } = $props();
 
 	const box = $derived(data.box);
+	const applicationOrder = $derived(spectrumOrder(box));
 	const tip = $derived(status.current?.indexed ?? null);
 
 	const hasRegisters = $derived(hasDisplayableRegisters(box.registers));
@@ -98,6 +102,9 @@
 		</details>
 	{/if}
 </div>
+
+{#if applicationOrder}{#key box.id}<ApplicationWorkflow order={applicationOrder} />{/key}{/if}
+{#key box.id}<BoxLineage {box} />{/key}
 
 {#if box.tokens.length > 0}
 	<Panel title={`Tokens (${box.tokens.length})`}>

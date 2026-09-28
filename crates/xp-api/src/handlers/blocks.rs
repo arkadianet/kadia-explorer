@@ -11,7 +11,7 @@ use xp_store::Reader;
 
 /// Resolves a `{height_or_id}` path segment: all-digits is a height, 64 hex chars is a
 /// header id, anything else is a 400.
-fn resolve_height(rd: &Reader, raw: &str) -> Result<u32, ApiError> {
+pub(crate) fn resolve_height(rd: &Reader, raw: &str) -> Result<u32, ApiError> {
     if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
         return raw
             .parse::<u32>()

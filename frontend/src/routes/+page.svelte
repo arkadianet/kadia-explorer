@@ -15,17 +15,8 @@
 	import { api } from '$lib/api/endpoints';
 	import { status as statusStore } from '$lib/status/status.svelte';
 	import { appearance } from '$lib/theme/theme.svelte';
-	import { txKind } from '$lib/tx/kind';
-	import {
-		buckets,
-		chainWindow,
-		formatHashrate,
-		hashrateHs,
-		HOUR_MS,
-		sumNano,
-		TARGET_BLOCK_SECONDS
-	} from '$lib/home/series';
-	import type { TxDto } from '$lib/api/types';
+	import { formatHashrate, hashrateHs, TARGET_BLOCK_SECONDS } from '$lib/home/series';
+	import type { TxSummaryDto } from '$lib/api/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -41,7 +32,7 @@
 	const tip = $derived(status?.indexed ?? null);
 	const h = $derived(statusStore.health);
 
-	const blocks = $derived(data.blocks.data ?? []);
+	const blocks = $derived(data.blocks.data?.recent_blocks ?? []);
 	const latest = $derived(blocks[0] ?? null);
 	const opening = $derived(
 		{
@@ -61,27 +52,23 @@
 	const latestAge = $derived(latest ? relTime(latest.timestamp, now) : '—');
 
 	// ---------------------------------------------------------------- windows and series
-	const day = $derived(chainWindow(blocks, 24 * HOUR_MS));
-	/** True while the loaded chain is shorter than the window the figures claim. */
-	const dayPartial = $derived(
-		blocks.length > 0 && blocks[0]!.timestamp - blocks[blocks.length - 1]!.timestamp < 24 * HOUR_MS
-	);
+	const summary = $derived(data.blocks.data);
+	const count = $derived(summary?.block_count ?? 0);
+	const scope = $derived(`latest ${count.toLocaleString('en-US')} indexed blocks`);
 	const dayNote = $derived(
-		dayPartial
-			? `Partial window: only ${blocks.length} blocks were loaded; the indexed history or request cap may limit coverage.`
-			: ''
+		summary
+			? `Heights ${summary.from_height ?? '\u2014'}\u2013${summary.to_height ?? '\u2014'}. Totals cover these blocks; charts place only this sample into timestamp buckets.`
+			: 'Snapshot unavailable'
 	);
-
-	const dayTxs = $derived(day.reduce((n, b) => n + b.tx_count, 0));
-	const txPerHour = $derived(buckets(day, HOUR_MS, 24, (b) => b.tx_count));
-	const blocksPerHour = $derived(buckets(day, HOUR_MS, 24));
-	const dayReward = $derived(sumNano(day, 'reward'));
-	const rewardPerHour = $derived(
-		buckets(day, HOUR_MS, 24, (b) => Number(BigInt(b.reward) / 1_000_000n) / 1000)
+	const dayTxs = $derived(summary?.transaction_count ?? 0);
+	const txPerHour = $derived(summary?.transactions_per_hour ?? []);
+	const blocksPerHour = $derived(summary?.blocks_per_hour ?? []);
+	const totalFees = $derived(summary?.fees ?? '0');
+	const roundedFees = $derived(BigInt(totalFees) % 1_000_000n !== 0n);
+	const feesPerHour = $derived(
+		(summary?.fees_per_hour ?? []).map((n) => Number(BigInt(n) / 1_000_000n) / 1000)
 	);
-
-	/** Blocks per 10-minute bucket across the six hours below the indexed tip. */
-	const heroSeries = $derived(buckets(blocks, 600_000, 36));
+	const heroSeries = $derived(summary?.blocks_per_ten_minutes ?? []);
 
 	const hashrate = $derived(latest ? formatHashrate(hashrateHs(latest.difficulty)) : '—');
 
@@ -96,17 +83,23 @@
 	// indexer cannot turn the page into a request loop.
 	// `null` until the first tip-driven refresh, so the server-loaded list stays the source
 	// of truth for the first paint rather than being copied into state.
-	let liveTxs = $state<TxDto[] | null>(null);
+	let liveTxs = $state<TxSummaryDto[] | null>(null);
 	let lastSeenTip = $state<number | null>(null);
+	let initializedTip = false;
 	let refreshing = false;
 
 	$effect(() => {
 		const t = statusStore.current?.indexed ?? null;
 		if (t === null || t === lastSeenTip || refreshing) return;
+		if (!initializedTip) {
+			initializedTip = true;
+			lastSeenTip = data.status.data?.indexed ?? t;
+			if (t === lastSeenTip) return;
+		}
 		lastSeenTip = t;
 		refreshing = true;
 		void api
-			.txs(undefined, 12)
+			.txSummaries(undefined, 6)
 			.then((page) => (liveTxs = page.items))
 			.catch(() => undefined)
 			.finally(() => (refreshing = false));
@@ -217,12 +210,12 @@
 	</section>
 
 	<!-- ------------------------------------------------------------------------------ stats -->
-	<section class="stats" aria-label="Chain in the last 24 hours">
+	<section class="stats" aria-label="Recent indexed chain">
 		<div class="stat glass">
 			<p class="stat-label"><Icon name="txs" size={16} />Transactions</p>
 			<p
 				class="stat-value"
-				title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
+				title={`Sum of tx_count over the ${count} indexed blocks in this window. ${dayNote}`}
 			>
 				{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')}
 			</p>
@@ -230,53 +223,48 @@
 				values={txPerHour}
 				color="var(--accent-ink)"
 				kind="bars"
-				title="Transactions per hour across the last 24 hours of indexed chain."
+				title="Transactions from the sampled blocks, placed in hourly buckets below the tip timestamp. Uncovered hours are not proof of no activity."
 			/>
 			<p class="stat-foot">
-				{data.blocks.error
-					? 'Window unavailable'
-					: dayPartial
-						? 'Partial chain window'
-						: 'last 24 h of chain'}
+				{data.blocks.error ? 'Window unavailable' : scope}
 			</p>
 		</div>
 
 		<div class="stat glass">
 			<p class="stat-label"><Icon name="blocks" size={16} />Blocks</p>
-			<p
-				class="stat-value"
-				title={`Blocks whose timestamp falls in the 24 hours below the indexed tip. ${dayNote}`}
-			>
-				{data.blocks.error ? 'Unavailable' : day.length.toLocaleString('en-US')}
+			<p class="stat-value" title={`Exact count in the bounded block sample. ${dayNote}`}>
+				{data.blocks.error ? 'Unavailable' : count.toLocaleString('en-US')}
 			</p>
 			<Sparkline
 				values={blocksPerHour}
 				color="var(--accent-ink)"
 				kind="line"
-				title="Blocks per hour across the last 24 hours of indexed chain."
+				title="Sampled blocks placed in hourly buckets below the tip timestamp."
 			/>
 			<p class="stat-foot" title="Ergo targets one block every 120 seconds.">
-				{dayPartial ? 'Partial chain window' : '720 at target'}
+				{scope}
 			</p>
 		</div>
 
 		<div class="stat glass">
-			<p class="stat-label"><Icon name="spark" size={16} />Miner rewards</p>
+			<p class="stat-label"><Icon name="spark" size={16} />Transaction fees</p>
 			<p
 				class="stat-value"
-				title={`Sum of the reward field over the ${day.length} indexed blocks in this window. ${dayNote}`}
+				title={`Exact transaction fees: ${totalFees} nanoERG. Displayed to three decimal places. ${dayNote}`}
 			>
-				{data.blocks.error ? 'Unavailable' : formatErg(dayReward, { maxFrac: 0 })}<span class="unit"
+				{data.blocks.error
+					? 'Unavailable'
+					: `${roundedFees ? '≈ ' : ''}${formatErg(totalFees, { maxFrac: 3 })}`}<span class="unit"
 					>ERG</span
 				>
 			</p>
 			<Sparkline
-				values={rewardPerHour}
+				values={feesPerHour}
 				color="var(--accent-ink)"
 				kind="line"
-				title="Reward paid per hour, in ERG, across the last 24 hours of indexed chain."
+				title="Transaction fees from sampled blocks, placed in hourly buckets below the tip timestamp."
 			/>
-			<p class="stat-foot">{dayPartial ? 'Partial chain window' : 'paid to miners'}</p>
+			<p class="stat-foot">{scope}</p>
 		</div>
 
 		<div class="stat glass">
@@ -310,6 +298,16 @@
 	</section>
 
 	<!-- ----------------------------------------------------------------------------- panels -->
+	{#if summary && count > 0}
+		<p class="window-caption">
+			Network sample: heights {summary.from_height?.toLocaleString(
+				'en-US'
+			)}–{summary.to_height?.toLocaleString('en-US')}. Hourly charts cover these blocks only.
+			{#if summary.partial_from !== null}Indexed history begins at block {summary.partial_from.toLocaleString(
+					'en-US'
+				)}.{/if}
+		</p>
+	{/if}
 	<div class="panels">
 		<section class="panel card">
 			<div class="card-head">
@@ -329,7 +327,7 @@
 							<th>Height</th>
 							<th>Age</th>
 							<th class="num">Txs</th>
-							<th class="num">Reward</th>
+							<th class="num">Fees</th>
 							<th>Miner</th>
 						</tr>
 					{/snippet}
@@ -338,7 +336,7 @@
 							<td><a class="height" href={`/blocks/${block.height}`}>{block.height}</a></td>
 							<td class="muted"><Age ms={block.timestamp} /></td>
 							<td class="num mono">{block.tx_count}</td>
-							<td class="num"><Amount nano={block.reward} maxFrac={3} /></td>
+							<td class="num"><Amount nano={block.fees} maxFrac={3} /></td>
 							<td><MinerChip minerPk={block.miner_pk} /></td>
 						</tr>
 					{/each}
@@ -351,7 +349,7 @@
 				<h2 class="card-title">Live transactions</h2>
 				<span class="pill live-pill tone-{h.tone}"><span class="dot"></span>{h.live}</span>
 			</div>
-			{#if data.txs.error}
+			{#if data.txs.error && liveTxs === null}
 				<div class="pad"><ErrorState error={data.txs.error} /></div>
 			{:else if shownTxs.length === 0}
 				<div class="pad">
@@ -360,29 +358,16 @@
 			{:else}
 				<ul class="txlist">
 					{#each shownTxs as tx (tx.id)}
-						{@const kind = txKind(tx)}
 						<li>
 							<a href={`/tx/${tx.id}`}>
-								<span class="kind {kind.kind}" title={kind.why}>
-									<Icon
-										name={kind.kind === 'rent'
-											? 'rent-coin'
-											: kind.kind === 'token'
-												? 'layers'
-												: 'txs'}
-										size={18}
-									/>
-								</span>
+								<span class="kind"><Icon name="txs" size={18} /></span>
 								<span class="tx-main">
-									<span class="tx-kind">{kind.label}</span>
+									<span class="tx-kind">{tx.input_count} in · {tx.output_count} out</span>
 									<span class="tx-id mono">{truncateMiddle(tx.id)}</span>
 								</span>
 								<span class="tx-age"><Age ms={tx.timestamp} /></span>
 								<span class="tx-value">
-									{formatErg(
-										tx.outputs.reduce((t, o) => t + BigInt(o.value), 0n),
-										{ maxFrac: 2 }
-									)}<span class="unit">ERG</span>
+									{formatErg(tx.fee, { maxFrac: 4 })}<span class="unit">ERG fee</span>
 								</span>
 							</a>
 						</li>
@@ -390,11 +375,9 @@
 				</ul>
 				<div class="live-foot">
 					<span
-						title={`Sum of tx_count over the ${day.length} indexed blocks in this window. ${dayNote}`}
+						title={`Sum of tx_count over the ${count} indexed blocks in this window. ${dayNote}`}
 					>
-						{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')} transactions · {dayPartial
-							? 'partial chain window'
-							: 'last 24 hours of chain'}
+						{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')} transactions · {scope}
 					</span>
 					<span class="live-spark">
 						<Sparkline
@@ -402,7 +385,7 @@
 							kind="bars"
 							height={26}
 							color="var(--accent)"
-							title="Transactions per hour across the last 24 hours of indexed chain."
+							title="Transactions from the sampled blocks, placed in hourly buckets below the tip timestamp. Uncovered hours are not proof of no activity."
 						/>
 					</span>
 				</div>
@@ -421,7 +404,9 @@
 				<div class="pad"><ErrorState error={data.rent.error} /></div>
 			{:else if rentItems.length === 0}
 				<div class="pad">
-					<EmptyState message="No box reaches its storage-rent maturity in the next 720 blocks." />
+					<EmptyState
+						message="No upcoming boxes were returned for this indexed snapshot. Coverage may be limited."
+					/>
 				</div>
 			{:else}
 				<p class="summary">
@@ -565,6 +550,12 @@
 </div>
 
 <style>
+	.window-caption {
+		color: var(--fg-muted);
+		font-size: var(--fs-micro);
+		margin: -12px 0 20px;
+		line-height: 1.6;
+	}
 	.home-dashboard {
 		display: contents;
 	}

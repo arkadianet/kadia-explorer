@@ -240,12 +240,15 @@ for (const appearance of ['original', 'aurora', 'atelier', 'prism']) {
 							const tabs = await page
 								.getByRole('tablist', { name: 'Address sections' })
 								.boundingBox();
-							const table = await page.getByRole('tabpanel').getByRole('table').boundingBox();
+							const activity = await page
+								.getByRole('tabpanel')
+								.getByRole('region', { name: 'Address activity', exact: true })
+								.boundingBox();
 							expect(
-								tabs!.y + tabs!.height <= table!.y + 1 ||
-									tabs!.x + tabs!.width <= table!.x + 1 ||
-									table!.x + table!.width <= tabs!.x + 1,
-								'The activity table must not paint over its tabs'
+								tabs!.y + tabs!.height <= activity!.y + 1 ||
+									tabs!.x + tabs!.width <= activity!.x + 1 ||
+									activity!.x + activity!.width <= tabs!.x + 1,
+								'The activity region must not paint over its tabs'
 							).toBe(true);
 						}
 					});

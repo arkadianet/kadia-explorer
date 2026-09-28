@@ -55,6 +55,7 @@ impl Store {
         }
         let mut txn = self.db.begin_write()?;
         crate::token_search::prepare_write(&txn)?;
+        crate::token_history::prepare_write(&txn)?;
         txn.set_durability(Durability::Immediate);
         self.check_register_capacity(&txn, boxes.iter())?;
         {
@@ -160,6 +161,7 @@ impl Store {
         }
         let entries = txn.open_table(REGISTER_IDX)?.len()?;
         crate::token_search::finish_write(&txn)?;
+        crate::token_history::finish_write(&txn)?;
         txn.commit()?;
         self.register_entries_cache
             .store(entries, std::sync::atomic::Ordering::Relaxed);

@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import { api } from '$lib/api/endpoints';
 	import { createTransactionTracker, type TrackingState } from '$lib/tx/tracker';
 	import TransactionTracking from '$lib/components/TransactionTracking.svelte';
 	import TransactionReceipt from '$lib/components/TransactionReceipt.svelte';
+	import ApplicationWorkflow from '$lib/components/ApplicationWorkflow.svelte';
+	import { transactionOrders } from '$lib/tx/spectrum';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHead from '$lib/components/PageHead.svelte';
 	import Facts from '$lib/components/Facts.svelte';
@@ -32,6 +35,7 @@
 				}
 	);
 	const tx = $derived(tracking.tx);
+	const applicationOrders = $derived(tx ? transactionOrders(tx) : []);
 	// A live inclusion check updates confirmations, not mutable box-spend/rent details.
 	const receiptTx = $derived(
 		tx && tracking.status?.state === 'confirmed'
@@ -87,6 +91,7 @@
 	{#if tx && receiptTx}
 		{#key `${tx.id}:${tx.block_id}:${tx.height}`}<TransactionReceipt
 				tx={receiptTx}
+				perspectiveAddress={page.url.searchParams.get('address')}
 				refreshing={tracking.checking}
 				onrefresh={refresh}
 			/>{/key}
@@ -113,6 +118,10 @@
 		</Facts>
 	{/if}
 </div>
+
+{#key tx?.block_id}{#each applicationOrders as order (order.box.id)}<ApplicationWorkflow
+			{order}
+		/>{/each}{/key}
 
 <!-- Inputs on the left, outputs on the right, parted by a rule that the two column headings
      label. No arrow glyph: the headings already say which side is which. -->

@@ -66,6 +66,7 @@ impl Store {
             .unwrap_or_else(|e| e.into_inner());
         let mut txn = self.db.begin_write()?;
         crate::token_search::prepare_write(&txn)?;
+        crate::token_history::prepare_write(&txn)?;
         txn.set_durability(if durable {
             Durability::Immediate
         } else {
@@ -179,6 +180,7 @@ impl Store {
         }
         let entries = txn.open_table(REGISTER_IDX)?.len()?;
         crate::token_search::finish_write(&txn)?;
+        crate::token_history::finish_write(&txn)?;
         txn.commit()?;
         self.register_entries_cache
             .store(entries, std::sync::atomic::Ordering::Relaxed);
@@ -320,6 +322,15 @@ fn apply_block(ctx: &mut Ctx, b: &DecodedBlock) -> Result<(), StoreError> {
         // coupling to the loop above, which allocated exactly one gidx per output in order.
         debug_assert_eq!(ctx.next_box, first_out_gidx + tx.outputs.len() as Gidx);
         tokens.apply_tx(tx, &input_boxes, first_out_gidx, ctx.height, ctx.partial)?;
+        // Inputs include burns; outputs include mints. Identical keys deduplicate change
+        // and repeated boxes without claiming these touches are payments.
+        for (token, _) in input_boxes
+            .iter()
+            .flat_map(|b| &b.tokens)
+            .chain(tx.outputs.iter().flat_map(|b| &b.tokens))
+        {
+            crate::token_history::insert(ctx.txn, token, tx_gidx)?;
+        }
 
         // `fee` was summed over the outputs above: it is the value this tx locked in the
         // miner-fee contract. The emission tx (index 0) and the fee-collection tx (the

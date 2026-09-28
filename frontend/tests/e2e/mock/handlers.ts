@@ -23,17 +23,56 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readFileSync } from 'node:fs';
+import type { GroupBalances, GroupMember } from '../../../src/lib/addresses/groups.ts';
 import type {
+	AddressActivityDto,
+	AddressActivityPageDto,
 	BoxDto,
 	PageDto,
 	TokenHolderDto,
 	TxDto,
 	TxSummaryDto
 } from '../../../src/lib/api/types.ts';
-import { buildDataset, registerKey, type Dataset } from './fixtures.ts';
+import { buildDataset, FIXTURE_HEIGHTS, registerKey, type Dataset } from './fixtures.ts';
 
 /** Items per page, small enough that the app's 50-item requests still paginate. */
 export const PAGE_SIZE = 5;
+
+// A captured mainnet workflow for the local demo. Display-only size/rent values are
+// synthetic; workflow identities, scripts, registers and amounts come from the fixture.
+const appFixture = JSON.parse(
+	readFileSync(
+		new URL('../../../../tests/fixtures/apps/spectrum-v3-swap.json', import.meta.url),
+		'utf8'
+	)
+) as { order: BoxDto; settlement: TxDto };
+function appBox(box: BoxDto): BoxDto {
+	return {
+		...box,
+		size: 0,
+		kind: 'box',
+		rent: {
+			maturity_height: box.creation_height + 1_051_200,
+			due_nano: '0',
+			claimable_at_tip: false,
+			consensus_fee_nano: '0',
+			collectible: false
+		}
+	};
+}
+const appTransaction: TxDto = {
+	...appFixture.settlement,
+	inputs: appFixture.settlement.inputs.map((input) => ({ ...input, box: appBox(input.box!) })),
+	outputs: appFixture.settlement.outputs.map(appBox)
+};
+const appBoxes = new Map(
+	[
+		appBox(appFixture.order),
+		...appTransaction.inputs.map((input) => input.box!),
+		...appTransaction.outputs
+	].map((box) => [box.id, box])
+);
 
 /** Titles for the statuses the fail toggle may produce, mirroring `xp-api`'s `ApiError`. */
 const FAIL_TITLES: Record<number, string> = {
@@ -181,6 +220,167 @@ function txSummariesOfTree(d: Dataset, tree: string): TxSummaryDto[] {
 	return txsOfTree(d, tree).map(txSummary);
 }
 
+/** Explicit group fixture read: the sample index is partial and has no address decoder. */
+async function addressGroupBalances(d: Dataset, req: IncomingMessage, res: ServerResponse) {
+	const reject = (status: number, code: string, detail: string) =>
+		sendJson(res, status, { status, title: 'Group balances unavailable', code, detail });
+	if (header(req, 'content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json')
+		return reject(
+			400,
+			'invalid_group_request',
+			'Send an application/json object containing only addresses.'
+		);
+	const raw = await new Promise<string | null>((resolve, rejectRead) => {
+		const chunks: Buffer[] = [];
+		let bytes = 0;
+		let finished = false;
+		req.on('data', (chunk: Buffer) => {
+			if (finished) return;
+			bytes += chunk.length;
+			if (bytes > 512_000) {
+				finished = true;
+				resolve(null);
+				return;
+			}
+			chunks.push(chunk);
+		});
+		req.once('end', () => {
+			if (!finished) resolve(Buffer.concat(chunks).toString('utf8'));
+		});
+		req.once('error', rejectRead);
+	});
+	if (raw === null)
+		return reject(413, 'group_request_limit', 'Group request exceeds its byte limit.');
+	let body: unknown;
+	try {
+		body = JSON.parse(raw);
+	} catch {
+		return reject(
+			400,
+			'invalid_group_request',
+			'Send a valid JSON object containing only addresses.'
+		);
+	}
+	if (
+		!body ||
+		typeof body !== 'object' ||
+		Array.isArray(body) ||
+		Object.keys(body).length !== 1 ||
+		!('addresses' in body) ||
+		!Array.isArray(body.addresses) ||
+		!body.addresses.length ||
+		body.addresses.length > 100 ||
+		body.addresses.some((address: unknown) => typeof address !== 'string')
+	)
+		return reject(
+			400,
+			'invalid_group_request',
+			'Select 1–100 address strings; labels and group names are not accepted.'
+		);
+	const addresses = body.addresses as string[];
+	if (
+		addresses.some((address) => Buffer.byteLength(address, 'utf8') > 4096) ||
+		addresses.reduce((bytes, address) => bytes + Buffer.byteLength(address, 'utf8'), 0) > 128_000
+	)
+		return reject(413, 'group_request_limit', 'Group addresses exceed their byte limit.');
+	// Only fixture mappings can establish canonical scripts here. A plausible unknown
+	// address is unsupported, not a made-up hash, a zero balance, or a verified invalidity.
+	if (
+		addresses.some(
+			(address) => !d.treeByAddress.has(address) && /^[1-9A-HJ-NP-Za-km-z]{7,4096}$/.test(address)
+		)
+	)
+		return reject(
+			501,
+			'mock_address_unavailable',
+			'This preview only resolves recorded sample addresses. A requested address is not mapped in the fixture; its validity and balance are unknown.'
+		);
+	const members: GroupMember[] = [];
+	const seen = new Map<string, number>();
+	const tokens = new Map<string, bigint>();
+	let nano = 0n;
+	let missing = false;
+	let tokenEntries = 0;
+	for (const address of addresses) {
+		const tree = d.treeByAddress.get(address);
+		if (tree === undefined) {
+			missing = true;
+			members.push({
+				address,
+				tree_hash: null,
+				status: 'invalid',
+				duplicate_of: null,
+				balance: null
+			});
+			continue;
+		}
+		const first = seen.get(tree);
+		if (first !== undefined) {
+			members.push({
+				address,
+				tree_hash: tree,
+				status: 'duplicate',
+				duplicate_of: first,
+				balance: null
+			});
+			continue;
+		}
+		const info = d.addresses.get(address);
+		if (!info)
+			return reject(
+				500,
+				'mock_fixture_integrity',
+				'A known sample address has no retained balance.'
+			);
+		seen.set(tree, members.length);
+		const balance = {
+			nano: info.balance.nano,
+			tokens: info.balance.tokens
+				.map(({ id, amount }) => ({ id, amount }))
+				.sort((a, b) => a.id.localeCompare(b.id))
+		};
+		tokenEntries += balance.tokens.length;
+		if (tokenEntries > 5000)
+			return reject(
+				422,
+				'group_work_limit',
+				'The selected fixture balances exceed the bounded token budget.'
+			);
+		nano += BigInt(balance.nano);
+		for (const token of balance.tokens)
+			tokens.set(token.id, (tokens.get(token.id) ?? 0n) + BigInt(token.amount));
+		members.push({ address, tree_hash: tree, status: 'resolved', duplicate_of: null, balance });
+	}
+	const block = d.status.indexed === null ? undefined : d.blockByHeight.get(d.status.indexed);
+	const result: GroupBalances = {
+		scope: 'selected_address_scripts',
+		consistency: 'single_reader',
+		indexed_height: d.status.indexed,
+		anchor: block ? { height: block.height, block_id: block.id } : null,
+		full_history: false,
+		partial_from: Math.min(...FIXTURE_HEIGHTS),
+		complete: false,
+		requested_count: addresses.length,
+		resolved_script_count: seen.size,
+		members,
+		observed_totals: missing
+			? null
+			: {
+					nano: nano.toString(),
+					tokens: [...tokens]
+						.sort(([a], [b]) => a.localeCompare(b))
+						.map(([id, amount]) => ({ id, amount: amount.toString() }))
+				}
+	};
+	if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 2 * 1024 * 1024)
+		return reject(
+			422,
+			'group_response_limit',
+			'The selected fixture balances exceed the bounded response budget.'
+		);
+	sendJson(res, 200, result);
+}
+
 function txSummary(t: TxDto): TxSummaryDto {
 	return {
 		id: t.id,
@@ -193,6 +393,185 @@ function txSummary(t: TxDto): TxSummaryDto {
 		data_input_count: t.data_inputs.length,
 		output_count: t.outputs.length
 	};
+}
+
+/** Token touches use only retained fixture inputs/outputs, not guessed transfer intent. */
+function tokenTransactions(d: Dataset, id: string, url: URL, res: ServerResponse): void {
+	const dir = url.searchParams.get('dir') ?? 'desc';
+	const limit = Number(url.searchParams.get('limit') ?? 20);
+	const cursor = url.searchParams.get('cursor');
+	const offset = Number(cursor ?? 0);
+	if (
+		!['asc', 'desc'].includes(dir) ||
+		![null, 'strict'].includes(url.searchParams.get('consistency')) ||
+		!Number.isInteger(limit) ||
+		limit < 1 ||
+		limit > 100 ||
+		!Number.isSafeInteger(offset) ||
+		offset < 0 ||
+		(cursor !== null && !DIGITS.test(cursor))
+	)
+		return badRequest(res, 'invalid token history pagination');
+	const block = d.blockByHeight.get(d.status.indexed ?? d.status.best)!;
+	const anchor = { height: block.height, block_id: block.id };
+	const snapshot = `mock-token-history-${Buffer.from(JSON.stringify([anchor, id, dir])).toString('base64url')}`;
+	const provided = url.searchParams.get('snapshot');
+	if ((cursor !== null && provided !== snapshot) || (provided !== null && provided !== snapshot))
+		return sendJson(res, 409, {
+			status: 409,
+			title: 'Snapshot changed',
+			code: 'snapshot_changed',
+			detail: 'Restart token history with the current snapshot and token.'
+		});
+	const seen = new Set<string>();
+	const touched = d.txs
+		.filter((tx) => {
+			if (seen.has(tx.id)) return false;
+			const touches =
+				tx.outputs.some((box) => box.tokens.some((token) => token.id === id)) ||
+				tx.inputs.some((input) => input.box?.tokens.some((token) => token.id === id));
+			if (touches) seen.add(tx.id);
+			return touches;
+		})
+		.sort((a, b) =>
+			dir === 'asc'
+				? a.height - b.height || a.index - b.index
+				: b.height - a.height || b.index - a.index
+		);
+	const result = page(touched.map(txSummary), cursor, limit);
+	sendJson(res, 200, {
+		...result,
+		next_snapshot: result.next_cursor ? snapshot : null,
+		consistency: 'strict',
+		anchor,
+		observed_anchor: anchor,
+		history_context: { scope: 'indexed_token_touches', partial_from: FIXTURE_HEIGHTS[0] }
+	});
+}
+
+/** Recorded fixture activity, with the same incomplete-input rules as the real endpoint.
+ * The mock's numeric cursor tracks scanned candidates, including filtered-out rows. */
+function addressActivity(d: Dataset, tree: string, url: URL, res: ServerResponse): void {
+	const asset = (url.searchParams.get('asset') ?? 'all').toLowerCase();
+	const direction = url.searchParams.get('direction') ?? 'all';
+	const dir = url.searchParams.get('dir') ?? 'desc';
+	const limit = Number(url.searchParams.get('limit') ?? 20);
+	const offset = Number(url.searchParams.get('cursor') ?? 0);
+	const time = (key: string) =>
+		url.searchParams.has(key) ? Number(url.searchParams.get(key)) : null;
+	const from = time('from_ms');
+	const to = time('to_ms');
+	if (
+		(asset !== 'all' && asset !== 'erg' && !HEX64.test(asset)) ||
+		!['all', 'received', 'sent', 'mixed', 'neutral', 'unknown'].includes(direction) ||
+		!['asc', 'desc'].includes(dir) ||
+		!Number.isInteger(limit) ||
+		limit < 1 ||
+		limit > 100 ||
+		!Number.isSafeInteger(offset) ||
+		offset < 0 ||
+		[from, to].some(
+			(value) =>
+				value !== null &&
+				(!Number.isSafeInteger(value) || value < 0 || value > 8_640_000_000_000_000)
+		) ||
+		(from !== null && to !== null && from >= to) ||
+		![null, 'strict'].includes(url.searchParams.get('consistency'))
+	) {
+		return badRequest(res, 'invalid address activity filters or pagination');
+	}
+	const block = d.blockByHeight.get(d.status.indexed ?? d.status.best)!;
+	const anchor = { height: block.height, block_id: block.id };
+	const snapshot = `mock-activity-${Buffer.from(JSON.stringify([anchor, tree, asset, direction, dir, from, to])).toString('base64url')}`;
+	const providedSnapshot = url.searchParams.get('snapshot');
+	if (
+		(offset > 0 && providedSnapshot !== snapshot) ||
+		(providedSnapshot !== null && providedSnapshot !== snapshot)
+	) {
+		return sendJson(res, 409, {
+			status: 409,
+			title: 'Snapshot changed',
+			code: 'snapshot_changed',
+			detail: 'Restart fixture activity with the current filters and snapshot.'
+		});
+	}
+	const candidates = txsOfTree(d, tree);
+	if (dir === 'asc') candidates.reverse();
+	const items: AddressActivityDto[] = [];
+	let scanned = 0;
+	let next = offset;
+	while (next < candidates.length && scanned < 200 && items.length < Math.min(PAGE_SIZE, limit)) {
+		const tx = candidates[next++];
+		scanned++;
+		if ((from !== null && tx.timestamp < from) || (to !== null && tx.timestamp >= to)) continue;
+		const resolved = tx.inputs.filter((input) => input.box !== null).length;
+		const complete = resolved === tx.inputs.length;
+		let erg = 0n;
+		const tokens = new Map<string, bigint>();
+		function accumulate(box: BoxDto, sign: bigint) {
+			if (box.tree_hash !== tree) return;
+			erg += sign * BigInt(box.value);
+			for (const token of box.tokens)
+				tokens.set(token.id, (tokens.get(token.id) ?? 0n) + sign * BigInt(token.amount));
+		}
+		for (const input of tx.inputs) if (input.box) accumulate(input.box, -1n);
+		for (const output of tx.outputs) accumulate(output, 1n);
+		const tokenMissing = asset !== 'all' && asset !== 'erg' && !tokens.has(asset);
+		if (tokenMissing && complete) continue;
+		const values =
+			asset === 'all'
+				? [erg, ...tokens.values()]
+				: asset === 'erg'
+					? [erg]
+					: [tokens.get(asset) ?? 0n];
+		const positive = values.some((value) => value > 0n);
+		const negative = values.some((value) => value < 0n);
+		const actualDirection = !complete
+			? 'unknown'
+			: positive && negative
+				? 'mixed'
+				: positive
+					? 'received'
+					: negative
+						? 'sent'
+						: 'neutral';
+		if (direction !== 'all' && direction !== actualDirection) continue;
+		items.push({
+			id: tx.id,
+			height: tx.height,
+			block_id: tx.block_id ?? d.blockByHeight.get(tx.height)!.id,
+			timestamp: tx.timestamp,
+			index: tx.index,
+			fee: tx.fee,
+			input_count: tx.inputs.length,
+			output_count: tx.outputs.length,
+			coverage: { complete, resolved_inputs: resolved, total_inputs: tx.inputs.length },
+			erg_delta: complete ? erg.toString() : null,
+			tokens: [...tokens]
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([id, delta]) => ({
+					id,
+					name: d.tokenById.get(id)?.name || null,
+					decimals: d.tokenById.get(id)?.decimals ?? null,
+					delta: complete ? delta.toString() : null
+				})),
+			direction: actualDirection,
+			asset_match: tokenMissing ? 'uncertain' : 'definite'
+		});
+	}
+	const more = next < candidates.length;
+	const result: AddressActivityPageDto = {
+		items,
+		next_cursor: more ? String(next) : null,
+		next_snapshot: more ? snapshot : null,
+		consistency: 'strict',
+		anchor,
+		observed_anchor: anchor,
+		scanned,
+		scan_limit_reached: scanned === 200 && more,
+		partial_from: FIXTURE_HEIGHTS[0]
+	};
+	sendJson(res, 200, result);
 }
 
 /** Resolves `/v1/blocks/{height_or_id}` the way the real handler does. */
@@ -218,18 +597,53 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		return;
 	}
 
-	if (req.method !== 'GET') {
+	if (req.method !== 'GET' && !(req.method === 'POST' && path === '/v1/addresses/balances')) {
 		problem(res, 405, 'Method Not Allowed', `${req.method} is not supported`);
 		return;
 	}
-
 	const fail = failStatus(req, url);
 	if (fail !== null && path.startsWith('/v1/')) {
 		problem(res, fail, FAIL_TITLES[fail], 'the mock was asked to fail this request');
 		return;
 	}
-
+	if (req.method === 'POST' && path === '/v1/addresses/balances') {
+		void addressGroupBalances(d, req, res).catch((error: unknown) => {
+			if (!res.headersSent && !res.destroyed)
+				problem(
+					res,
+					500,
+					'Fixture read failed',
+					error instanceof Error ? error.message : 'Unable to read the request.'
+				);
+		});
+		return;
+	}
 	// --- status --------------------------------------------------------------------
+	if (path === '/v1/txs/' + appTransaction.id + '/status') {
+		return sendJson(res, 200, {
+			id: appTransaction.id,
+			state: 'confirmed',
+			checked_at_ms: Date.now(),
+			indexed_height: appTransaction.height,
+			inclusion: {
+				block_id: appTransaction.block_id,
+				height: appTransaction.height,
+				confirmations: 1
+			},
+			previous_inclusion: null,
+			mempool: {
+				observation: 'not_checked',
+				checked_at_ms: null,
+				first_seen_at_ms: null,
+				last_seen_at_ms: null,
+				error: null
+			},
+			pending: null,
+			conflicts: [],
+			history_scope: 'process_local_requested_transactions',
+			retention_seconds: 3600
+		});
+	}
 	if (path === '/v1/status') {
 		const lag = lagBlocks(req, url);
 		const indexed = d.status.indexed ?? d.status.best;
@@ -248,6 +662,55 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 				: null
 		});
 		return;
+	}
+
+	if (path === '/v1/network/summary') {
+		const rows = d.blocks.slice(0, 720);
+		const anchor = rows[0]?.timestamp ?? 0;
+		const bucket = (step: number, count: number, value: (b: (typeof rows)[number]) => number) =>
+			Array.from({ length: count }, (_, i) =>
+				rows
+					.filter((b) => {
+						const age = anchor - b.timestamp;
+						return age >= 0 && age < step * count && count - 1 - Math.floor(age / step) === i;
+					})
+					.reduce((n, b) => n + value(b), 0)
+			);
+		return sendJson(res, 200, {
+			scope: 'latest_indexed_blocks',
+			requested_blocks: 720,
+			block_count: rows.length,
+			transaction_count: rows.reduce((n, b) => n + b.tx_count, 0),
+			fees: rows.reduce((n, b) => n + BigInt(b.fees), 0n).toString(),
+			from_height: rows.at(-1)?.height ?? null,
+			to_height: rows[0]?.height ?? null,
+			anchor_id: rows[0]?.id ?? null,
+			earliest_timestamp: rows.length ? Math.min(...rows.map((b) => b.timestamp)) : null,
+			latest_timestamp: rows.length ? Math.max(...rows.map((b) => b.timestamp)) : null,
+			partial_from: null,
+			recent_blocks: rows.slice(0, 6),
+			blocks_per_hour: bucket(3600000, 24, () => 1),
+			transactions_per_hour: bucket(3600000, 24, (b) => b.tx_count),
+			fees_per_hour: bucket(3600000, 24, (b) => Number(b.fees)).map(String),
+			blocks_per_ten_minutes: bucket(600000, 36, () => 1)
+		});
+	}
+	const rewards = /^\/v1\/blocks\/([^/]+)\/rewards$/.exec(path);
+	if (rewards) {
+		const block = resolveBlock(d, decodeURIComponent(rewards[1]));
+		if (!block) return notFound(res);
+		return sendJson(res, 200, {
+			block_id: block.id,
+			height: block.height,
+			basis: 'unsupported',
+			gross_reward: null,
+			reemission_obligation: null,
+			miner_subsidy: null,
+			transaction_fees: block.fees,
+			reward_box_id: null,
+			transaction_id: null,
+			note: 'No supported EIP-27 emission reward was identified. Fees are separate; storage-rent income is not included.'
+		});
 	}
 
 	// --- blocks --------------------------------------------------------------------
@@ -306,7 +769,8 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 
 	const oneTx = /^\/v1\/txs\/([^/]+)$/.exec(path);
 	if (oneTx) {
-		const tx = d.txById.get(decodeURIComponent(oneTx[1]).toLowerCase());
+		const id = decodeURIComponent(oneTx[1]).toLowerCase();
+		const tx = id === appTransaction.id ? appTransaction : d.txById.get(id);
 		return tx ? sendJson(res, 200, tx) : notFound(res);
 	}
 
@@ -319,17 +783,30 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 
 	const oneBox = /^\/v1\/boxes\/([^/]+)$/.exec(path);
 	if (oneBox) {
-		const b = d.boxById.get(decodeURIComponent(oneBox[1]).toLowerCase());
+		const id = decodeURIComponent(oneBox[1]).toLowerCase();
+		const b = appBoxes.get(id) ?? d.boxById.get(id);
 		return b ? sendJson(res, 200, b) : notFound(res);
 	}
 
 	// --- addresses -----------------------------------------------------------------
-	const address = /^\/v1\/addresses\/([^/]+)(\/boxes|\/txs|\/rent)?$/.exec(path);
+	if (/^\/v1\/addresses\/[^/]+\/(?:(balance|boxes)\/at|balance\/compare)$/.test(path)) {
+		return sendJson(res, 503, {
+			type: 'about:blank',
+			title: 'Historical state unavailable',
+			status: 503,
+			code: 'history_unavailable',
+			detail:
+				'This fixture index starts above genesis; exact historical state requires complete retained history.'
+		});
+	}
+	const address = /^\/v1\/addresses\/([^/]+)(\/boxes|\/txs|\/rent|\/activity)?$/.exec(path);
 	if (address) {
 		const addr = decodeURIComponent(address[1]);
 		const tree = d.treeByAddress.get(addr);
 		if (tree === undefined) return notFound(res);
 		switch (address[2]) {
+			case '/activity':
+				return addressActivity(d, tree, url, res);
 			case '/boxes': {
 				const unspent = url.searchParams.get('unspent') === 'true';
 				sendJson(res, 200, page(boxesOfTree(d, tree, unspent), cursor, limit));
@@ -396,15 +873,51 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 		return;
 	}
 
-	const token = /^\/v1\/tokens\/([^/]+)(\/holders|\/boxes)?$/.exec(path);
+	const token = /^\/v1\/tokens\/([^/]+)(\/holders|\/boxes|\/txs)?$/.exec(path);
 	if (token) {
 		const id = decodeURIComponent(token[1]).toLowerCase();
 		const info = d.tokenById.get(id);
 		if (info === undefined) return notFound(res);
 		switch (token[2]) {
-			case '/holders':
-				sendJson(res, 200, holderPage(d.tokenHolders.get(id) ?? [], cursor, limit));
+			case '/txs':
+				return tokenTransactions(d, id, url, res);
+			case '/holders': {
+				const result = holderPage(d.tokenHolders.get(id) ?? [], cursor, limit);
+				const strict = url.searchParams.get('consistency') === 'strict';
+				const block = d.blockByHeight.get(d.status.indexed ?? d.status.best)!;
+				const anchor = { height: block.height, block_id: block.id };
+				const snapshotFor = (next: string) =>
+					`mock-holders-${Buffer.from(JSON.stringify([anchor, id, next])).toString('base64url')}`;
+				const provided = url.searchParams.get('snapshot');
+				if (
+					strict &&
+					((cursor === null) !== (provided === null) ||
+						(cursor !== null && provided !== snapshotFor(cursor)))
+				)
+					return sendJson(res, 409, {
+						status: 409,
+						title: 'Snapshot changed',
+						code: 'snapshot_changed',
+						detail: 'Restart holders with the current snapshot, token and cursor.'
+					});
+				sendJson(res, 200, {
+					...result,
+					...(strict
+						? {
+								consistency: 'strict',
+								anchor,
+								observed_anchor: anchor,
+								next_snapshot: result.next_cursor ? snapshotFor(result.next_cursor) : null
+							}
+						: {}),
+					holder_context: {
+						supply: info.supply,
+						holder_count: info.holder_count,
+						definition: 'indexed_emission_minus_burned'
+					}
+				});
 				return;
+			}
 			case '/boxes':
 				sendJson(res, 200, page(boxesOfIds(d, d.boxIdsByToken.get(id) ?? [], url), cursor, limit));
 				return;

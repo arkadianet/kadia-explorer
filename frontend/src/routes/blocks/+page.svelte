@@ -37,7 +37,11 @@
 				<th class="num">Txs</th>
 				<th class="num">Size</th>
 				<th class="num">Fees</th>
-				<th class="num">Reward</th>
+				<th
+					class="num"
+					title="Legacy emission estimate before EIP-27 obligations; open a block for observed reward evidence."
+					>Emission estimate</th
+				>
 				<th>Miner</th>
 			</tr>
 		{/snippet}

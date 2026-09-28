@@ -17,7 +17,8 @@ test('a known address shows its balance and per-tab lists', async ({ page }) => 
 	await expect(page.locator('.balance')).toBeVisible();
 	await expect(page.getByText('Boxes', { exact: true })).toBeVisible();
 
-	// Transactions tab is the default and loads on mount.
+	// The compact legacy transaction list remains available beside address activity.
+	await page.getByRole('tab', { name: 'Transactions', exact: true }).click();
 	const rows = page.locator('table.table tbody tr');
 	await expect(rows.first()).toBeVisible();
 
