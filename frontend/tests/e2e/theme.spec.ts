@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { contrast } from './contrast';
 import { block, claimableBox, MOCK_ADDRESS, newestToken, template, tx } from './data';
 
 test('the theme toggle flips the theme and survives a reload', async ({ page }) => {
@@ -207,6 +208,33 @@ for (const appearance of ['original', 'aurora', 'atelier', 'prism']) {
 							const bounds = await title.boundingBox();
 							expect(bounds!.x).toBeGreaterThanOrEqual(0);
 							expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+						}
+						if (
+							appearance === 'prism' &&
+							width === 1440 &&
+							['blocks', 'txs', 'tokens', 'richlist', 'rent', 'status'].includes(kind)
+						) {
+							const currentLabel = page
+								.getByRole('navigation', { name: 'Primary', exact: true })
+								.locator('[aria-current="page"] .nav-label');
+							await expect(currentLabel).toBeVisible();
+							const colours = await currentLabel.evaluate((element) => {
+								// Include the link itself: a selected item may paint its own background.
+								let ancestor: Element | null = element;
+								while (ancestor) {
+									const bg = getComputedStyle(ancestor).backgroundColor;
+									const channels = bg.match(/[\d.]+/g)?.map(Number);
+									if (channels && (channels.length === 3 || channels[3] === 1)) {
+										return { fg: getComputedStyle(element).color, bg };
+									}
+									ancestor = ancestor.parentElement;
+								}
+								throw new Error('Current navigation label has no opaque background');
+							});
+							expect(
+								contrast(colours.fg, colours.bg),
+								`Current navigation text must remain readable on ${url} in ${theme} mode`
+							).toBeGreaterThanOrEqual(4.5);
 						}
 						if (kind === 'address') {
 							const tabs = await page

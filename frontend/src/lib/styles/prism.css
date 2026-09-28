@@ -1027,6 +1027,7 @@
 	}
 	:root[data-appearance='prism'] .nav a.current {
 		color: var(--fg);
+		background: none;
 		border-color: var(--accent-ink);
 		font-weight: 650;
 	}
