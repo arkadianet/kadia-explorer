@@ -119,8 +119,17 @@ impl BlockSource for RustNode {
                 resp.status()
             )));
         }
-        resp.text()
-            .await
+        // Bound decompressed bodies before allocation, including chunked responses.
+        // The API's optional proof lookup shares this source with ingest.
+        let mut resp = resp;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(Self::map_reqwest_err)? {
+            if chunk.len() > 16 * 1024 * 1024 - bytes.len() {
+                return Err(SourceError::Decode("block body exceeds 16 MiB".into()));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        String::from_utf8(bytes)
             .map(Some)
             .map_err(|e| SourceError::Decode(e.to_string()))
     }

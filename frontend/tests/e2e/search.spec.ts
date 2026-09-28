@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { MOCK_ADDRESS, UNKNOWN_HEX, block, claimableBox, tx } from './data.ts';
+import { readFileSync } from 'node:fs';
 
 /** Types a query into the header search box and submits it. */
 async function search(page: import('@playwright/test').Page, q: string) {
@@ -41,6 +42,29 @@ test('an address goes straight to the address page', async ({ page }) => {
 	await search(page, MOCK_ADDRESS);
 	await expect(page).toHaveURL(`/address/${MOCK_ADDRESS}`);
 	await expect(page.getByRole('heading', { name: 'Address' })).toBeVisible();
+});
+
+test('a long H-prefix address reaches server validation', async ({ page }) => {
+	const address = readFileSync(
+		new URL('../../../tests/fixtures/receipts/p2s-address.txt', import.meta.url),
+		'utf8'
+	).trim();
+	let requested = '';
+	await page.route('**/v1/search?*', (route) => {
+		requested = new URL(route.request().url()).searchParams.get('q')!;
+		return route.fulfill({ json: { kind: 'address', id: MOCK_ADDRESS } });
+	});
+	await page.goto(`/search?q=${address}`);
+	await expect(page).toHaveURL(`/address/${MOCK_ADDRESS}`);
+	expect(requested).toBe(address);
+});
+
+test('an invalid address checksum receives a format hint', async ({ page }) => {
+	await page.route('**/v1/search?*', (route) =>
+		route.fulfill({ status: 400, json: { detail: 'Invalid address' } })
+	);
+	await page.goto(`/search?q=${MOCK_ADDRESS.slice(0, -1)}1`);
+	await expect(page.getByText('Enter a block height, an id or an address.')).toBeVisible();
 });
 
 test('an unparseable query lands on the search page with a format hint', async ({ page }) => {

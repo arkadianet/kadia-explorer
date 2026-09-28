@@ -711,6 +711,105 @@ async fn search_resolves_height_header_tx_box_and_address() {
     assert_eq!(st, StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn search_validates_p2s_scripts_without_prefix_or_length_assumptions() {
+    let (_d, app) = app();
+    let long = include_str!("../../../tests/fixtures/receipts/p2s-address.txt").trim();
+    let short = xp_wire::tree::tree_info(&hex::decode("0008d3").unwrap())
+        .unwrap()
+        .address;
+    for address in [long, short.as_str()] {
+        assert!(xp_wire::tree::address_tree_hash(address).is_ok());
+        let (status, _) = get(&app, &format!("/v1/search?q={address}")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+    let invalid = format!("{}1", &long[..long.len() - 1]);
+    let (status, _) = get(&app, &format!("/v1/search?q={invalid}")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn detail_confirmations_are_bound_to_the_reader_snapshot() {
+    let (_d, app) = app();
+    let tx_id = hex::encode(fixture(1866000).txs[0].id.0);
+    let (status, tx) = get(&app, &format!("/v1/txs/{tx_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tx["confirmations"], 3);
+    assert_eq!(tx["indexed_height"], 1866002);
+    assert_eq!(tx["block_id"], hex::encode(fixture(1866000).header.id.0));
+    let (status, _) = get(&app, &format!("/v1/txs/{tx_id}/evidence")).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+struct EvidenceSource {
+    anchor: xp_types::Hash32,
+    fork_after_fetch: bool,
+    fetched: std::sync::atomic::AtomicBool,
+}
+#[async_trait::async_trait]
+impl xp_source::BlockSource for EvidenceSource {
+    fn name(&self) -> &str {
+        "fixture"
+    }
+    async fn best_height(&self) -> Result<u32, xp_source::SourceError> {
+        Ok(1866002)
+    }
+    async fn header_id_at(
+        &self,
+        _: u32,
+    ) -> Result<Option<xp_types::Hash32>, xp_source::SourceError> {
+        use std::sync::atomic::Ordering;
+        Ok(Some(
+            if self.fork_after_fetch && self.fetched.load(Ordering::SeqCst) {
+                [0; 32]
+            } else {
+                self.anchor
+            },
+        ))
+    }
+    async fn full_block_json(
+        &self,
+        _: &xp_types::Hash32,
+    ) -> Result<Option<String>, xp_source::SourceError> {
+        self.fetched
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(Some(
+            include_str!("../../../tests/fixtures/blocks/1866000.json").into(),
+        ))
+    }
+    async fn genesis_boxes_json(&self) -> Result<String, xp_source::SourceError> {
+        Ok("[]".into())
+    }
+}
+
+#[tokio::test]
+async fn evidence_is_anchored_and_rejects_source_forks() {
+    for fork_after_fetch in [false, true] {
+        let (_dir, router, _state) = app_with_state(unlimited(), None);
+        let block = fixture(1866000);
+        let source: Arc<dyn xp_source::BlockSource> = Arc::new(EvidenceSource {
+            anchor: block.header.id.0,
+            fork_after_fetch,
+            fetched: std::sync::atomic::AtomicBool::new(false),
+        });
+        let app = router.layer(axum::Extension(source));
+        let id = hex::encode(block.txs[1].id.0);
+        let (status, data) = get(&app, &format!("/v1/txs/{id}/evidence")).await;
+        if fork_after_fetch {
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        } else {
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(data["tx_id"], id);
+            assert_eq!(data["block_id"], hex::encode(block.header.id.0));
+            assert_eq!(data["assurance"], "trusted_node_response");
+            assert_eq!(
+                data["inputs"].as_array().unwrap().len(),
+                block.txs[1].inputs.len()
+            );
+        }
+    }
+}
+
 /// Fees are real numbers over the API, not the constant 0 the old `value_in - value_out`
 /// produced, and every fee output is labelled `kind: "fee"`.
 #[tokio::test]
@@ -3134,15 +3233,22 @@ async fn summary_routes_match_all_fixture_fields_without_enrichment() {
         ] {
             assert_eq!(summary[count], tx[field].as_array().unwrap().len());
         }
+        let mut detail = get(
+            &app,
+            &format!("/v1/txs/{}", summary["id"].as_str().unwrap()),
+        )
+        .await
+        .1;
+        // The detail route adds a reader-consistent confirmation snapshot. Every legacy
+        // field must still match the original projection byte-for-byte.
+        let fields = detail.as_object_mut().unwrap();
+        assert!(fields.remove("block_id").unwrap().is_string());
+        assert_eq!(fields.remove("indexed_height").unwrap(), 1866002);
         assert_eq!(
-            get(
-                &app,
-                &format!("/v1/txs/{}", summary["id"].as_str().unwrap())
-            )
-            .await
-            .1,
-            *tx
+            fields.remove("confirmations").unwrap(),
+            1866003 - summary["height"].as_u64().unwrap()
         );
+        assert_eq!(detail, *tx);
     }
     for height in 1866000..=1866002 {
         let wanted: Vec<_> = full

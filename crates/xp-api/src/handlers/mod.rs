@@ -1,6 +1,7 @@
 pub mod addresses;
 pub mod blocks;
 pub mod boxes;
+pub mod evidence;
 pub mod registers;
 pub mod rent;
 pub mod richlist;

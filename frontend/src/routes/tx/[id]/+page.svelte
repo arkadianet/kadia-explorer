@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
+	import TransactionReceipt from '$lib/components/TransactionReceipt.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHead from '$lib/components/PageHead.svelte';
 	import Facts from '$lib/components/Facts.svelte';
@@ -14,6 +16,15 @@
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+	let refreshing = $state(false);
+	async function refresh() {
+		refreshing = true;
+		try {
+			await invalidateAll();
+		} finally {
+			refreshing = false;
+		}
+	}
 
 	const tx = $derived(data.tx);
 	const tip = $derived(status.current?.indexed ?? null);
@@ -33,6 +44,7 @@
 
 <div class="head">
 	<PageHead title="Transaction" id={tx.id} />
+	{#key tx.id}<TransactionReceipt {tx} {refreshing} onrefresh={refresh} />{/key}
 
 	<Facts>
 		<Fact label="Block"><a class="mono" href={`/blocks/${tx.height}`}>{tx.height}</a></Fact>

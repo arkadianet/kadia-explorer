@@ -176,7 +176,7 @@ async fn run(config_path: PathBuf) -> anyhow::Result<i32> {
             api_cfg.max_inflight_reads as usize,
         )),
     };
-    let app = xp_api::router(app_state, &api_cfg);
+    let app = xp_api::router(app_state, &api_cfg).layer(axum::Extension(source));
 
     {
         let signal_shutdown = shutdown.clone();

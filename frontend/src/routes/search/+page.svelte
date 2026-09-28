@@ -22,7 +22,8 @@
 	const hints = {
 		empty: 'Enter a block height, an id or an address.',
 		'unknown-format': 'Enter a block height, an id or an address.',
-		'not-found': '64-hex ids can be block, transaction or box ids. Addresses start with 9.'
+		'not-found':
+			'64-hex ids can be block, transaction or box ids. Check the full mainnet address and the indexed range.'
 	} as const;
 
 	const hint = $derived(hints[data.reason]);

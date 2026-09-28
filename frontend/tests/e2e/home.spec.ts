@@ -31,9 +31,9 @@ test('home renders the hero and every panel with rows from the mock', async ({ p
 		has: page.getByRole('heading', { name: 'Live transactions' })
 	});
 	await expect(txs.locator('.txlist li')).toHaveCount(5);
-	await expect(txs.locator('.tx-kind').first()).toHaveText(
-		/Storage rent claim|Token transfer|Payment/
-	);
+	// This fixture spends a contract script without a supported decoder; no payment intent
+	// or rent claim is inferred from token presence or box age.
+	await expect(txs.locator('.tx-kind').first()).toHaveText('Contract interaction');
 
 	const rent = page.locator('section.panel', {
 		has: page.getByRole('heading', { name: 'Rent maturing soon' })

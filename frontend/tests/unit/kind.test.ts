@@ -9,7 +9,7 @@ function box(over: Partial<BoxDto>): BoxDto {
 		index: 0,
 		value: '1000000000',
 		creation_height: 1_000_000,
-		ergo_tree: null,
+		ergo_tree: '0008cd03a5b9ae24950ee854694a9832914324a6b69121fcd468bcc7c4023b5874f353cf',
 		address: null,
 		template_hash: null,
 		tree_hash: 'tree-a',
@@ -45,13 +45,18 @@ function tx(over: Partial<TxDto>): TxDto {
 }
 
 describe('txKind', () => {
-	it('calls it a storage-rent claim when an old input returns to its own script', () => {
+	it('recognizes emission and fee collection from indexed contract identities', () => {
+		const emission = box({ kind: 'emission' });
+		expect(txKind(tx({ inputs: [{ id: emission.id, box: emission }] })).kind).toBe('emission');
+		const fee = box({ kind: 'fee' });
+		expect(txKind(tx({ inputs: [{ id: fee.id, box: fee }] })).kind).toBe('fee');
+	});
+	it('does not infer rent from an old input returning to its own script', () => {
 		const spent = box({ creation_height: 2_000_000 - RENT_PERIOD, tree_hash: 'tree-a' });
 		const result = txKind(
 			tx({ inputs: [{ id: spent.id, box: spent }], outputs: [box({ tree_hash: 'tree-a' })] })
 		);
-		expect(result.kind).toBe('rent');
-		expect(result.label).toBe('Storage rent claim');
+		expect(result.kind).toBe('unknown');
 	});
 
 	it('does not call it rent when the old value goes somewhere else', () => {
@@ -59,7 +64,7 @@ describe('txKind', () => {
 		const result = txKind(
 			tx({ inputs: [{ id: spent.id, box: spent }], outputs: [box({ tree_hash: 'tree-b' })] })
 		);
-		expect(result.kind).toBe('payment');
+		expect(result.kind).toBe('unknown');
 	});
 
 	it('does not call it rent one block short of the rent period', () => {
@@ -70,15 +75,15 @@ describe('txKind', () => {
 		expect(result.kind).toBe('payment');
 	});
 
-	it('calls it a token transfer when a token moves', () => {
+	it('does not infer a transfer when input coverage is absent', () => {
 		const result = txKind(
 			tx({ outputs: [box({ tokens: [{ id: 'token', amount: '5', name: null, decimals: null }] })] })
 		);
-		expect(result.kind).toBe('token');
+		expect(result.kind).toBe('unknown');
 	});
 
-	it('ignores inputs the indexer could not resolve', () => {
+	it('keeps unknown inputs explicit', () => {
 		const result = txKind(tx({ inputs: [{ id: 'unknown', box: null }], outputs: [box({})] }));
-		expect(result.kind).toBe('payment');
+		expect(result.kind).toBe('unknown');
 	});
 });

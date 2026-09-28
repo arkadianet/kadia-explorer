@@ -20,6 +20,10 @@ describe('formatErg', () => {
 	it('maxFrac rounds down (truncates) not up', () => {
 		expect(formatErg('1999999999', { maxFrac: 2 })).toBe('1.99');
 	});
+	it('never truncates a nonzero amount to zero', () => {
+		expect(formatErg('110800', { maxFrac: 2 })).toBe('0.0001108');
+		expect(formatErg('-1', { maxFrac: 0 })).toBe('-0.000000001');
+	});
 });
 
 describe('formatNano', () => {

@@ -42,11 +42,11 @@ export const load: PageLoad = async ({ url, fetch }) => {
 	const direct = routeFor(classified);
 	if (direct) throw redirect(302, direct);
 
-	if (classified.kind !== 'hex32') {
+	if (classified.kind !== 'hex32' && classified.kind !== 'address') {
 		return { q, reason: 'unknown-format' as NotFoundReason, registers };
 	}
 
-	// hex32 — ambiguous between block/tx/box, ask the API.
+	// Resolve IDs and validate address candidates on the server.
 	try {
 		const result = await api.search(classified.value, fetch);
 		if (result.matches && result.matches.length > 1) {
@@ -63,6 +63,7 @@ export const load: PageLoad = async ({ url, fetch }) => {
 		throw redirect(302, destinationFor(result.kind, result.id));
 	} catch (e) {
 		if (e instanceof ApiError) {
+			if (e.status === 400) return { q, reason: 'unknown-format' as NotFoundReason, registers };
 			if (e.status === 404) return { q, reason: 'not-found' as NotFoundReason, registers };
 			throw error(e.status, e.detail);
 		}

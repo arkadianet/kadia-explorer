@@ -9,6 +9,15 @@ use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::Json;
 
+#[derive(serde::Serialize)]
+struct TxDetail {
+    #[serde(flatten)]
+    tx: crate::dto::TxDto,
+    block_id: String,
+    indexed_height: Option<u32>,
+    confirmations: Option<u32>,
+}
+
 pub async fn summaries(
     State(state): State<AppState>,
     Query(p): Query<ListParams>,
@@ -101,7 +110,15 @@ pub async fn get_one(
             .ok_or(ApiError::NotFound)?;
         let tip = rd.indexed_height()?;
         let dto = budget.tx(rd, &id, &row, tip, emission.as_ref())?;
-        budget.json(&dto)
+        let header = rd
+            .header_at(row.height)?
+            .ok_or_else(|| ApiError::Integrity("missing transaction header".into()))?;
+        budget.json(&TxDetail {
+            tx: dto,
+            block_id: xp_types::hex32(&header.id),
+            indexed_height: tip,
+            confirmations: tip.and_then(|h| h.checked_sub(row.height)).map(|n| n + 1),
+        })
     })
     .await
 }

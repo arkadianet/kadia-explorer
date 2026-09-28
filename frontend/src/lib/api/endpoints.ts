@@ -15,6 +15,7 @@ import type {
 	TokenHolderDto,
 	TokenInfoDto,
 	TxDto,
+	TxEvidence,
 	TxSummaryDto
 } from './types';
 
@@ -56,6 +57,8 @@ export const api = {
 		),
 
 	tx: (id: string, f?: Fetch) => apiGet<TxDto>(`/txs/${encodeURIComponent(id)}`, undefined, f),
+	txEvidence: (id: string, f?: Fetch) =>
+		apiGet<TxEvidence>(`/txs/${encodeURIComponent(id)}/evidence`, undefined, f),
 
 	box: (id: string, f?: Fetch) => apiGet<BoxDto>(`/boxes/${encodeURIComponent(id)}`, undefined, f),
 
