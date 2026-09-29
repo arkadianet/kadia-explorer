@@ -111,6 +111,29 @@ export interface TxEvidence {
 	inputs: { id: string; proof: 'empty' | 'nonempty'; extension_127: string | null }[];
 }
 
+/** Bounded node projection; input balances, registers and signatures are not resolved. */
+export interface PendingTxDetails {
+	inputs: string[];
+	data_inputs: string[];
+	outputs: {
+		index: number;
+		id: string | null;
+		value: string;
+		ergo_tree: string | null;
+		/** Derived with the same mainnet encoder as confirmed boxes when the script is supported. */
+		address?: string | null;
+		tokens: { id: string; amount: string }[];
+		token_count: number | null;
+		tokens_truncated: boolean;
+		ergo_tree_truncated: boolean;
+	}[];
+	inputs_truncated: boolean;
+	data_inputs_truncated: boolean;
+	outputs_truncated: boolean;
+	/** Completeness of this projection, never proof of network acceptance. */
+	complete: boolean;
+}
+
 /** A single local-index and configured-node observation, not network-wide acceptance. */
 export interface TxStatusDto {
 	id: string;
@@ -133,6 +156,8 @@ export interface TxStatusDto {
 		data_input_count: number;
 		size: number | null;
 		fee: string | null;
+		/** Older servers return summary counts only. */
+		details?: PendingTxDetails;
 	} | null;
 	conflicts: { input_id: string; tx_id: string; height: number }[];
 	history_scope: 'process_local_requested_transactions';

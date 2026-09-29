@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { appearance, type Appearance } from '$lib/theme/theme.svelte';
+	import { appearance, density, type Appearance, type Density } from '$lib/theme/theme.svelte';
 	import Icon from './Icon.svelte';
 
 	const choices: { id: Appearance; name: string; description: string }[] = [
@@ -9,6 +9,10 @@
 		{ id: 'prism', name: 'Prism', description: 'Full-width workspace and spatial transactions.' }
 	];
 	let dialog: HTMLDialogElement;
+	const densities: { id: Density; name: string; description: string }[] = [
+		{ id: 'standard', name: 'Standard', description: 'Balanced spacing for everyday use.' },
+		{ id: 'compact', name: 'Compact', description: 'More records and less space between sections.' }
+	];
 	let opener: HTMLButtonElement;
 	let isOpen = $state(false);
 	let announcement = $state('');
@@ -112,12 +116,97 @@
 			</label>
 		{/each}
 	</fieldset>
+	<fieldset class="density-options">
+		<legend>Information density</legend>
+		<p>Use either density with any layout. Text stays readable and touch controls stay large.</p>
+		<div class="density-choices">
+			{#each densities as choice (choice.id)}
+				<label class="density-choice" class:selected={density.current === choice.id}>
+					<input
+						type="radio"
+						name="explorer-density"
+						value={choice.id}
+						aria-label={choice.name}
+						aria-describedby={`density-${choice.id}-description`}
+						checked={density.current === choice.id}
+						onchange={() => {
+							density.set(choice.id);
+							announcement = `${choice.name} density selected.`;
+						}}
+					/>
+					<span
+						><strong>{choice.name}</strong><span id={`density-${choice.id}-description`}
+							>{choice.description}</span
+						></span
+					>
+				</label>
+			{/each}
+		</div>
+	</fieldset>
 	<p class="appearance-feedback" role="status" aria-live="polite">
 		{announcement || `${currentName} is selected.`}
 	</p>
 </dialog>
 
 <style>
+	.density-options {
+		border: 0;
+		border-top: var(--rule);
+		margin: 0 24px 20px;
+		padding: 12px 0 0;
+		min-width: 0;
+	}
+	.density-options legend {
+		padding-right: 12px;
+		font-size: 14px;
+		font-weight: 700;
+	}
+	.density-options p {
+		color: var(--fg-muted);
+		font-size: 12px;
+		margin-bottom: 12px;
+	}
+	.density-choices {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 12px;
+	}
+	.density-choice {
+		display: flex;
+		gap: 10px;
+		align-items: start;
+		padding: 12px;
+		border: var(--rule);
+		border-radius: 8px;
+		cursor: pointer;
+	}
+	.density-choice.selected {
+		border-color: var(--accent-ink);
+		box-shadow: 0 0 0 1px var(--accent-ink);
+	}
+	.density-choice input {
+		accent-color: var(--accent-ink);
+		flex: none;
+		margin: 4px 0 0;
+	}
+	.density-choice strong {
+		display: block;
+		font-size: 14px;
+	}
+	.density-choice span span {
+		display: block;
+		color: var(--fg-muted);
+		font-size: 12px;
+		margin-top: 4px;
+	}
+	@media (max-width: 540px) {
+		.density-options {
+			margin-inline: 16px;
+		}
+		.density-choices {
+			grid-template-columns: 1fr;
+		}
+	}
 	.appearance-trigger {
 		display: inline-flex;
 		align-items: center;

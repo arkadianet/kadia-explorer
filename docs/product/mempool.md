@@ -3,7 +3,8 @@
 `/mempool` loads one bounded observation when opened. Further checks use the explicit
 **Refresh mempool** button. It does not poll. The source is the configured primary
 Ergo node; a local pending observation is neither confirmation nor a network-wide
-count. Transaction links open the existing lifecycle view.
+count. Transaction links open live status and the available pending inputs and
+outputs immediately, before local inclusion.
 
 The homepage also loads one compact observation independently of its block and
 transaction panels. It shows the returned count, at most three transaction links,
@@ -75,18 +76,39 @@ before JSON parsing, validates UTF-8, and aborts after ten seconds. Date fields 
 fit JavaScript's supported date range. Monetary display uses BigInt throughout.
 Unknown fees or sizes are labelled as unavailable rather than shown as zero.
 
-Original uses a compact list below its observation summary. Prism places the source
-observation beside raised transaction panels. Atelier puts observation metadata in
-the outer margin of an open ledger. Aurora uses paired rounded transaction panels
-beneath its centered introduction. All become one column at narrow widths.
+The desktop list aligns transaction IDs, exact fees and input/output counts in a
+compact ledger. Size, data-input count, full IDs and raw fees remain available in
+each row's **Details** disclosure. Standard and Compact density work independently
+of appearance. Original uses ruled rows; Prism uses raised rows beside a crystal
+inspector; Atelier places its inspector to the left of an open paper ledger;
+Aurora uses an inset ledger with leading connection controls and rounded sections.
 
-The connections composition follows each appearance: Original uses a compact
-producer/transaction/consumer arrangement; Prism separates raised references
-around a crystal hub; Atelier puts the selected transaction in a record margin;
-Aurora places its selected transaction above paired reference lists. Mobile uses
-the logical producer, transaction, consumer order. Pending transaction details now
-link to the focused view, expose the already available size and data-input count,
-and label retained pending facts after a transaction is no longer observed.
+Connections occupy a bounded side inspector on desktop. On mobile, the native
+**Pending connections** disclosure starts closed unless a focus link was opened.
+Selecting a row opens and focuses it; selecting a neighbor changes the local
+inspection and shareable URL without another request. Lists, declarations and
+coverage warnings remain accessible through native buttons, links and disclosures.
+
+The transaction page consumes optional `pending.details` from its existing status
+request, with no additional node or box requests. It shows spending-input IDs,
+read-only input IDs and declared output values, IDs when supplied, token IDs and
+exact raw token quantities. Input values and assets remain unknown. Safely derived
+output addresses link to indexed address pages without identifying an owner or
+inferring payment intent; a missing address leaves the exact script available to
+inspect and copy. Pending outputs and tokens may not yet have indexed records.
+
+This projection retains at most 32 input IDs, 32 data-input IDs, 32 outputs and 32
+tokens per output within 32 KiB. Scripts over 2,048 bytes are omitted explicitly;
+address derivation only attempts retained scripts of at most 512 bytes. Per-list
+truncation, missing asset entries and script omissions remain visible. Initially
+four loaded inputs and outputs are displayed, with local expansion controls.
+Neither the projection nor its `complete` flag establishes network acceptance,
+transaction validation, payment volume or an input/output net balance.
+
+Older servers keep their summary-only state. Malformed detail projections are
+rejected for display without replacing the available summary. A pending-to-confirmed
+transition removes the pending projection and loads the canonical receipt. Retained
+details after an outage or mempool disappearance are explicitly historical evidence.
 
 Unit tests cover exact quantities, bounds, unavailable responses, cancellation and
 absence of polling. Browser fixtures are explicitly synthetic: they verify one

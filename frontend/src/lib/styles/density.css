@@ -1,0 +1,395 @@
+/* Density controls spacing and heading scale. Keep this after the four
+   compositions: their rails, column order, materials and emphasis remain intact. */
+:root[data-density] {
+	--density-gap: 16px;
+	--density-panel: 16px;
+	--density-row: 44px;
+	--density-title: 32px;
+	--space-5: 16px;
+	--space-6: 20px;
+	--space-8: 24px;
+	--space-10: 28px;
+	--space-12: 36px;
+	--gutter: 24px;
+	--fs-page: var(--density-title);
+}
+:root[data-density='compact'] {
+	--density-gap: 10px;
+	--density-panel: 10px;
+	--density-row: 36px;
+	--density-title: 26px;
+	--space-3: 8px;
+	--space-4: 12px;
+	--space-5: 12px;
+	--space-6: 16px;
+	--space-8: 18px;
+	--space-10: 22px;
+	--space-12: 28px;
+}
+:root[data-density][data-appearance] .content,
+:root[data-density][data-appearance] .home-dashboard {
+	gap: var(--density-gap);
+}
+:root[data-density][data-appearance] .content .page-head {
+	padding-block: var(--density-panel);
+}
+:root[data-density][data-appearance] .content .page-head h1,
+:root[data-density][data-appearance] .content:not([data-page='home']) h1 {
+	font-size: var(--density-title);
+	line-height: 1.12;
+}
+:root[data-density][data-appearance] .content .panel > .panel-head,
+:root[data-density][data-appearance] .content .card-head {
+	min-height: 0;
+	padding-block: 10px;
+}
+:root[data-density][data-appearance] .content .panel-title,
+:root[data-density][data-appearance] .content .card-title {
+	font-size: 20px;
+}
+:root[data-density][data-appearance] .content .table :is(th, td) {
+	height: var(--density-row);
+	padding-block: 0;
+}
+:root[data-density][data-appearance] .content .table tr {
+	height: var(--density-row);
+}
+:root[data-density][data-appearance] .content .table thead th {
+	height: 32px;
+}
+:root[data-density][data-appearance] .content .head {
+	gap: var(--density-gap);
+}
+:root[data-density][data-appearance] .content:not([data-page='address']) .head .fact {
+	padding-block: 10px;
+}
+:root[data-density][data-appearance] .content .discovery,
+:root[data-density][data-appearance] .content .receipt {
+	padding: var(--density-panel);
+}
+:root[data-density][data-appearance] .content .discovery-head {
+	gap: var(--density-gap);
+}
+:root[data-density][data-appearance] .content .discovery .token-search {
+	padding: var(--density-panel);
+	gap: var(--density-gap);
+	margin-block: var(--density-gap);
+}
+:root[data-density][data-appearance] .content .receipt-section,
+:root[data-density][data-appearance] .content .flow .cards {
+	gap: var(--density-gap);
+}
+:root[data-density][data-appearance] .content .receipt-heading h2 {
+	font-size: 26px;
+}
+:root[data-density][data-appearance] .content .receipt .asset {
+	margin-block: 12px;
+}
+:root[data-density][data-appearance] .content .receipt .amount {
+	font-size: 32px;
+}
+:root[data-density][data-appearance] .content :is(.saved-workspace, .app-workspace) {
+	gap: var(--density-gap);
+}
+:root[data-density][data-appearance] .content :is(.saved-intro, .inspect-form) {
+	padding: var(--density-panel);
+}
+:root[data-density][data-appearance] .content :is(.app-intro, .developer-workspace > .intro) {
+	padding-block: var(--density-panel);
+	gap: var(--density-gap);
+	margin-bottom: var(--density-gap);
+}
+:root[data-density][data-appearance]
+	.content
+	:is(.app-intro, .saved-intro, .developer-workspace)
+	h1 {
+	margin-block: 8px;
+}
+:root[data-density][data-appearance] .developer-workspace .traits {
+	margin-top: 12px;
+}
+
+/* A returning visitor needs the current chain, then records. The masthead is
+   deliberately small; each appearance still supplies its own composition. */
+
+/* A pending transaction has useful data now. Its observation state is a compact
+   status strip, leaving room for the actual inputs and outputs below it. */
+:root[data-density][data-appearance] .content[data-page='tx'] .tracking.has-pending-details {
+	display: block;
+	padding: var(--density-panel);
+}
+:root[data-density][data-appearance] .content[data-page='tx'] .tracking.has-pending-details h2 {
+	font-size: 24px;
+	margin-block: 6px;
+}
+:root[data-density][data-appearance]
+	.content[data-page='tx']
+	.tracking.has-pending-details
+	.description {
+	margin: 0;
+	max-width: none;
+}
+:root[data-density][data-appearance]
+	.content[data-page='tx']
+	.tracking.has-pending-details
+	.pending-facts {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 8px 16px;
+	margin-block: 10px;
+}
+:root[data-density][data-appearance]
+	.content[data-page='tx']
+	.tracking.has-pending-details
+	.pending-facts
+	> div {
+	padding: 0;
+}
+:root[data-density][data-appearance]
+	.content[data-page='tx']
+	.tracking.has-pending-details
+	:is(.observation-note, .connections-link, details) {
+	margin-block: 6px;
+}
+:root[data-density][data-appearance] .home-dashboard .hero-in {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
+	align-items: center;
+	gap: var(--density-gap);
+	min-height: 0;
+	padding: var(--density-panel);
+}
+:root[data-density][data-appearance] .hero-copy,
+:root[data-density][data-appearance] .home-dashboard .tipcard {
+	grid-column: auto;
+	grid-row: auto;
+	align-self: center;
+}
+:root[data-density][data-appearance] .home-dashboard .hero h1 {
+	font-size: clamp(28px, 3vw, 42px);
+	line-height: 1.1;
+	margin: 0;
+}
+:root[data-density][data-appearance] .hero .kicker {
+	margin-bottom: 6px;
+}
+:root[data-density][data-appearance] .hero .lede {
+	margin-top: 8px;
+	font-size: 14px;
+	line-height: 1.5;
+	max-width: 48ch;
+}
+:root[data-density][data-appearance] .home-dashboard .tipcard {
+	width: 100%;
+	margin: 0;
+	padding: 10px var(--density-panel);
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 4px 12px;
+}
+:root[data-density][data-appearance] .home-dashboard .tipcard-head,
+:root[data-density][data-appearance] .home-dashboard .tipcard-foot {
+	grid-column: 1 / -1;
+	margin: 0;
+}
+:root[data-density][data-appearance] .home-dashboard .tipcard-height {
+	font-size: 26px;
+	margin: 0;
+}
+:root[data-density][data-appearance] .home-dashboard .tipcard-age {
+	align-self: center;
+	margin: 0;
+}
+:root[data-density][data-appearance] .home-dashboard .stats {
+	gap: 8px;
+	margin: 0;
+	padding-block: 0;
+}
+:root[data-density][data-appearance] .home-dashboard .stat {
+	min-height: 0;
+	padding: var(--density-panel);
+}
+:root[data-density][data-appearance] .home-dashboard .stat-value {
+	font-size: 24px;
+	margin: 0;
+}
+:root[data-density][data-appearance] .home-dashboard .stat-foot {
+	padding-top: 4px;
+}
+:root[data-density][data-appearance] .home-dashboard .panels {
+	gap: var(--density-gap);
+}
+:root[data-density][data-appearance] .home-dashboard .live {
+	margin-top: 0;
+}
+:root[data-density][data-appearance] .home-dashboard .txlist li > a {
+	padding-block: 8px;
+	min-height: var(--density-row);
+}
+:root[data-density][data-appearance] .home-dashboard .deeper-in {
+	padding-block: 24px;
+}
+:root[data-density][data-appearance] .home-dashboard .tools {
+	margin-top: var(--density-gap);
+}
+:root[data-density][data-appearance] .home-dashboard .tool {
+	min-height: 0;
+}
+
+@media (min-width: 900px) {
+	:root[data-density][data-appearance='prism'] .content,
+	:root[data-density][data-appearance='atelier'] .content {
+		padding-top: calc(var(--density-gap) + var(--banner-h, 0px));
+		padding-inline: 24px;
+	}
+	:root[data-density][data-appearance='atelier'] .rail-in {
+		padding-block: 16px 0;
+		gap: 12px;
+	}
+	:root[data-density][data-appearance='atelier'] .rail .brand .name {
+		font-size: 44px;
+	}
+	:root[data-density][data-appearance='atelier'] .rail .brand .sub {
+		margin-top: 6px;
+	}
+	:root[data-density][data-appearance='atelier'] .rail .mark {
+		width: 40px;
+		height: 40px;
+		font-size: 26px;
+	}
+	:root[data-density][data-appearance='atelier'] .topbar {
+		height: 56px;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stats .stat > .spark {
+		height: 22px;
+	}
+	:root[data-density][data-appearance='prism'] .home-dashboard > .stats {
+		grid-column: 2;
+		grid-row: 3;
+	}
+}
+@media (max-width: 899px) {
+	:root[data-density] {
+		--gutter: 12px;
+		--density-panel: 12px;
+		--density-gap: 12px;
+		--density-title: 26px;
+	}
+	:root[data-density='compact'] {
+		--density-panel: 8px;
+		--density-gap: 8px;
+		--density-title: 24px;
+	}
+	:root[data-density][data-appearance] .home-dashboard .hero-in {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 10px;
+	}
+	:root[data-density][data-appearance] .hero .lede {
+		display: none;
+	}
+	:root[data-density][data-appearance] .home-dashboard .tipcard {
+		grid-template-columns: minmax(0, 1fr) auto;
+		padding: 8px 0 0;
+		background: transparent;
+		border: 0;
+		border-top: 1px solid var(--hero-hairline, var(--hairline));
+		box-shadow: none;
+		border-radius: 0;
+	}
+	:root[data-density][data-appearance] .home-dashboard .tipcard-head {
+		grid-column: 1;
+		grid-row: 1;
+	}
+	:root[data-density][data-appearance] .home-dashboard .tipcard-height {
+		grid-column: 2;
+		grid-row: 1;
+		font-size: 22px;
+	}
+	:root[data-density][data-appearance] .home-dashboard .tipcard-age {
+		grid-column: 2;
+		grid-row: 2;
+		text-align: right;
+	}
+	:root[data-density][data-appearance] .home-dashboard .tipcard-foot {
+		grid-column: 1;
+		grid-row: 2;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stats {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 6px;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 2px 6px;
+		padding: 8px;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat-value {
+		font-size: 19px;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat-label {
+		grid-column: 1 / -1;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat-label svg {
+		display: none;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat:nth-child(4) {
+		grid-column: span 2;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat-foot {
+		grid-column: 1 / -1;
+		font-size: 11px;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat > .spark {
+		display: none;
+	}
+	:root[data-density][data-appearance] .home-dashboard .stat:last-child {
+		grid-column: auto;
+		grid-template-columns: minmax(0, 1fr);
+		align-items: center;
+	}
+	:root[data-density][data-appearance] .home-dashboard .window-caption {
+		margin-block: 0;
+	}
+	:root[data-density][data-appearance]
+		.home-dashboard
+		.stat:last-child
+		:is(.stat-label, .stat-foot) {
+		grid-column: auto;
+	}
+	:root[data-density][data-appearance] .content .discovery-head {
+		display: block;
+	}
+	:root[data-density][data-appearance] .content .discovery .intro {
+		margin-top: 8px;
+	}
+	:root[data-density][data-appearance] .content .discovery .intro br {
+		display: none;
+	}
+}
+/* Compact must never make touch interaction harder. Applied to both narrow
+   windows and coarse pointers, including tablets wider than the mobile layout. */
+@media (max-width: 899px), (pointer: coarse) {
+	:root[data-density] {
+		--density-row: 44px;
+	}
+	:root[data-density][data-appearance]
+		:is(.content, .topbar)
+		:is(
+			button:not(.copy),
+			select,
+			input:not([type='radio']):not([type='checkbox']),
+			summary,
+			.btn,
+			.seg-btn,
+			.tab
+		) {
+		min-height: 44px;
+	}
+	:root[data-density][data-appearance] .content .table td a {
+		display: inline-flex;
+		align-items: center;
+		min-height: 44px;
+	}
+}

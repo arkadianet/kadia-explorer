@@ -1,11 +1,13 @@
 type Mode = 'dark' | 'light';
 export type Appearance = 'original' | 'aurora' | 'atelier' | 'prism';
+export type Density = 'standard' | 'compact';
 
 const KEY = 'xp-theme';
 const APPEARANCE_KEY = 'xp-appearance';
 
 let current = $state<Mode>('light');
 let currentAppearance = $state<Appearance>('prism');
+let currentDensity = $state<Density>('standard');
 
 function appearanceOrDefault(value: string | null): Appearance {
 	return value === 'original' || value === 'aurora' || value === 'atelier' || value === 'prism'
@@ -78,6 +80,31 @@ export const appearance = {
 			localStorage.setItem(APPEARANCE_KEY, selected);
 		} catch {
 			// The current session can still use the selected appearance.
+		}
+	}
+};
+
+export const density = {
+	get current() {
+		return currentDensity;
+	},
+	init() {
+		let saved: string | null = null;
+		try {
+			saved = localStorage.getItem('xp-density');
+		} catch {
+			// Standard density remains available without browser storage.
+		}
+		currentDensity = saved === 'compact' ? 'compact' : 'standard';
+		document.documentElement.dataset.density = currentDensity;
+	},
+	set(value: Density) {
+		currentDensity = value === 'compact' ? 'compact' : 'standard';
+		document.documentElement.dataset.density = currentDensity;
+		try {
+			localStorage.setItem('xp-density', currentDensity);
+		} catch {
+			// The current session can still use the selected density.
 		}
 	}
 };

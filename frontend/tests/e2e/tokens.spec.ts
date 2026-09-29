@@ -134,9 +134,8 @@ test('a token id resolves through the API to the token page', async ({ page }) =
 test('an address page names the tokens it holds and scales their amounts', async ({ page }) => {
 	await page.goto(`/address/${MOCK_ADDRESS}`);
 
-	const holdings = page
-		.locator('section.panel')
-		.filter({ has: page.getByRole('heading', { name: /^Tokens \(/ }) });
+	const holdings = page.locator('details.address-holdings');
+	await holdings.locator('summary').click();
 	const named = holdings.getByRole('link', { name: SYNTHETIC_TOKEN.name });
 	await expect(named).toBeVisible();
 	await expect(named).toHaveAttribute('href', `/token/${SYNTHETIC_TOKEN.id}`);

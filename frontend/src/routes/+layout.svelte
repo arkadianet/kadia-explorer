@@ -5,8 +5,9 @@
 	import '$lib/styles/aurora.css';
 	import '$lib/styles/atelier.css';
 	import '$lib/styles/prism.css';
+	import '$lib/styles/density.css';
 	import { page } from '$app/state';
-	import { appearance, theme } from '$lib/theme/theme.svelte';
+	import { appearance, density, theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
 	import { savedAddresses, SAVED_ADDRESSES_KEY } from '$lib/addresses/saved.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -113,6 +114,7 @@
 	onMount(() => {
 		theme.init();
 		appearance.init();
+		density.init();
 		savedAddresses.load();
 		const syncSaved = (event: StorageEvent) => {
 			if (event.key === SAVED_ADDRESSES_KEY || event.key === null) savedAddresses.load();

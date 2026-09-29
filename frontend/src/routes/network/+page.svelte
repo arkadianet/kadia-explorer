@@ -93,11 +93,8 @@
 <div class="network-history">
 	<header class="network-intro">
 		<p class="eyebrow">NETWORK / CANONICAL BLOCK HISTORY</p>
-		<h1>The chain, over time.</h1>
-		<p>
-			Compare activity, fees, block size and difficulty across an exact height range. Every chart
-			has the raw values behind it.
-		</p>
+		<h1>Network history</h1>
+		<p>Activity, fees, size and difficulty.</p>
 	</header>
 	<form onsubmit={load} aria-label="Network history range">
 		<div class="range-fields">
@@ -118,7 +115,8 @@
 					required
 				/></label
 			><label
-				>Maximum buckets<input
+				>Buckets<input
+					aria-label="Maximum buckets"
 					inputmode="numeric"
 					maxlength="3"
 					bind:value={buckets}
@@ -130,19 +128,23 @@
 		<div class="range-actions">
 			<button type="submit" disabled={historyState.loading}
 				>{historyState.loading ? 'Loading range…' : 'Load network history'}</button
-			><button type="button" class="secondary" onclick={recent} disabled={!status.current?.indexed}
-				>Use latest 720 blocks</button
-			>{#if pin}<button type="button" class="secondary" onclick={changed}
-					>Clear end-block pin</button
-				>{/if}
+			><button
+				type="button"
+				class="secondary"
+				onclick={recent}
+				disabled={!status.current?.indexed}
+				aria-label="Use latest 720 blocks">Latest 720 blocks</button
+			>
 		</div>
-		<p>
-			Up to 20,160 blocks and 120 height buckets. 720 blocks is a count, not a guaranteed day.
-			Loading is explicit; ranges do not refresh in the background.
-		</p>
 		{#if pin}<p class="pin">
-				Pinned end block: <a href={'/blocks/' + pin}>{pin}</a>. A changed block rejects refresh
-				until you clear this pin.
+				<span
+					>Pinned end: <a href={'/blocks/' + pin} title={pin} aria-label={'Pinned end block ' + pin}
+						>{pin.slice(0, 8)}…{pin.slice(-8)}</a
+					></span
+				>
+				<button type="button" class="secondary" onclick={changed} aria-label="Clear end-block pin"
+					>Clear pin</button
+				>
 			</p>{/if}
 	</form>
 	{#if localError || historyState.error}<div class="notice" role="alert">
@@ -155,19 +157,29 @@
 		<section class="network-results" aria-label="Network history results">
 			<div class="range-heading">
 				<div>
-					<p class="eyebrow">COMPLETE SELECTED RANGE</p>
 					<h2>
 						{data.totals.from_height.toLocaleString('en-US')} → {data.totals.to_height.toLocaleString(
 							'en-US'
 						)}
 					</h2>
 				</div>
-				<a href={share!}>Open pinned range ↗</a>
-				<a
-					href={`/mining?from_height=${data.totals.from_height}&to_height=${data.totals.to_height}&end_block_id=${data.anchor.block_id}`}
-					>Inspect mining signals ↗</a
-				>
+				<div class="result-links">
+					<a href={share!} aria-label="Open pinned range">Pinned link ↗</a>
+					<a
+						href={`/mining?from_height=${data.totals.from_height}&to_height=${data.totals.to_height}&end_block_id=${data.anchor.block_id}`}
+						aria-label="Inspect mining signals">Mining ↗</a
+					>
+				</div>
 			</div>
+			<p class="coverage-strip">
+				{data.full_history
+					? 'Full retained history.'
+					: 'The index is partial' +
+						(data.partial_from === null
+							? '.'
+							: ', from height ' + data.partial_from.toLocaleString('en-US') + '.')}
+				All {data.totals.block_count.toLocaleString('en-US')} requested headers present.
+			</p>
 			<div class="summary">
 				<div>
 					<span>Blocks</span><strong>{data.totals.block_count.toLocaleString('en-US')}</strong>
@@ -217,38 +229,8 @@
 						<span>Block {data.totals.from_height}</span><span>Block {data.totals.to_height}</span>
 					</figcaption>
 				</figure>
-				<p class="chart-note">
-					Bars start at zero and scale to this range’s maximum. Difficulty is the last block’s exact
-					value in each bucket; the table also shows its minimum and maximum. Height spacing does
-					not imply equal elapsed time.
-				</p>
 			</div>
-			<aside class="coverage">
-				<h3>What this range covers</h3>
-				<p>
-					One snapshot of canonical indexed block headers, observed at indexed height {data.indexed_height.toLocaleString(
-						'en-US'
-					)}. End anchor: <a href={'/blocks/' + data.anchor.block_id}>{data.anchor.block_id}</a>.
-				</p>
-				<p>
-					{data.full_history
-						? 'The index reports full retained history.'
-						: 'The index is partial' +
-							(data.partial_from === null
-								? '.'
-								: ', from height ' + data.partial_from.toLocaleString('en-US') + '.')} All requested headers
-					are present; this does not describe activity outside the selected range.
-				</p>
-				<p>
-					Header timestamps span {time(data.totals.earliest_timestamp)} to {time(
-						data.totals.latest_timestamp
-					)}. Timestamps can move backwards; block order is canonical.
-				</p>
-				<p>
-					Fees come from indexed block totals. Difficulty is not a measured hashrate. No circulating
-					supply, prices, miner identity or ownership is inferred.
-				</p>
-			</aside>
+
 			<details class="raw-values" open>
 				<summary>Exact bucket values</summary>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex (The bounded table region must support keyboard scrolling.) -->
@@ -279,6 +261,34 @@
 					</table>
 				</div>
 			</details>
+			<details class="coverage">
+				<summary>Methodology and snapshot evidence</summary>
+				<p>
+					Up to 20,160 blocks and 120 height buckets. Loading is explicit, with no background
+					refresh. Refresh preserves the end-block pin and rejects a changed canonical block until
+					you clear it.
+				</p>
+				<p>
+					Bars start at zero and scale to this range’s maximum. Difficulty is the last block’s exact
+					value in each bucket; the table also shows its minimum and maximum. Height spacing does
+					not imply equal elapsed time. 720 blocks is a count, not a guaranteed day.
+				</p>
+				<p>
+					One snapshot of canonical indexed block headers, observed at indexed height {data.indexed_height.toLocaleString(
+						'en-US'
+					)}. End anchor: <a href={'/blocks/' + data.anchor.block_id}>{data.anchor.block_id}</a>.
+				</p>
+				<p>Coverage describes only the requested range, not activity outside it.</p>
+				<p>
+					Header timestamps span {time(data.totals.earliest_timestamp)} to {time(
+						data.totals.latest_timestamp
+					)}. Timestamps can move backwards; block order is canonical.
+				</p>
+				<p>
+					Fees come from indexed block totals. Difficulty is not a measured hashrate. No circulating
+					supply, prices, miner identity or ownership is inferred.
+				</p>
+			</details>
 		</section>
 	{:else if !historyState.loading && !localError && !historyState.error}<section class="empty">
 			<h2>Choose the blocks to compare.</h2>
@@ -297,25 +307,31 @@
 		min-width: 0;
 	}
 	.network-intro {
-		max-width: 72ch;
-		margin-bottom: 28px;
+		margin-bottom: var(--density-gap, 16px);
 	}
 	.eyebrow {
 		font: 10px var(--font-mono);
-		letter-spacing: 0.1em;
+		letter-spacing: 0.08em;
 		color: var(--accent-ink);
-		margin-bottom: 12px;
+		margin: 0 0 4px;
 	}
 	h1 {
-		font-size: clamp(34px, 5vw, 65px);
-		line-height: 1.05;
-		letter-spacing: -0.05em;
-		margin-bottom: 16px;
+		font-size: var(--density-title, 32px);
+		line-height: 1.15;
+		letter-spacing: -0.035em;
+		margin: 0 0 6px;
+	}
+	h2 {
+		font-size: 18px;
+		line-height: 1.3;
+		margin: 0;
+		overflow-wrap: anywhere;
 	}
 	p {
 		font-size: 12px;
-		line-height: 1.8;
+		line-height: 1.6;
 		color: var(--fg-muted);
+		margin: 0;
 	}
 	form,
 	.empty,
@@ -324,18 +340,24 @@
 		border: 1px solid var(--hairline);
 		background: var(--surface-solid);
 		border-radius: var(--radius-card);
-		padding: 24px;
-		margin-block: 22px;
+		padding: var(--density-panel, 16px);
+		margin-block: var(--density-gap, 16px);
 		min-width: 0;
+	}
+	form {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 8px var(--density-gap, 16px);
+		align-items: end;
 	}
 	.range-fields {
 		display: grid;
-		grid-template-columns: 1fr 1fr 0.7fr;
-		gap: 16px;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(64px, 0.5fr);
+		gap: 8px;
 	}
 	label {
 		display: grid;
-		gap: 8px;
+		gap: 4px;
 		font-size: 11px;
 		color: var(--fg-muted);
 		min-width: 0;
@@ -344,24 +366,25 @@
 	select {
 		width: 100%;
 		min-width: 0;
+		min-height: var(--density-row, 44px);
 		color: var(--fg);
 		background: var(--surface-solid);
 		border: 1px solid var(--hairline);
 		border-radius: var(--radius-control);
-		padding: 11px;
+		padding: 7px 8px;
 		font: 13px var(--font-mono);
 	}
 	.range-actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 10px;
-		margin-block: 18px 12px;
+		gap: 8px;
 	}
 	button {
+		min-height: var(--density-row, 44px);
 		border: 1px solid var(--btn-fill);
 		color: var(--btn-fill-fg);
 		background: var(--btn-fill);
-		padding: 11px 15px;
+		padding: 7px 10px;
 		border-radius: var(--radius-control);
 		font-size: 12px;
 		cursor: pointer;
@@ -382,32 +405,48 @@
 		overflow-wrap: anywhere;
 	}
 	.pin {
-		overflow-wrap: anywhere;
+		grid-column: 1/-1;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		border-top: 1px solid var(--hairline);
+		padding-top: 8px;
+	}
+	.pin button {
+		min-height: 32px;
+		padding-block: 4px;
+	}
+	.network-results {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
 	}
 	.range-heading {
 		display: flex;
-		gap: 16px;
+		flex-wrap: wrap;
+		gap: 4px var(--density-gap, 16px);
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 28px;
 	}
-	h2 {
-		font-size: clamp(20px, 3vw, 30px);
-		letter-spacing: -0.025em;
-		overflow-wrap: anywhere;
+	.result-links {
+		display: flex;
+		gap: 12px;
+		font-size: 11px;
 	}
-	.range-heading > a {
+	.coverage-strip {
 		font-size: 11px;
 	}
 	.summary {
 		display: grid;
 		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 22px;
-		margin-bottom: 32px;
+		gap: var(--density-gap, 16px);
+		padding-block: 8px;
+		border-block: 1px solid var(--hairline);
 	}
 	.summary > div {
 		display: grid;
-		gap: 12px;
+		gap: 3px;
 		min-width: 0;
 	}
 	.summary span {
@@ -415,31 +454,37 @@
 		color: var(--fg-muted);
 	}
 	.summary strong {
-		font-family: var(--font-number, var(--font-sans));
-		font-size: clamp(20px, 3vw, 32px);
-		font-weight: var(--weight-number, 600);
+		font-size: 23px;
+		line-height: 1.3;
+		font-weight: 600;
+		letter-spacing: -0.025em;
 		overflow-wrap: anywhere;
 	}
 	small {
-		font-size: 12px;
+		font-size: 11px;
 		font-weight: 400;
 	}
 	.chart-controls {
 		display: flex;
-		gap: 20px;
+		gap: 12px;
 		align-items: end;
 		justify-content: space-between;
 	}
 	.chart-controls label {
-		width: 240px;
+		grid-template-columns: auto minmax(140px, 220px);
+		align-items: center;
+		gap: 8px;
+	}
+	.chart-controls p {
+		font-size: 11px;
 	}
 	figure {
-		margin: 22px 0 12px;
+		margin: 8px 0 0;
 	}
 	svg {
 		display: block;
 		width: 100%;
-		height: 180px;
+		height: 140px;
 		overflow: visible;
 	}
 	rect {
@@ -454,30 +499,20 @@
 		color: var(--fg-muted);
 		font: 10px var(--font-mono);
 	}
-	.chart-note {
-		font-size: 11px;
-		max-width: 95ch;
-	}
 	.coverage {
-		margin-top: 30px;
 		border-top: 1px solid var(--hairline);
-		padding-top: 20px;
-	}
-	h3 {
-		font-size: 14px;
-		margin-bottom: 10px;
+		min-width: 0;
 	}
 	.coverage p {
-		margin-block: 10px;
+		margin-block: 8px;
 	}
 	.raw-values {
-		margin-top: 28px;
 		min-width: 0;
 	}
 	summary {
 		cursor: pointer;
-		font-size: 13px;
-		padding-block: 12px;
+		font-size: 12px;
+		padding-block: 10px;
 	}
 	.table-scroll {
 		overflow: auto;
@@ -488,12 +523,13 @@
 	table {
 		border-collapse: collapse;
 		width: 100%;
-		font: 11px var(--font-mono);
+		font: 12px var(--font-mono);
 	}
 	th,
 	td {
 		text-align: left;
-		padding: 12px;
+		padding: 8px;
+		height: var(--density-row, 44px);
 		white-space: nowrap;
 		border-bottom: 1px solid var(--hairline);
 	}
@@ -504,22 +540,29 @@
 	}
 	:global([data-appearance='prism']) .network-results {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.36fr);
-		gap: 26px;
-		border-radius: 24px;
-		box-shadow: 0 20px 48px color-mix(in srgb, var(--accent-ink) 12%, transparent);
+		grid-template-columns: minmax(0, 1fr) minmax(210px, 0.35fr);
+		gap: 10px var(--density-gap, 16px);
+		border-radius: 18px;
+		box-shadow: 0 12px 32px color-mix(in srgb, var(--accent-ink) 10%, transparent);
 	}
 	:global([data-appearance='prism']) .range-heading,
-	:global([data-appearance='prism']) .summary,
-	:global([data-appearance='prism']) .raw-values {
-		grid-column: 1/-1;
-		margin: 0;
-	}
+	:global([data-appearance='prism']) .coverage-strip,
+	:global([data-appearance='prism']) .raw-values,
 	:global([data-appearance='prism']) .coverage {
-		margin: 0;
+		grid-column: 1/-1;
+	}
+	:global([data-appearance='prism']) .visual {
+		grid-column: 1;
+		grid-row: 3;
+	}
+	:global([data-appearance='prism']) .summary {
+		grid-column: 2;
+		grid-row: 3;
+		grid-template-columns: 1fr 1fr;
+		align-content: start;
 		border: 1px solid var(--hairline);
-		border-radius: 16px;
-		padding: 18px;
+		border-radius: 12px;
+		padding: var(--density-panel, 16px);
 		background: var(--accent-wash);
 	}
 	:global([data-appearance='atelier']) .network-results {
@@ -529,101 +572,140 @@
 		background: transparent;
 		padding-inline: 0;
 		display: grid;
-		grid-template-columns: minmax(150px, 0.3fr) minmax(0, 1fr);
-		gap: 30px;
+		grid-template-columns: minmax(140px, 0.25fr) minmax(0, 1fr);
+		gap: 10px var(--density-gap, 16px);
 	}
 	:global([data-appearance='atelier']) .range-heading,
-	:global([data-appearance='atelier']) .raw-values {
-		grid-column: 1/-1;
-		margin: 0;
-	}
-	:global([data-appearance='atelier']) .summary {
-		grid-column: 1;
-		grid-row: 2;
-		grid-template-columns: 1fr;
-		align-content: start;
-	}
-	:global([data-appearance='atelier']) .visual {
-		grid-column: 2;
-		grid-row: 2;
-	}
+	:global([data-appearance='atelier']) .coverage-strip,
+	:global([data-appearance='atelier']) .raw-values,
 	:global([data-appearance='atelier']) .coverage {
 		grid-column: 1/-1;
 	}
-	:global([data-appearance='atelier']) form {
+	:global([data-appearance='atelier']) .summary {
+		grid-column: 1;
+		grid-row: 3;
+		grid-template-columns: 1fr;
+		align-content: start;
 		border: 0;
-		border-top: 1px solid var(--hairline);
-		border-bottom: 1px solid var(--hairline);
+		padding: 0;
+		gap: 8px;
+	}
+	:global([data-appearance='atelier']) .summary > div {
+		gap: 0;
+	}
+	:global([data-appearance='atelier']) .summary strong {
+		font-size: 18px;
+	}
+	:global([data-appearance='atelier']) .visual {
+		grid-column: 2;
+		grid-row: 3;
+		border-left: 1px solid var(--hairline);
+		padding-left: var(--density-panel, 16px);
+	}
+	:global([data-appearance='atelier']) form {
+		border-inline: 0;
 		background: transparent;
 		border-radius: 0;
 		padding-inline: 0;
 	}
 	:global([data-appearance='aurora']) .network-intro {
 		text-align: center;
-		margin: 30px auto 42px;
 	}
 	:global([data-appearance='aurora']) form {
-		max-width: 1000px;
-		margin-inline: auto;
-		border-radius: 28px;
-		box-shadow: 0 18px 50px color-mix(in srgb, var(--accent-ink) 8%, transparent);
+		border-radius: 18px;
+		box-shadow: 0 12px 32px color-mix(in srgb, var(--accent-ink) 8%, transparent);
 	}
 	:global([data-appearance='aurora']) .network-results {
 		border: 0;
 		border-radius: 0;
 		background: transparent;
-		padding: 22px 0;
+		padding-inline: 0;
 	}
 	:global([data-appearance='aurora']) .visual {
-		padding: 30px;
+		padding: var(--density-panel, 16px);
 		border: 1px solid var(--hairline);
-		border-radius: 30px;
+		border-radius: 22px;
 		background: var(--surface-solid);
+		margin-inline: 12px;
 	}
 	:global([data-appearance='aurora']) .summary {
 		text-align: center;
-		padding-block: 20px;
+		border: 0;
 	}
-	@media (max-width: 800px) {
-		form,
-		.network-results,
-		.notice,
-		.empty {
-			padding: 18px;
+	@media (max-width: 900px) {
+		.network-results {
+			gap: 6px;
 		}
-		.range-fields {
+		form {
+			grid-template-columns: 1fr;
+		}
+		.range-actions {
+			display: grid;
 			grid-template-columns: 1fr 1fr;
 		}
-		.range-fields label:last-child {
-			grid-column: 1/-1;
+		input,
+		select,
+		button {
+			min-height: 44px;
+		}
+		.pin button {
+			min-height: 44px;
+		}
+		.pin a,
+		.result-links a {
+			display: inline-flex;
+			align-items: center;
+			min-height: 44px;
+		}
+		summary {
+			min-height: 44px;
+			padding-block: 12px;
 		}
 		.summary {
 			grid-template-columns: 1fr 1fr;
 		}
-		.range-heading,
-		.chart-controls {
-			align-items: start;
-			flex-direction: column;
+		.summary strong {
+			font-size: 19px;
+		}
+		.range-heading {
+			gap: 0 12px;
 		}
 		.chart-controls label {
-			width: 100%;
+			width: 60%;
+			grid-template-columns: 1fr;
+			gap: 4px;
+		}
+		.chart-controls p {
+			max-width: 35%;
+		}
+		svg {
+			height: 100px;
 		}
 		:global([data-appearance='prism']) .network-results,
 		:global([data-appearance='atelier']) .network-results {
-			display: block;
+			display: flex;
+			gap: 6px;
 		}
 		:global([data-appearance='prism']) .summary,
 		:global([data-appearance='atelier']) .summary {
-			display: grid;
 			grid-template-columns: 1fr 1fr;
-			margin-block: 24px;
+			padding: 8px;
 		}
-		:global([data-appearance='prism']) .coverage,
-		:global([data-appearance='atelier']) .coverage {
-			margin-top: 22px;
+		:global([data-appearance='atelier']) .visual {
+			border-left: 0;
+			padding-left: 0;
 		}
 		:global([data-appearance='aurora']) .visual {
-			padding: 18px;
+			margin-inline: 0;
+			padding: 8px;
+		}
+	}
+	@media (max-width: 560px) {
+		.range-fields {
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(58px, 0.6fr);
+		}
+		.pin {
+			flex-wrap: wrap;
 		}
 	}
 </style>

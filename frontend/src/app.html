@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-appearance="prism">
+<html lang="en" data-appearance="prism" data-density="standard">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -19,9 +19,11 @@
 			(function () {
 				var saved = null;
 				var appearance = null;
+				var density = null;
 				try {
 					saved = localStorage.getItem('xp-theme');
 					appearance = localStorage.getItem('xp-appearance');
+					density = localStorage.getItem('xp-density');
 				} catch (e) {
 					/* private mode */
 				}
@@ -38,6 +40,7 @@
 					appearance === 'prism'
 						? appearance
 						: 'prism';
+				document.documentElement.dataset.density = density === 'compact' ? 'compact' : 'standard';
 			})();
 		</script>
 		%sveltekit.head%

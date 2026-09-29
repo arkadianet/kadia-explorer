@@ -8,6 +8,7 @@
 	const confirmed = $derived(
 		observation?.state === 'confirmed' || (tracking.tx !== null && observation === null)
 	);
+	const hasPendingDetails = $derived(!!observation?.pending?.details && !confirmed);
 	const title = $derived(
 		observation?.state === 'pending'
 			? 'Waiting for a block'
@@ -36,7 +37,62 @@
 	</p>
 {/snippet}
 
-<section class="tracking" class:confirmed aria-label="Live transaction status">
+{#snippet progress()}
+	<div class="steps" aria-label="Transaction progress">
+		<div class:reached={observation?.state === 'pending'}>
+			<span>01</span><strong>Observed by our node</strong>
+		</div>
+		<div><span>02</span><strong>Included in a block</strong></div>
+		<div><span>03</span><strong>Confirmations</strong></div>
+	</div>
+{/snippet}
+
+{#snippet secondaryPendingFacts()}
+	{#if observation?.pending}
+		<div>
+			<dt>Read-only data inputs</dt>
+			<dd>{observation.pending.data_input_count}</dd>
+		</div>
+		<div>
+			<dt>Serialized size</dt>
+			<dd>
+				{observation.pending.size === null
+					? 'Not supplied'
+					: `${observation.pending.size.toLocaleString('en-US')} bytes`}
+			</dd>
+		</div>
+		{#if observation.mempool.first_seen_at_ms !== null}<div>
+				<dt>First observed by this explorer</dt>
+				<dd>{absTime(observation.mempool.first_seen_at_ms)}</dd>
+			</div>{/if}
+	{/if}
+{/snippet}
+
+{#snippet statusDescription()}
+	<p class="description">
+		{#if tracking.checking && !observation}Looking for this ID in the local index and our node’s
+			mempool.
+		{:else if observation?.state === 'pending'}Our node has this transaction in its mempool. It has
+			not been included in the local index yet.
+		{:else if observation?.state === 'no_longer_observed'}Our node previously reported this
+			transaction, but it is absent from its latest mempool observation. This does not establish
+			that it was rejected.
+		{:else if observation?.state === 'conflicted'}The local index contains another transaction
+			spending a remembered input. The conflicting transactions are linked below.
+		{:else if observation?.state === 'not_observed'}This ID is not in our local index or our node’s
+			latest mempool observation. It may still be propagating or outside our indexed range. Check
+			the ID against your wallet.
+		{:else}We cannot currently check our node’s mempool. This does not mean the transaction failed.
+			This page will keep checking while it is visible.{/if}
+	</p>
+{/snippet}
+
+<section
+	class="tracking"
+	class:confirmed
+	class:has-pending-details={hasPendingDetails}
+	aria-label="Live transaction status"
+>
 	<div class="tracking-top">
 		<p class="eyebrow">
 			<span class="dot" class:stale={!!tracking.error || tracking.unsupported}></span>
@@ -52,29 +108,8 @@
 	</div>
 	{#if !confirmed}
 		<h2 aria-live="polite" aria-atomic="true">{title}</h2>
-		<p class="description">
-			{#if tracking.checking && !observation}Looking for this ID in the local index and our node’s
-				mempool.
-			{:else if observation?.state === 'pending'}Our node has this transaction in its mempool. It
-				has not been included in the local index yet.
-			{:else if observation?.state === 'no_longer_observed'}Our node previously reported this
-				transaction, but it is absent from its latest mempool observation. This does not establish
-				that it was rejected.
-			{:else if observation?.state === 'conflicted'}The local index contains another transaction
-				spending a remembered input. The conflicting transactions are linked below.
-			{:else if observation?.state === 'not_observed'}This ID is not in our local index or our
-				node’s latest mempool observation. It may still be propagating or outside our indexed range.
-				Check the ID against your wallet.
-			{:else}We cannot currently check our node’s mempool. This does not mean the transaction
-				failed. This page will keep checking while it is visible.{/if}
-		</p>
-		<div class="steps" aria-label="Transaction progress">
-			<div class:reached={observation?.state === 'pending'}>
-				<span>01</span><strong>Observed by our node</strong>
-			</div>
-			<div><span>02</span><strong>Included in a block</strong></div>
-			<div><span>03</span><strong>Confirmations</strong></div>
-		</div>
+		{#if !hasPendingDetails}{@render statusDescription()}{/if}
+		{#if !hasPendingDetails}{@render progress()}{/if}
 		{#if observation?.pending}
 			{#if observation.mempool.observation !== 'present'}<p class="warning">
 					The pending facts below are from the last time this explorer observed the transaction{observation
@@ -93,22 +128,7 @@
 							{formatErg(observation.pending.fee)} ERG
 						</dd>
 					</div>{/if}
-				<div>
-					<dt>Read-only data inputs</dt>
-					<dd>{observation.pending.data_input_count}</dd>
-				</div>
-				<div>
-					<dt>Serialized size</dt>
-					<dd>
-						{observation.pending.size === null
-							? 'Not supplied'
-							: `${observation.pending.size.toLocaleString('en-US')} bytes`}
-					</dd>
-				</div>
-				{#if observation.mempool.first_seen_at_ms !== null}<div>
-						<dt>First observed by this explorer</dt>
-						<dd>{absTime(observation.mempool.first_seen_at_ms)}</dd>
-					</div>{/if}
+				{#if !observation.pending.details}{@render secondaryPendingFacts()}{/if}
 			</dl>
 			<p class="connections-link">
 				<a href={'/mempool?focus=' + observation.id}>Inspect connections in a mempool snapshot ↗</a>
@@ -143,10 +163,17 @@
 		</ul>
 	{/if}
 	<div class="observation-note">
-		{#if !confirmed}{@render checkedAt()}{/if}
-		{#if observation}<details>
-				<summary>{confirmed ? 'Observation details' : 'What this observation covers'}</summary>
-				{#if confirmed}{@render checkedAt()}{/if}
+		{#if !confirmed && !hasPendingDetails}{@render checkedAt()}{/if}
+		{#if observation}<details class:progress-details={hasPendingDetails}>
+				<summary
+					>{hasPendingDetails
+						? 'Confirmation progress and observation facts'
+						: confirmed
+							? 'Observation details'
+							: 'What this observation covers'}</summary
+				>
+				{#if confirmed || hasPendingDetails}{@render checkedAt()}{/if}{#if hasPendingDetails}{@render statusDescription()}{@render progress()}
+					<dl class="pending-facts">{@render secondaryPendingFacts()}</dl>{/if}
 				<p>
 					Pending status reflects one configured node. First observed means when this explorer
 					observed a requested ID, not when the transaction was broadcast. Observation history is
@@ -250,6 +277,7 @@
 		background: #eeab71;
 	}
 	button {
+		min-height: 44px;
 		flex: none;
 		background: transparent;
 		color: inherit;
@@ -338,6 +366,40 @@
 	}
 	summary {
 		cursor: pointer;
+		min-height: 44px;
+		align-content: center;
+	}
+	.progress-details {
+		margin-top: 12px;
+		font-size: 12px;
+	}
+	.progress-details .steps {
+		margin-top: 8px;
+	}
+	.tracking.has-pending-details {
+		padding: var(--density-panel, 16px);
+	}
+	.has-pending-details h2 {
+		margin-top: 10px;
+		font-size: 24px;
+	}
+	.has-pending-details .description {
+		margin-top: 8px;
+		font-size: 12px;
+	}
+	.has-pending-details .pending-facts {
+		margin-top: 12px;
+		gap: 10px 24px;
+	}
+	.has-pending-details .pending-facts dt {
+		font-size: 11px;
+	}
+	.has-pending-details .pending-facts dd {
+		font-size: 12px;
+		margin-top: 3px;
+	}
+	.has-pending-details .connections-link {
+		margin-block: 8px;
 	}
 	details p {
 		max-width: 85ch;
@@ -352,6 +414,11 @@
 		margin-top: 8px;
 	}
 	@media (max-width: 500px) {
+		:global(:root[data-appearance='atelier'] .content[data-page='tx'])
+			.tracking.has-pending-details
+			.pending-facts {
+			padding-top: 0;
+		}
 		.tracking {
 			padding: 20px;
 		}

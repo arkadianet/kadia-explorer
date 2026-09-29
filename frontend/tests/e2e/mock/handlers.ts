@@ -730,7 +730,44 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 			indexed_height: d.status.indexed,
 			inclusion: null,
 			previous_inclusion: null,
-			pending: pendingFixture,
+			pending: {
+				...pendingFixture,
+				details: {
+					inputs:
+						pendingFixture.id === pendingFixtures[1].id
+							? ['bb'.repeat(32)]
+							: [...d.boxById.keys()].slice(0, pendingFixture.input_count),
+					data_inputs: pendingFixture.data_input_count ? ['cc'.repeat(32)] : [],
+					outputs: Array.from({ length: pendingFixture.output_count }, (_, index) => {
+						// Synthetic output identities preserve the connections shown by this demo.
+						const sample = appFixtures
+							.flatMap((fixture) => fixture.settlement.outputs)
+							.find((box) => box.address && box.ergo_tree && box.ergo_tree.length <= 1024)!;
+						const token = d.tokens[0];
+						const isFee = pendingFixture.fee !== null && index === pendingFixture.output_count - 1;
+						const feeTree =
+							'1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a57304';
+						return {
+							index,
+							id:
+								index === 0 && pendingFixture.id !== pendingFixtures[1].id
+									? (pendingFixture.id === pendingFixtures[0].id ? 'bb' : 'cc').repeat(32)
+									: pendingFixture.id.slice(0, 62) + index.toString(16).padStart(2, '0'),
+							value: isFee ? pendingFixture.fee! : String(1_000_000_000 + index * 100_000_000),
+							ergo_tree: isFee ? feeTree : sample.ergo_tree,
+							address: isFee ? null : sample.address,
+							tokens: index === 0 ? [{ id: token.id, amount: '250000000' }] : [],
+							token_count: index === 0 ? 1 : 0,
+							tokens_truncated: false,
+							ergo_tree_truncated: false
+						};
+					}),
+					inputs_truncated: false,
+					data_inputs_truncated: false,
+					outputs_truncated: false,
+					complete: true
+				}
+			},
 			conflicts: [],
 			mempool: {
 				observation: 'present',

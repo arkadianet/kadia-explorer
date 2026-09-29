@@ -4,6 +4,7 @@
 	import { api } from '$lib/api/endpoints';
 	import { createTransactionTracker, type TrackingState } from '$lib/tx/tracker';
 	import TransactionTracking from '$lib/components/TransactionTracking.svelte';
+	import PendingTransactionDetails from '$lib/components/PendingTransactionDetails.svelte';
 	import TransactionReceipt from '$lib/components/TransactionReceipt.svelte';
 	import ApplicationWorkflow from '$lib/components/ApplicationWorkflow.svelte';
 	import RosenWorkflow from '$lib/components/RosenWorkflow.svelte';
@@ -91,6 +92,12 @@
 <div class="head">
 	<PageHead title="Transaction" id={data.id} />
 	<TransactionTracking {tracking} onrefresh={refresh} />
+	{#if !tx && tracking.status?.pending && tracking.status.state !== 'confirmed'}
+		{#key data.id}<PendingTransactionDetails
+				observation={tracking.status}
+				stale={!!tracking.error}
+			/>{/key}
+	{/if}
 	{#if tx && receiptTx}
 		{#key `${tx.id}:${tx.block_id}:${tx.height}`}<TransactionReceipt
 				tx={receiptTx}

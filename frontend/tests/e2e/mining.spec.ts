@@ -47,6 +47,12 @@ test('mining loads explicitly with exact full-range shares, fee precision and un
 	await load(page);
 	expect(urls).toHaveLength(2);
 	expect(new URL(urls[1]).searchParams.get('end_block_id')).toBe('a'.repeat(64));
+	const methodology = result(page).locator('details.coverage');
+	await expect(methodology).not.toHaveAttribute('open', '');
+	await methodology.getByText('Methodology and snapshot evidence', { exact: true }).click();
+	await expect(methodology).toContainText(
+		'Different public keys may be controlled by the same entity.'
+	);
 });
 test('a changed anchor removes old shares until an explicit unpinned reload', async ({ page }) => {
 	await setup(page);
@@ -99,6 +105,47 @@ test('editing the range discards a late in-flight response', async ({ page }) =>
 	).toBeEnabled();
 });
 for (const appearance of ['original', 'aurora', 'atelier', 'prism']) {
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 390, height: 844 }
+	]) {
+		test(`compact mining exposes records early in ${appearance} at ${viewport.width}`, async ({
+			page
+		}) => {
+			await page.setViewportSize(viewport);
+			await page.addInitScript((appearance) => {
+				localStorage.setItem('xp-appearance', appearance);
+				localStorage.setItem('xp-density', 'compact');
+			}, appearance);
+			await setup(page);
+			await load(page);
+			await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+			await page.evaluate(() => window.scrollTo(0, 0));
+			const first = page
+				.getByRole('region', { name: 'Public key block shares', exact: true })
+				.getByRole('listitem')
+				.first();
+			const bounds = (await first.boundingBox())!;
+			expect(bounds.y).toBeLessThan(viewport.width === 390 ? 730 : 650);
+			await expect(first).toBeInViewport({ ratio: viewport.width === 390 ? 0.5 : 1 });
+			await expect(result(page).locator('.coverage-strip')).toContainText(
+				'The index is partial, from height 1.'
+			);
+			await expect(result(page).locator('.coverage-strip')).toContainText('1 unknown vote fields');
+			if (viewport.width === 390) {
+				for (const control of [
+					page.getByRole('button', { name: 'Load mining signals', exact: true }),
+					page.getByRole('button', { name: 'Clear end-block pin', exact: true }),
+					page.getByLabel('From height', { exact: true }),
+					page.getByLabel('Top entries', { exact: true })
+				]) {
+					const box = (await control.boundingBox())!;
+					expect(box.height).toBeGreaterThanOrEqual(44);
+					expect(box.width).toBeGreaterThanOrEqual(44);
+				}
+			}
+		});
+	}
 	for (const theme of ['light', 'dark']) {
 		test(`mining is usable at 320 in ${appearance} ${theme}`, async ({ page }) => {
 			await page.setViewportSize({ width: 320, height: 1000 });

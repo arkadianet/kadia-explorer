@@ -90,9 +90,10 @@ test('partial and truncated reads remain scoped; refresh failure retains labelle
 	await view.getByRole('button', { name: 'Load rent exposure' }).click();
 	await expect(view.getByText('Scanned boxes only', { exact: true })).toBeVisible();
 	await expect(
-		view.getByText('Earlier outputs and unresolved pre-index spends', { exact: false })
+		view.getByText('earlier outputs and pre-index spends may be missing.', { exact: false })
 	).toBeVisible();
-	await expect(view.getByText(/unscanned boxes may mature sooner/)).toBeVisible();
+	await expect(view.locator('.scan-warning')).toContainText('unscanned boxes may mature sooner');
+	await expect(view.locator('.scan-warning')).toBeVisible();
 	await view.getByRole('button', { name: 'Refresh rent exposure' }).click();
 	await expect(view.getByRole('alert')).toContainText('Previous snapshot retained; it is stale.');
 	await expect(view.getByText('Previous snapshot · stale', { exact: true })).toBeVisible();
@@ -115,6 +116,63 @@ for (const category of ['toString', '__proto__']) {
 			view.getByText('No scanned boxes match this category.', { exact: true })
 		).toHaveCount(0);
 	});
+}
+
+for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 390, height: 844 }
+	]) {
+		test(`${appearance} rent records stay near the first screen at ${viewport.width}px in both densities`, async ({
+			page
+		}) => {
+			await page.setViewportSize(viewport);
+			await page.addInitScript(
+				(appearance) => localStorage.setItem('xp-appearance', appearance),
+				appearance
+			);
+			const data = snapshot();
+			data.context.full_history = false;
+			data.context.partial_from = 1_800_000;
+			await page.route(routePattern, (route) => route.fulfill({ json: data }));
+			const positions: number[] = [];
+			await page.goto('/');
+			for (const density of ['standard', 'compact']) {
+				await page.evaluate((density) => localStorage.setItem('xp-density', density), density);
+				await page.goto(`/address/${MOCK_ADDRESS}#rent`);
+				// The next iteration has the same URL, so force preference initialization.
+				await page.reload();
+				await expect(page.locator('html')).toHaveAttribute('data-density', density);
+				const view = page.getByRole('region', { name: 'Storage rent exposure' });
+				await expect(page.locator('details.address-holdings')).not.toHaveAttribute('open', '');
+				await view.getByRole('button', { name: 'Load rent exposure' }).click();
+				const first = view.getByRole('list', { name: 'Scanned rent boxes' }).locator('li').first();
+				await expect(first).toBeVisible();
+				const top = await first.evaluate(
+					(element) => element.getBoundingClientRect().top + window.scrollY
+				);
+				positions.push(top);
+				expect(top).toBeLessThan(viewport.width === 390 ? 900 : 700);
+				expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+					viewport.width
+				);
+				await expect(
+					view.getByText('earlier outputs and pre-index spends may be missing.', { exact: false })
+				).toBeVisible();
+				if (viewport.width === 390) {
+					for (const control of [
+						view.getByRole('button', { name: 'Refresh rent exposure' }),
+						view.getByLabel('Box category', { exact: true }),
+						view.getByLabel('Approaching horizon', { exact: true })
+					]) {
+						expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+					}
+				}
+			}
+			// Compact must actually preserve or improve the amount of evidence shown above the fold.
+			expect(positions[1]).toBeLessThanOrEqual(positions[0] + 2);
+		});
+	}
 }
 
 test('legacy responses are unavailable, while a successful empty snapshot is explicit evidence', async ({

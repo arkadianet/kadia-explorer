@@ -3840,6 +3840,9 @@
 												"type": "null"
 											}
 										]
+									},
+									"details": {
+										"$ref": "#/components/schemas/PendingTxDetails"
 									}
 								},
 								"required": ["input_count", "output_count", "data_input_count", "size", "fee"]
@@ -3887,6 +3890,129 @@
 					"conflicts",
 					"history_scope",
 					"retention_seconds"
+				]
+			},
+			"PendingTxDetails": {
+				"type": "object",
+				"properties": {
+					"inputs": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"data_inputs": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"outputs": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"index": {
+									"type": "number"
+								},
+								"id": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"value": {
+									"type": "string"
+								},
+								"ergo_tree": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"address": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"tokens": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"id": {
+												"type": "string"
+											},
+											"amount": {
+												"type": "string"
+											}
+										},
+										"required": ["id", "amount"]
+									}
+								},
+								"token_count": {
+									"anyOf": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"tokens_truncated": {
+									"type": "boolean"
+								},
+								"ergo_tree_truncated": {
+									"type": "boolean"
+								}
+							},
+							"required": [
+								"index",
+								"id",
+								"value",
+								"ergo_tree",
+								"tokens",
+								"token_count",
+								"tokens_truncated",
+								"ergo_tree_truncated"
+							]
+						}
+					},
+					"inputs_truncated": {
+						"type": "boolean"
+					},
+					"data_inputs_truncated": {
+						"type": "boolean"
+					},
+					"outputs_truncated": {
+						"type": "boolean"
+					},
+					"complete": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"inputs",
+					"data_inputs",
+					"outputs",
+					"inputs_truncated",
+					"data_inputs_truncated",
+					"outputs_truncated",
+					"complete"
 				]
 			},
 			"TxEvidence": {

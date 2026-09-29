@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import Icon from '$lib/components/Icon.svelte';
@@ -14,6 +14,8 @@
 
 	let view = $state<MempoolState>({ loading: true, snapshot: null, error: null });
 	let query = $state('');
+	let inspectorOpen = $state(false);
+	let inspector = $state<HTMLDivElement>();
 	let loader: ReturnType<typeof createMempoolLoader> | undefined;
 	onMount(() => {
 		const current = createMempoolLoader((next) => {
@@ -49,6 +51,15 @@
 		replaceState(url, page.state);
 		requestedFocus = id;
 		repeatedFocus = false;
+	}
+	async function inspectListed(id: string) {
+		selectConnection(id);
+		inspectorOpen = true;
+		if (!window.matchMedia('(min-width: 1000px)').matches) {
+			await tick();
+			inspector?.scrollIntoView({ block: 'nearest' });
+			inspector?.querySelector('summary')?.focus({ preventScroll: true });
+		}
 	}
 	const problemTitle = $derived(
 		view.error?.code === 'mempool_not_configured'
@@ -108,58 +119,53 @@
 		</section>
 	{:else if view.snapshot}
 		{@const snapshot = view.snapshot}
-		{#if snapshot.items.length || requestedFocus !== null}
-			<PendingConnections {snapshot} {selected} {invalidFocus} onselect={selectConnection} />
-		{/if}
-		<div class="mempool-layout">
-			<aside class="observation-summary" aria-label="Mempool observation details">
-				<div class="count-block">
-					<p class="eyebrow">TRANSACTIONS RETURNED</p>
-					<p class="snapshot-count">
-						{snapshot.observed_count.toLocaleString('en-US')}{#if snapshot.limit_reached}<span
-								>at the observation limit</span
-							>{/if}
+		<aside class="observation-summary" aria-label="Mempool observation details">
+			<div class="count-block">
+				<strong>{snapshot.observed_count.toLocaleString('en-US')}</strong><span
+					>transactions returned{snapshot.limit_reached ? ' · limit reached' : ''}</span
+				>
+			</div>
+			<div class="observed-at">
+				<span>Configured primary node</span><time
+					datetime={new Date(snapshot.checked_at_ms).toISOString()}
+					>{utc(snapshot.checked_at_ms)}</time
+				>
+			</div>
+			<details class="observation-evidence">
+				<summary>Observation details</summary>
+				<div>
+					<p>
+						{snapshot.cached ? 'Reused node observation' : 'Node checked for this observation'}.
+						Refreshes can reuse it until {utc(snapshot.expires_at_ms)}.
 					</p>
+					<p>Pending transactions can change immediately. Presence does not guarantee inclusion.</p>
 				</div>
-				<dl>
-					<div>
-						<dt>Source</dt>
-						<dd>Configured primary node</dd>
-					</div>
-					<div>
-						<dt>Observed at</dt>
-						<dd>
-							<time datetime={new Date(snapshot.checked_at_ms).toISOString()}
-								>{utc(snapshot.checked_at_ms)}</time
-							>
-						</dd>
-					</div>
-					<div>
-						<dt>Response</dt>
-						<dd>
-							{snapshot.cached ? 'Reused node observation' : 'Node checked for this observation'}
-						</dd>
-					</div>
-				</dl>
-				<p class="observation-note">
-					Refreshes can reuse this observation until {utc(snapshot.expires_at_ms)}. Pending
-					transactions can change immediately.
-				</p>
-				<p class="scope-note">
-					This is one node’s view. Presence does not guarantee inclusion, and this list is not a
-					network-wide total.
-				</p>
-			</aside>
+			</details>
+			<p class="scope-note">One node’s view, not a network-wide total.</p>
+		</aside>
+		<div
+			class="mempool-layout"
+			class:with-inspector={snapshot.items.length > 0 || requestedFocus !== null}
+		>
+			{#if snapshot.items.length || requestedFocus !== null}
+				<div class="connections-column" bind:this={inspector}>
+					<PendingConnections
+						{snapshot}
+						{selected}
+						{invalidFocus}
+						focused={requestedFocus !== null}
+						bind:open={inspectorOpen}
+						onselect={selectConnection}
+					/>
+				</div>
+			{/if}
 			<section class="pending-list-panel" aria-label="Pending transactions">
 				<div class="list-heading">
-					<div>
-						<p class="eyebrow">PENDING OBSERVATIONS</p>
-						<h2>
-							{snapshot.observed_count === 0
-								? 'No pending transactions observed.'
-								: 'Waiting for a block.'}
-						</h2>
-					</div>
+					<h2>
+						{snapshot.observed_count === 0
+							? 'No pending transactions observed.'
+							: 'Pending transactions'}
+					</h2>
 					{#if snapshot.observed_count > 0}<label class="filter"
 							>Filter loaded transaction IDs<input
 								type="search"
@@ -177,7 +183,7 @@
 					</p>{/if}
 				{#if snapshot.observed_count === 0}
 					<div class="empty-observation">
-						<Icon name="layers" size={34} />
+						<Icon name="layers" size={28} />
 						<p>The node successfully returned an empty list at the observation time.</p>
 					</div>
 				{:else}
@@ -196,58 +202,93 @@
 							>
 						</div>{/if}
 					<div class="pending-list">
+						<div class="ledger-heading" aria-hidden="true">
+							<span>Transaction ID</span><span>Miner-fee outputs</span><span>In → out</span><span
+								>Inspect</span
+							>
+						</div>
 						{#each matches as transaction (transaction.id)}
 							<article
 								class="pending-transaction"
+								class:selected-row={selected === transaction.id}
 								aria-label={'Pending transaction ' + transaction.id}
 							>
-								<div class="transaction-identity">
-									<span class="pending-label"
-										><Icon name="clock" size={13} />Pending at observation</span
-									><a class="transaction-id" href={'/tx/' + transaction.id}
-										>{transaction.id}<Icon name="arrow-right" size={16} /></a
-									>
-								</div>
-								<dl class="transaction-facts">
-									<div>
-										<dt>Inputs / outputs</dt>
-										<dd>
-											{transaction.input_count} <span aria-hidden="true">→</span><span
+								<div class="transaction-main">
+									<div class="transaction-identity">
+										<a
+											class="transaction-id"
+											href={'/tx/' + transaction.id}
+											aria-label={transaction.id}
+											title={transaction.id}
+											><span>{transaction.id.slice(0, 10)}…{transaction.id.slice(-8)}</span><Icon
+												name="arrow-right"
+												size={14}
+											/></a
+										><span class="pending-label">Pending at observation</span>
+									</div>
+									<div class="transaction-fee">
+										<span class="mobile-label">Miner-fee outputs</span><span
+											title={transaction.fee === null ? undefined : transaction.fee + ' nanoERG'}
+											>{transaction.fee === null
+												? 'Unknown'
+												: formatErg(transaction.fee) + ' ERG'}</span
+										>
+									</div>
+									<div class="transaction-counts">
+										<span class="mobile-label">Inputs / outputs</span><span
+											>{transaction.input_count} <span aria-hidden="true">→</span><span
 												class="visually-hidden"
 											>
 												inputs and
-											</span>
-											{transaction.output_count}<span class="visually-hidden"> outputs</span>
-										</dd>
+											</span>{transaction.output_count}<span class="visually-hidden">
+												outputs</span
+											></span
+										>
 									</div>
-									<div>
-										<dt>Data inputs</dt>
-										<dd>{transaction.data_input_count}</dd>
-									</div>
-									<div>
-										<dt>Size</dt>
-										<dd>
-											{transaction.size === null
-												? 'Not supplied'
-												: transaction.size.toLocaleString('en-US') + ' bytes'}
-										</dd>
-									</div>
-									<div class="fee">
-										<dt>Miner-fee outputs</dt>
-										<dd>
-											{#if transaction.fee !== null}<span title={transaction.fee + ' nanoERG'}
-													>{formatErg(transaction.fee)} ERG</span
-												><small>{formatNano(transaction.fee)} nanoERG</small>{:else}Unknown{/if}
-										</dd>
-									</div>
-								</dl>
-								<button
-									type="button"
-									class="secondary inspect-connections"
-									onclick={() => selectConnection(transaction.id)}
-									aria-label={'Inspect connections for listed transaction ' + transaction.id}
-									>Inspect connections</button
-								>
+									<button
+										type="button"
+										class="secondary inspect-connections"
+										onclick={() => void inspectListed(transaction.id)}
+										aria-label={'Inspect connections for listed transaction ' + transaction.id}
+										aria-pressed={selected === transaction.id}>Connections</button
+									>
+								</div>
+								<details class="transaction-evidence">
+									<summary
+										>Details<span class="size-preview" aria-hidden="true">
+											· {transaction.size === null
+												? 'size not supplied'
+												: transaction.size.toLocaleString('en-US') + ' bytes'} · {transaction.data_input_count}
+											data inputs</span
+										></summary
+									>
+									<dl>
+										<div class="full-id">
+											<dt>Transaction ID</dt>
+											<dd>{transaction.id}</dd>
+										</div>
+										<div>
+											<dt>Read-only data inputs</dt>
+											<dd>{transaction.data_input_count}</dd>
+										</div>
+										<div>
+											<dt>Size</dt>
+											<dd>
+												{transaction.size === null
+													? 'Not supplied'
+													: transaction.size.toLocaleString('en-US') + ' bytes'}
+											</dd>
+										</div>
+										<div>
+											<dt>Exact miner-fee outputs</dt>
+											<dd>
+												{transaction.fee === null
+													? 'Unknown'
+													: formatNano(transaction.fee) + ' nanoERG'}
+											</dd>
+										</div>
+									</dl>
+								</details>
 							</article>
 						{/each}
 					</div>
@@ -267,29 +308,31 @@
 	}
 	.mempool-intro {
 		display: flex;
-		align-items: end;
+		align-items: center;
 		justify-content: space-between;
-		gap: 28px;
-		margin-bottom: 30px;
+		gap: var(--density-gap, 16px);
+		margin-bottom: var(--density-gap, 16px);
 	}
 	.eyebrow {
 		font: 11px var(--font-mono);
-		letter-spacing: 0.11em;
+		letter-spacing: 0.08em;
 		color: var(--fg-muted);
 	}
 	h1 {
-		font: var(--weight-display, 750) clamp(38px, 5vw, 66px)/1 var(--font-display, var(--font-sans));
-		letter-spacing: -0.05em;
-		margin-block: 12px 18px;
+		font: var(--weight-display, 750) var(--density-title, 32px)/1.1
+			var(--font-display, var(--font-sans));
+		letter-spacing: -0.035em;
+		margin-block: 7px;
 	}
 	.mempool-intro > div > p:last-child {
-		max-width: 70ch;
-		font-size: 13px;
-		line-height: 1.75;
+		max-width: 78ch;
+		font-size: 12px;
+		line-height: 1.6;
 		color: var(--fg-muted);
 	}
 	button {
 		display: inline-flex;
+		min-height: 36px;
 		align-items: center;
 		justify-content: center;
 		gap: 8px;
@@ -297,7 +340,7 @@
 		border-radius: var(--radius-control);
 		background: var(--btn-fill);
 		color: var(--btn-fill-fg);
-		padding: 12px 16px;
+		padding: 7px 12px;
 		font-size: 12px;
 		cursor: pointer;
 		flex-shrink: 0;
@@ -315,396 +358,472 @@
 		color: var(--accent-ink);
 		overflow-wrap: anywhere;
 	}
+	h2 {
+		font: var(--weight-display, 700) 20px/1.2 var(--font-display, var(--font-sans));
+		letter-spacing: -0.025em;
+	}
 	.mempool-notice {
-		padding: 38px;
+		padding: var(--density-panel, 16px);
 		border: 1px solid var(--hairline);
 		border-radius: var(--radius-card);
 		background: var(--surface-solid);
 	}
-	h2 {
-		font: var(--weight-display, 700) 27px/1.2 var(--font-display, var(--font-sans));
-		letter-spacing: -0.035em;
-	}
 	.mempool-notice h2 {
-		margin-block: 14px;
+		margin-block: 12px;
 	}
 	.mempool-notice p {
 		font-size: 13px;
-		line-height: 1.8;
+		line-height: 1.7;
 		max-width: 76ch;
-		margin-bottom: 12px;
+		margin-bottom: 10px;
 	}
 	.mempool-notice a {
 		font-size: 12px;
-		display: inline-block;
-		margin-top: 10px;
+		display: inline-flex;
+		align-items: center;
+		min-height: 44px;
 	}
 	.observation-summary {
-		display: grid;
-		grid-template-columns: minmax(160px, 0.6fr) minmax(0, 1.4fr);
-		gap: 18px 30px;
-		padding: 24px;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px 24px;
+		padding: 10px var(--density-panel, 16px);
 		border: 1px solid var(--hairline);
 		border-radius: var(--radius-card);
 		background: var(--surface-solid);
-		margin-bottom: 28px;
+		margin-bottom: var(--density-gap, 16px);
 	}
-	.snapshot-count {
-		font: var(--weight-number, 700) 58px/1.1 var(--font-number, var(--font-sans));
-		letter-spacing: -0.05em;
-		margin-top: 12px;
+	.count-block {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
 	}
-	.snapshot-count span {
-		display: block;
-		font: 11px/1.5 var(--font-sans);
-		letter-spacing: 0;
-		margin-top: 6px;
-		color: var(--fg-muted);
+	.count-block strong {
+		font: var(--weight-number, 700) 27px/1 var(--font-number, var(--font-sans));
 	}
-	dl {
-		margin: 0;
-		min-width: 0;
-	}
-	.observation-summary dl {
-		display: grid;
-		gap: 12px;
-	}
-	.observation-summary dl > div {
-		display: grid;
-		grid-template-columns: 95px minmax(0, 1fr);
-		gap: 12px;
-	}
-	dt {
+	.count-block > span,
+	.observed-at,
+	.scope-note {
 		font-size: 11px;
+		line-height: 1.6;
 		color: var(--fg-muted);
-		line-height: 1.5;
 	}
-	dd {
-		margin: 0;
-		font-size: 12px;
-		line-height: 1.5;
-		overflow-wrap: anywhere;
+	.observed-at {
+		display: grid;
 	}
 	time {
 		font: 11px/1.6 var(--font-mono);
 	}
-	.observation-note,
-	.scope-note {
-		color: var(--fg-muted);
+	.observation-evidence {
+		min-width: 0;
+		flex: 1 1 140px;
+	}
+	summary {
+		min-height: 32px;
+		align-content: center;
 		font-size: 11px;
-		line-height: 1.8;
+		cursor: pointer;
+		color: var(--accent-ink);
+	}
+	.observation-evidence > div {
+		max-width: 65ch;
+		padding-block: 8px;
+		font-size: 11px;
+		line-height: 1.7;
+		color: var(--fg-muted);
 	}
 	.scope-note {
-		border-left: 2px solid var(--accent-ink);
-		padding-left: 14px;
+		flex: 1 0 100%;
+	}
+	.mempool-layout,
+	.pending-list-panel,
+	.connections-column {
+		min-width: 0;
+	}
+	.mempool-layout {
+		display: grid;
+		gap: var(--density-gap, 16px);
+		align-items: start;
 	}
 	.list-heading {
 		display: flex;
-		align-items: end;
+		flex-wrap: wrap;
+		align-items: center;
 		justify-content: space-between;
-		gap: 24px;
-		margin-block: 0 18px;
-	}
-	.list-heading h2 {
-		margin-top: 8px;
+		gap: 10px 16px;
 	}
 	.filter {
 		display: grid;
-		gap: 8px;
+		gap: 4px;
 		font-size: 11px;
 		color: var(--fg-muted);
-		width: min(100%, 300px);
-		flex-shrink: 0;
+		width: min(100%, 255px);
 	}
 	input {
 		width: 100%;
 		min-width: 0;
-		padding: 11px 12px;
+		min-height: 36px;
+		padding: 7px 10px;
 		border: 1px solid var(--hairline);
 		border-radius: var(--radius-control);
 		background: var(--surface-solid);
 		color: var(--fg);
-		font: 12px var(--font-mono);
+		font: 11px var(--font-mono);
 	}
 	.list-scope,
 	.list-footnote {
 		font-size: 11px;
-		line-height: 1.8;
+		line-height: 1.6;
 		color: var(--fg-muted);
-		margin-block: 16px;
+		margin-block: 10px;
 	}
 	.limit-notice {
-		border: 1px solid var(--hairline);
+		border-left: 2px solid var(--accent-ink);
 		background: var(--accent-wash);
-		border-radius: var(--radius-control);
-		padding: 14px 16px;
+		padding: 8px 12px;
 		font-size: 12px;
-		line-height: 1.7;
+		line-height: 1.6;
+		margin-top: 10px;
 	}
 	.pending-list {
 		border: 1px solid var(--hairline);
 		border-radius: var(--radius-card);
 		overflow: hidden;
 	}
+	.ledger-heading,
+	.transaction-main {
+		display: grid;
+		grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 60px 90px;
+		gap: 10px;
+		align-items: center;
+	}
+	.ledger-heading {
+		padding: 8px var(--density-panel, 16px);
+		color: var(--fg-muted);
+		font-size: 11px;
+		background: var(--surface-solid);
+		border-bottom: 1px solid var(--hairline);
+	}
 	.pending-transaction {
-		padding: 22px;
+		padding: 5px var(--density-panel, 16px) 0;
 		background: var(--surface-solid);
 		min-width: 0;
 	}
 	.pending-transaction + .pending-transaction {
 		border-top: 1px solid var(--hairline);
 	}
-	.transaction-identity {
-		min-width: 0;
+	.pending-transaction.selected-row {
+		box-shadow: inset 2px 0 var(--accent-ink);
+		background: color-mix(in srgb, var(--accent-wash) 40%, var(--surface-solid));
 	}
-	.pending-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		font-size: 11px;
-		color: var(--fg-muted);
-		margin-bottom: 10px;
+	.transaction-main {
+		min-height: var(--density-row, 44px);
+	}
+	.transaction-identity,
+	.transaction-fee,
+	.transaction-counts {
+		min-width: 0;
 	}
 	.transaction-id {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		font: 12px/1.7 var(--font-mono);
-		overflow-wrap: anywhere;
-		word-break: break-all;
+		gap: 6px;
+		min-height: 24px;
+		font: 11px/1.5 var(--font-mono);
+	}
+	.transaction-id > span {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.transaction-id :global(svg) {
 		flex-shrink: 0;
 	}
-	.transaction-facts {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1.4fr);
-		gap: 20px;
-		margin-top: 20px;
+	.pending-label {
+		display: block;
+		font-size: 11px;
+		color: var(--fg-muted);
 	}
-	.transaction-facts dd {
+	.transaction-fee,
+	.transaction-counts {
+		font: 11px/1.6 var(--font-mono);
 		font-variant-numeric: tabular-nums;
-		margin-top: 4px;
+		overflow-wrap: anywhere;
+	}
+	.mobile-label {
+		display: none;
 	}
 	.inspect-connections {
-		margin-top: 18px;
+		font-size: 11px;
+		min-height: var(--density-row, 44px);
+		padding: 5px 8px;
 	}
-	small {
-		display: block;
-		font: 11px/1.6 var(--font-mono);
+	.transaction-evidence > summary {
 		color: var(--fg-muted);
-		margin-top: 3px;
+		font-size: 11px;
 	}
-	.empty-observation {
-		padding: 36px;
+	.transaction-evidence dl {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 10px;
+		border-top: 1px dashed var(--hairline);
+		padding-block: 10px;
+		margin: 0;
+	}
+	dt {
+		font-size: 11px;
+		color: var(--fg-muted);
+	}
+	dd {
+		font: 11px/1.6 var(--font-mono);
+		margin: 4px 0 0;
+		overflow-wrap: anywhere;
+	}
+	.full-id {
+		grid-column: 1 / -1;
+	}
+	.empty-observation,
+	.empty-filter {
+		padding: 24px var(--density-panel, 16px);
 		border: 1px dashed var(--hairline);
 		border-radius: var(--radius-card);
 	}
 	.empty-observation p {
 		font-size: 13px;
 		color: var(--fg-muted);
-		line-height: 1.8;
-		margin-top: 14px;
-	}
-	.empty-filter {
-		padding: 30px;
-		border: 1px solid var(--hairline);
-		border-radius: var(--radius-card);
+		line-height: 1.7;
+		margin-top: 10px;
 	}
 	.empty-filter h3 {
-		font-size: 16px;
-		margin-bottom: 18px;
-	}
-	:global([data-appearance='prism']) .mempool-layout {
-		display: grid;
-		grid-template-columns: minmax(200px, 0.35fr) minmax(0, 1fr);
-		gap: 30px;
-		align-items: start;
+		font-size: 15px;
+		margin-bottom: 12px;
 	}
 	:global([data-appearance='prism']) .observation-summary {
-		display: block;
-		border-radius: 24px;
 		background: linear-gradient(140deg, var(--surface-solid), var(--accent-wash));
-		box-shadow: 0 18px 45px color-mix(in srgb, var(--accent-ink) 13%, transparent);
-	}
-	:global([data-appearance='prism']) .count-block {
-		padding-block: 12px 24px;
-	}
-	:global([data-appearance='prism']) .observation-summary dl > div {
-		grid-template-columns: 1fr;
-		gap: 4px;
-	}
-	:global([data-appearance='prism']) .observation-note,
-	:global([data-appearance='prism']) .scope-note {
-		margin-top: 20px;
-	}
-	:global([data-appearance='prism']) .list-heading {
-		display: block;
-	}
-	:global([data-appearance='prism']) .filter {
-		margin-top: 20px;
-		width: 100%;
+		border-radius: 16px;
 	}
 	:global([data-appearance='prism']) .pending-list {
 		border: 0;
+		background: transparent;
 		overflow: visible;
 	}
-	:global([data-appearance='prism']) .pending-transaction {
-		margin-bottom: 14px;
-		border: 1px solid var(--hairline);
-		border-radius: 17px;
-		box-shadow: 0 8px 20px color-mix(in srgb, var(--fg) 5%, transparent);
+	:global([data-appearance='prism']) .ledger-heading {
+		border: 0;
+		background: transparent;
 	}
-	:global([data-appearance='prism']) .transaction-facts {
-		grid-template-columns: 1fr 1fr;
+	:global([data-appearance='prism']) .pending-transaction {
+		margin-block: 6px;
+		border: 1px solid var(--hairline);
+		border-radius: 10px;
+		box-shadow: 0 3px 10px color-mix(in srgb, var(--fg) 4%, transparent);
+	}
+	:global([data-appearance='prism']) .pending-transaction.selected-row {
+		border-color: var(--accent-ink);
 	}
 	:global([data-appearance='atelier']) .mempool-intro {
 		border-bottom: 4px double var(--fg);
-		padding-block: 12px 30px;
-	}
-	:global([data-appearance='atelier']) .mempool-layout {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(180px, 0.3fr);
-		gap: 30px;
-		align-items: start;
+		padding-bottom: 12px;
 	}
 	:global([data-appearance='atelier']) .observation-summary {
-		grid-column: 2;
-		grid-row: 1;
-		display: block;
 		border: 0;
-		border-left: 1px solid var(--hairline);
+		border-bottom: 1px solid var(--hairline);
 		border-radius: 0;
-		padding: 0 0 0 22px;
 		background: transparent;
-	}
-	:global([data-appearance='atelier']) .observation-summary dl {
-		margin-top: 28px;
-	}
-	:global([data-appearance='atelier']) .observation-summary dl > div {
-		grid-template-columns: 1fr;
-		gap: 4px;
-	}
-	:global([data-appearance='atelier']) .observation-note,
-	:global([data-appearance='atelier']) .scope-note {
-		margin-top: 20px;
-	}
-	:global([data-appearance='atelier']) .pending-list-panel {
-		grid-column: 1;
-		grid-row: 1;
-	}
-	:global([data-appearance='atelier']) .list-heading {
-		display: block;
-	}
-	:global([data-appearance='atelier']) .filter {
-		margin-top: 22px;
-		width: 100%;
+		padding-inline: 0;
 	}
 	:global([data-appearance='atelier']) .pending-list {
 		border: 0;
-		border-top: 1px solid var(--fg);
+		border-top: 2px solid var(--fg);
 		border-radius: 0;
 	}
+	:global([data-appearance='atelier']) .ledger-heading,
 	:global([data-appearance='atelier']) .pending-transaction {
 		background: transparent;
-		padding: 22px 0;
-	}
-	:global([data-appearance='atelier']) .transaction-facts {
-		grid-template-columns: 1fr 1fr;
+		padding-inline: 10px;
 	}
 	:global([data-appearance='atelier']) .mempool-notice {
 		max-width: 760px;
-		margin: 45px auto;
+		margin: 24px auto;
 		border: 0;
-		border-top: 4px double var(--fg);
-		border-bottom: 1px solid var(--hairline);
+		border-block: 4px double var(--fg);
 		border-radius: 0;
 		background: transparent;
 	}
 	:global([data-appearance='aurora']) .mempool-intro {
-		display: grid;
-		justify-content: stretch;
-		justify-items: center;
+		justify-content: center;
 		text-align: center;
-		margin: 24px auto 36px;
 	}
 	:global([data-appearance='aurora']) .observation-summary {
-		max-width: 1050px;
-		margin-inline: auto;
-		border-radius: 28px;
+		justify-content: center;
 		background: var(--accent-wash);
-		padding: 30px;
+		border-radius: 20px;
+	}
+	:global([data-appearance='aurora']) .scope-note {
+		text-align: center;
 	}
 	:global([data-appearance='aurora']) .pending-list {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 20px;
-		border: 0;
-		overflow: visible;
+		border-radius: 20px;
+		padding: 4px 8px;
+		background: var(--surface-solid);
 	}
-	:global([data-appearance='aurora']) .pending-transaction {
-		border: 1px solid var(--hairline);
-		border-radius: 24px;
-		padding: 26px;
+	:global([data-appearance='aurora']) .transaction-main {
+		grid-template-columns: 90px minmax(0, 1.3fr) minmax(0, 1fr) 60px;
 	}
-	:global([data-appearance='aurora']) .transaction-facts {
-		grid-template-columns: 1fr 1fr;
+	:global([data-appearance='aurora']) .ledger-heading {
+		grid-template-columns: 90px minmax(0, 1.3fr) minmax(0, 1fr) 60px;
+	}
+	:global([data-appearance='aurora']) .inspect-connections {
+		grid-column: 1;
+		grid-row: 1;
+		border-radius: var(--radius-pill);
+	}
+	:global([data-appearance='aurora']) .transaction-identity {
+		grid-column: 2;
+		grid-row: 1;
+	}
+	:global([data-appearance='aurora']) .transaction-fee {
+		grid-column: 3;
+		grid-row: 1;
+	}
+	:global([data-appearance='aurora']) .transaction-counts {
+		grid-column: 4;
+		grid-row: 1;
+	}
+	:global([data-appearance='aurora']) .ledger-heading > :last-child {
+		grid-column: 1;
+		grid-row: 1;
+	}
+	:global([data-appearance='aurora']) .ledger-heading > :first-child {
+		grid-column: 2;
+		grid-row: 1;
+	}
+	:global([data-appearance='aurora']) .ledger-heading > :nth-child(2) {
+		grid-column: 3;
+		grid-row: 1;
+	}
+	:global([data-appearance='aurora']) .ledger-heading > :nth-child(3) {
+		grid-column: 4;
+		grid-row: 1;
 	}
 	:global([data-appearance='aurora']) .mempool-notice {
 		max-width: 850px;
 		margin-inline: auto;
-		border-radius: 28px;
+		border-radius: 24px;
 		text-align: center;
 	}
-	@media (max-width: 760px) {
-		.mempool-intro,
+	@media (min-width: 1000px) {
+		.scope-note {
+			flex: 1 1 180px;
+		}
+		:global([data-appearance='atelier']) .mempool-intro {
+			padding-bottom: 8px;
+			margin-bottom: 10px;
+		}
+		:global([data-appearance='atelier']) .observation-summary {
+			margin-bottom: 10px;
+		}
+		.with-inspector {
+			grid-template-columns: minmax(0, 1fr) minmax(270px, 0.44fr);
+		}
+		.connections-column {
+			grid-column: 2;
+			grid-row: 1;
+			position: sticky;
+			top: 16px;
+		}
+		.pending-list-panel {
+			grid-column: 1;
+			grid-row: 1;
+		}
+		:global([data-appearance='atelier']) .with-inspector {
+			grid-template-columns: minmax(250px, 0.38fr) minmax(0, 1fr);
+		}
+		:global([data-appearance='atelier']) .connections-column {
+			grid-column: 1;
+		}
+		:global([data-appearance='atelier']) .pending-list-panel {
+			grid-column: 2;
+		}
+	}
+	@media (max-width: 999px) {
+		.mempool-intro {
+			align-items: stretch;
+			flex-direction: column;
+			gap: 10px;
+		}
+		.mempool-intro > button {
+			align-self: start;
+		}
+		button,
+		input,
+		summary,
+		.transaction-id,
+		.inspect-connections {
+			min-height: 44px;
+		}
+		.observation-summary {
+			gap: 8px 16px;
+		}
+		.observation-evidence {
+			flex: 1 0 100%;
+		}
 		.list-heading {
 			align-items: stretch;
 			flex-direction: column;
 		}
-		.observation-summary {
-			display: block;
-			padding: 20px;
-		}
-		.observation-summary dl {
-			margin-top: 24px;
-		}
-		.observation-note,
-		.scope-note {
-			margin-top: 18px;
-		}
 		.filter {
 			width: 100%;
 		}
-		.transaction-facts {
-			grid-template-columns: 1fr 1fr;
-			gap: 16px;
+		.ledger-heading {
+			display: none;
+		}
+		.transaction-main,
+		:global([data-appearance='aurora']) .transaction-main {
+			grid-template-columns: minmax(0, 1fr) 92px;
+			gap: 4px 10px;
+		}
+		.transaction-identity,
+		:global([data-appearance='aurora']) .transaction-identity {
+			grid-column: 1;
+			grid-row: 1;
+		}
+		.inspect-connections,
+		:global([data-appearance='aurora']) .inspect-connections {
+			grid-column: 2;
+			grid-row: 1;
+		}
+		.transaction-fee,
+		:global([data-appearance='aurora']) .transaction-fee {
+			grid-column: 1;
+			grid-row: 2;
+			padding-block: 8px;
+		}
+		.transaction-counts,
+		:global([data-appearance='aurora']) .transaction-counts {
+			grid-column: 2;
+			grid-row: 2;
+			padding-block: 8px;
+		}
+		.mobile-label {
+			display: block;
+			font: 11px/1.6 var(--font-sans);
+			color: var(--fg-muted);
+		}
+		.pending-label {
+			display: none;
+		}
+		.transaction-evidence dl {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.size-preview {
+			display: none;
 		}
 		.pending-transaction {
-			padding: 18px;
+			padding-inline: 10px;
 		}
-		.mempool-notice,
-		.empty-observation,
-		.empty-filter {
-			padding: 24px 18px;
-		}
-		:global([data-appearance='prism']) .mempool-layout,
-		:global([data-appearance='atelier']) .mempool-layout {
-			display: block;
-		}
-		:global([data-appearance='atelier']) .observation-summary {
-			border: 0;
-			border-bottom: 1px solid var(--hairline);
-			padding: 0 0 26px;
-		}
-		:global([data-appearance='aurora']) .pending-list {
-			grid-template-columns: 1fr;
-		}
-		:global([data-appearance='aurora']) .observation-summary {
-			padding: 22px;
-		}
-		:global([data-appearance='aurora']) .pending-transaction {
-			padding: 20px;
+		:global([data-appearance='aurora']) .mempool-intro {
+			text-align: left;
 		}
 	}
 </style>

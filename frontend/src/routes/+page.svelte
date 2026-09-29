@@ -15,7 +15,6 @@
 	import { truncateMiddle } from '$lib/format/hash';
 	import { api } from '$lib/api/endpoints';
 	import { status as statusStore } from '$lib/status/status.svelte';
-	import { appearance } from '$lib/theme/theme.svelte';
 	import { formatHashrate, hashrateHs, TARGET_BLOCK_SECONDS } from '$lib/home/series';
 	import type { TxSummaryDto } from '$lib/api/types';
 	import type { PageData } from './$types';
@@ -35,14 +34,6 @@
 
 	const blocks = $derived(data.blocks.data?.recent_blocks ?? []);
 	const latest = $derived(blocks[0] ?? null);
-	const opening = $derived(
-		{
-			original: ['Transparent', 'by design.'],
-			aurora: ['Every move.', 'In full light.'],
-			atelier: ['Everything.', 'Accounted for.'],
-			prism: ['Follow the chain.', 'In every dimension.']
-		}[appearance.current]
-	);
 
 	let now = $state(Date.now());
 	$effect(() => {
@@ -69,7 +60,6 @@
 	const feesPerHour = $derived(
 		(summary?.fees_per_hour ?? []).map((n) => Number(BigInt(n) / 1_000_000n) / 1000)
 	);
-	const heroSeries = $derived(summary?.blocks_per_ten_minutes ?? []);
 
 	const hashrate = $derived(latest ? formatHashrate(hashrateHs(latest.difficulty)) : '—');
 
@@ -155,19 +145,9 @@
 	<section class="hero">
 		<div class="hero-in">
 			<div class="hero-copy">
-				<p class="kicker">KADIA / ERGO MAINNET</p>
-				<h1>{opening[0]}<br /><span>{opening[1]}</span></h1>
-				<p class="lede">Explore, understand, and build on Ergo.</p>
-				<div class="cta">
-					<a class="btn btn-fill" href="/blocks">
-						Explore blocks
-						<Icon name="arrow-right" size={18} />
-					</a>
-					<a class="btn btn-ghost" href="/rent">
-						Storage rent
-						<Icon name="arrow-right" size={18} />
-					</a>
-				</div>
+				<p class="kicker">KADIA / EXPLORER</p>
+				<h1>Ergo mainnet</h1>
+				<p class="lede">Blocks, transactions and the assets moving between them.</p>
 			</div>
 
 			{#if latest}
@@ -178,35 +158,15 @@
 					</div>
 					<p class="tipcard-height">{latest.height.toLocaleString('en-US')}</p>
 					<p class="tipcard-age">{latestAge}</p>
-					<Sparkline
-						values={heroSeries}
-						kind="bars"
-						color="var(--hero-chart, var(--accent))"
-						height={40}
-						title="Blocks per 10-minute bucket over the six hours of chain below the indexed tip, counted from the loaded block timestamps."
-					/>
 					<p
 						class="tipcard-foot"
 						title={`Difficulty ${latest.difficulty} divided by Ergo's ${TARGET_BLOCK_SECONDS} s target block time — the hashrate that would produce this difficulty on average.`}
 					>
-						<span>blocks per 10 min, 6 h</span>
+						<span>Estimated hashrate</span>
 						<b>{hashrate}</b>
 					</p>
 				</div>
 			{/if}
-			<div class="home-chain-scene" aria-label="Recent indexed blocks">
-				{#each recentBlocks.slice(0, 3) as block, index (block.id)}
-					<a class="scene-block" href={`/blocks/${block.height}`} style={`--scene-order: ${index}`}>
-						<span class="scene-index">Indexed block / 0{index + 1}</span>
-						<strong class="scene-height">{block.height.toLocaleString('en-US')}</strong>
-						<span class="scene-count"
-							>{block.tx_count} transaction{block.tx_count === 1 ? '' : 's'}</span
-						>
-						<span class="scene-id mono">{truncateMiddle(block.id, 8, 6)}</span>
-						<Icon name="arrow-right" size={18} />
-					</a>
-				{/each}
-			</div>
 		</div>
 	</section>
 
@@ -562,9 +522,6 @@
 	.home-dashboard {
 		display: contents;
 	}
-	.home-chain-scene {
-		display: none;
-	}
 	/* Full-bleed sections cancel the content column's gutter and, for the hero, its top
 	   padding as well — the landscape has to run under the floating header. */
 	.hero,
@@ -619,13 +576,6 @@
 
 	:global(:root[data-theme='dark']) .hero .lede {
 		color: var(--hero-muted, #c3d0c8);
-	}
-
-	.cta {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-3);
-		margin-top: var(--space-6);
 	}
 
 	/* The tip card: the single number a returning visitor came for, floating over the valley. */
@@ -1124,20 +1074,11 @@
 		color: var(--hero-highlight, #b7f25f);
 		margin-bottom: 18px;
 	}
-	.hero .btn-fill {
-		background: var(--hero-btn-fill, #b7f25f);
-		color: var(--hero-btn-fg, #10291e);
-	}
 	.hero :global(:focus-visible) {
 		outline-color: var(--hero-focus, #b7f25f);
 	}
 	.deeper :global(:focus-visible) {
 		outline-color: var(--accent);
-	}
-	.hero .btn-ghost {
-		background: transparent;
-		color: var(--hero-fg, #eef8e8);
-		border-color: var(--hero-hairline, #6a8a73);
 	}
 	.deeper {
 		background: var(--ink-panel);

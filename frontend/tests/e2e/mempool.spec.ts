@@ -69,8 +69,12 @@ test('mempool loads one observation on entry, preserves exact fees and follows d
 	await expect(list.getByRole('article')).toHaveCount(2);
 	expect(requests).toHaveLength(1);
 	await expect(list.getByText('9,007,199.254740993 ERG', { exact: true })).toBeVisible();
+	await list.getByRole('article').first().locator('summary').click();
 	await expect(list.getByText('9,007,199,254,740,993 nanoERG', { exact: true })).toBeVisible();
-	await expect(list.getByText('Unknown', { exact: true })).toBeVisible();
+	await expect(
+		list.locator('.transaction-fee').getByText('Unknown', { exact: true })
+	).toBeVisible();
+	await list.getByRole('article').nth(1).locator('summary').click();
 	await expect(list.getByText('Not supplied', { exact: true })).toBeVisible();
 	await expect(list.getByRole('link', { name: firstId, exact: true })).toHaveAttribute(
 		'href',
@@ -346,6 +350,7 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 					({ appearance, theme }) => {
 						localStorage.setItem('xp-appearance', appearance);
 						localStorage.setItem('xp-theme', theme);
+						localStorage.setItem('xp-density', 'compact');
 					},
 					{ appearance, theme }
 				);
@@ -361,7 +366,17 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 					page.getByRole('complementary', { name: 'Mempool observation details', exact: true })
 				).toContainText('Reused node observation');
 				const graph = page.getByRole('region', { name: 'Pending connections', exact: true });
-				await graph.getByRole('combobox').selectOption(secondId);
+				await expect(graph.locator('details.inspector')).not.toHaveAttribute('open');
+				await expect(graph.getByRole('combobox')).toBeHidden();
+				const inspect = page.getByRole('button', {
+					name: 'Inspect connections for listed transaction ' + secondId
+				});
+				const touchBounds = await inspect.boundingBox();
+				expect(touchBounds?.height).toBeGreaterThanOrEqual(44);
+				await inspect.focus();
+				await page.keyboard.press('Enter');
+				await expect(graph.locator('details.inspector')).toHaveAttribute('open', '');
+				await expect(graph.getByRole('combobox')).toHaveValue(secondId);
 				await expect(graph.getByRole('list', { name: 'Observed consumers' })).toBeVisible();
 				expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
 				await expect(
@@ -371,5 +386,41 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 				).toBeVisible();
 			}
 		);
+	}
+}
+
+for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	for (const density of ['standard', 'compact']) {
+		test(`${appearance} ${density} keeps pending records beside the bounded desktop inspector`, async ({
+			page
+		}) => {
+			await page.addInitScript(
+				({ appearance, density }) => {
+					localStorage.setItem('xp-appearance', appearance);
+					localStorage.setItem('xp-density', density);
+				},
+				{ appearance, density }
+			);
+			await page.setViewportSize({ width: 1440, height: 1000 });
+			const requests = await setup(page, connectedFixture());
+			const list = page.getByRole('region', { name: 'Pending transactions', exact: true });
+			const graph = page.getByRole('region', { name: 'Pending connections', exact: true });
+			await expect(graph.getByRole('combobox')).toBeVisible();
+			await expect(page.locator('html')).toHaveAttribute('data-density', density);
+			await page.evaluate(() => document.fonts.ready);
+			const record = await list.getByRole('article').first().boundingBox();
+			const listBounds = await list.boundingBox();
+			const inspectorBounds = await graph.boundingBox();
+			expect(record!.y).toBeLessThan(600);
+			expect(record!.height).toBeLessThan(125);
+			expect(Math.abs(listBounds!.y - inspectorBounds!.y)).toBeLessThan(8);
+			if (appearance === 'atelier')
+				expect(inspectorBounds!.x + inspectorBounds!.width).toBeLessThanOrEqual(listBounds!.x);
+			else expect(listBounds!.x + listBounds!.width).toBeLessThanOrEqual(inspectorBounds!.x);
+			await list.getByRole('article').nth(1).getByRole('button').click();
+			await expect(graph.getByRole('combobox')).toHaveValue(secondId);
+			await expect(graph.getByRole('list', { name: 'Observed consumers' })).toBeVisible();
+			expect(requests).toHaveLength(1);
+		});
 	}
 }

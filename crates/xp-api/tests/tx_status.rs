@@ -140,6 +140,20 @@ async fn pending_confirmed_removed_and_reincluded_are_distinct() {
     assert!(initial["inclusion"].is_null());
     assert!(initial["mempool"]["first_seen_at_ms"].is_u64());
     assert_eq!(initial["pending"]["input_count"], block.txs[1].inputs.len());
+    assert_eq!(
+        initial["pending"]["details"]["inputs"][0],
+        hex32(&block.txs[1].inputs[0].0)
+    );
+    assert_eq!(
+        initial["pending"]["details"]["outputs"][0]["value"],
+        block.txs[1].outputs[0].value.to_string()
+    );
+    assert_eq!(status(&app, id).await["pending"], initial["pending"]);
+    assert_eq!(
+        source.calls.load(Ordering::SeqCst),
+        1,
+        "details must share the cached observation"
+    );
     store
         .apply_batch(std::slice::from_ref(&block), true)
         .unwrap();
@@ -230,6 +244,27 @@ async fn mismatched_node_body_is_unavailable_not_a_pending_transaction() {
     assert_eq!(result["state"], "unavailable");
     assert!(result["pending"].is_null());
     assert!(result["mempool"]["first_seen_at_ms"].is_null());
+}
+
+#[tokio::test]
+async fn missing_optional_output_metadata_preserves_summary_with_explicit_partial_details() {
+    let id = block().txs[1].id.0;
+    let raw = json!({"id":hex32(&id),"inputs":[{"boxId":hex32(&[9;32])}],"dataInputs":[],
+        "outputs":[{"value":9007199254740993u64,"ergoTree":"00"}],"size":100})
+    .to_string();
+    let source = Source::new(raw);
+    let (_dir, _, app) = app(Some(source.clone()));
+    let result = status(&app, id).await;
+    assert_eq!(result["state"], "pending");
+    assert_eq!(result["pending"]["output_count"], 1);
+    assert_eq!(result["pending"]["fee"], "0");
+    let detail = &result["pending"]["details"];
+    assert_eq!(detail["outputs"][0]["value"], "9007199254740993");
+    assert!(detail["outputs"][0]["id"].is_null());
+    assert!(detail["outputs"][0]["token_count"].is_null());
+    assert_eq!(detail["complete"], false);
+    assert_eq!(status(&app, id).await["pending"], result["pending"]);
+    assert_eq!(source.calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

@@ -3,8 +3,6 @@
 	import { page } from '$app/state';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHead from '$lib/components/PageHead.svelte';
-	import Facts from '$lib/components/Facts.svelte';
-	import Fact from '$lib/components/Fact.svelte';
 	import Table from '$lib/components/Table.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import InfiniteList from '$lib/components/InfiniteList.svelte';
@@ -115,58 +113,77 @@
 	</div>
 	<Panel title="Historical snapshot"><AddressHistory address={addr} /></Panel>
 {:else}
-	<div class="head">
-		<PageHead title="Address" id={info.address}>
-			{#snippet aside()}
-				<span class="balance"><Amount nano={info.balance.nano} maxFrac={9} /></span>
-			{/snippet}
-		</PageHead>
-		<SaveAddress address={info.address} />
-
-		<Facts>
-			<Fact label="Boxes"><span class="mono">{info.box_count}</span></Fact>
-			<Fact label="Tokens"><span class="mono">{info.balance.tokens.length}</span></Fact>
-			<Fact label="First seen">
-				<a class="mono" href={`/blocks/${info.first_seen}`}>{info.first_seen}</a>
-			</Fact>
-			<Fact label="Last seen">
-				<a class="mono" href={`/blocks/${info.last_seen}`}>{info.last_seen}</a>
-			</Fact>
-		</Facts>
+	<div class="address-head">
+		<header class="address-masthead">
+			<div class="address-title">
+				<h1>Address</h1>
+				<span class="address-balance" title={`${info.balance.nano} nanoERG`}
+					>{formatErg(info.balance.nano, { maxFrac: 9 })}<small>ERG</small></span
+				>
+			</div>
+			<div class="address-tools"><SaveAddress address={info.address} /></div>
+			<div class="address-id">
+				<Hash value={info.address} head={info.address.length} tail={0} />
+			</div>
+		</header>
+		<dl class="address-facts">
+			<div>
+				<dt>Boxes</dt>
+				<dd>{info.box_count}</dd>
+			</div>
+			<div>
+				<dt>Tokens</dt>
+				<dd>{info.balance.tokens.length}</dd>
+			</div>
+			<div>
+				<dt>First seen</dt>
+				<dd><a href={`/blocks/${info.first_seen}`}>{info.first_seen}</a></dd>
+			</div>
+			<div>
+				<dt>Last seen</dt>
+				<dd><a href={`/blocks/${info.last_seen}`}>{info.last_seen}</a></dd>
+			</div>
+		</dl>
 	</div>
 
 	{#if info.balance.tokens.length > 0}
-		<Panel title={`Tokens (${info.balance.tokens.length})`}>
-			<Table>
-				{#snippet head()}
-					<tr>
-						<th>Token</th>
-						<th class="num">Amount</th>
-					</tr>
-				{/snippet}
-				{#each info.balance.tokens as token (token.id)}
-					<tr>
-						<td>
-							<!-- A minted name is prose and keeps the body face; a token minted without one
+		<details class="address-holdings">
+			<summary>Token holdings <span>{info.balance.tokens.length} assets</span></summary>
+			<div class="holdings-table">
+				<Table>
+					{#snippet head()}
+						<tr>
+							<th>Token</th>
+							<th class="num">Amount</th>
+						</tr>
+					{/snippet}
+					{#each info.balance.tokens as token (token.id)}
+						<tr>
+							<td>
+								<!-- A minted name is prose and keeps the body face; a token minted without one
 							     falls back to its truncated id in mono. Either way the cell links to the
 							     token's own page. -->
-							{#if token.name}
-								<a class="token-name" href={`/token/${token.id}`} title={token.id}>{token.name}</a>
-							{:else}
-								<a class="mono" href={`/token/${token.id}`} title={token.id}
-									>{truncateMiddle(token.id)}</a
-								>
-							{/if}
-						</td>
-						<td class="num mono">{formatTokenAmount(token.amount, token.decimals)}</td>
-					</tr>
-				{/each}
-			</Table>
-		</Panel>
+								{#if token.name}
+									<a class="token-name" href={`/token/${token.id}`} title={token.id}>{token.name}</a
+									>
+								{:else}
+									<a class="mono" href={`/token/${token.id}`} title={token.id}
+										>{truncateMiddle(token.id)}</a
+									>
+								{/if}
+							</td>
+							<td class="num mono">{formatTokenAmount(token.amount, token.decimals)}</td>
+						</tr>
+					{/each}
+				</Table>
+			</div>
+		</details>
 	{/if}
 
 	<Panel>
-		<Tabs tabs={TABS} {active} onchange={selectTab} label="Address sections" />
+		<div class="address-section-tabs">
+			<Tabs tabs={TABS} {active} onchange={selectTab} label="Address sections" />
+		</div>
 
 		<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
 			{#if active === 'activity'}
@@ -307,13 +324,197 @@
 		flex-direction: column;
 		gap: var(--space-4);
 	}
-	/* The one big number on the page: what this address is worth right now. */
-	.balance :global(.amount) {
-		font-size: var(--fs-key);
-		font-weight: 600;
+	.address-head {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		min-width: 0;
 	}
-	.balance :global(.unit) {
-		font-size: var(--fs-data);
+	:global(
+		:root[data-density][data-appearance] .content[data-page='address'] > .panel > .panel-body
+	) {
+		padding: var(--density-panel, 16px);
+	}
+	:global(:root[data-density][data-appearance] .content[data-page='address'])
+		.address-section-tabs
+		:global(.tabs) {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		gap: 0 16px;
+		margin-bottom: 0;
+	}
+	.address-section-tabs :global(.tab) {
+		flex-shrink: 0;
+		white-space: nowrap;
+	}
+	.address-masthead {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 6px 16px;
+		align-items: center;
+		padding: var(--density-panel, 16px);
+		border: var(--rule);
+		border-top: 3px solid var(--accent-ink);
+		border-radius: var(--radius-card);
+		background: var(--surface-solid);
+		min-width: 0;
+	}
+	.address-title {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.address-title h1 {
+		font-family: var(--font-display, var(--font-sans));
+		font-size: var(--density-title, 32px);
+		line-height: 1.05;
+		letter-spacing: -0.04em;
+		margin: 0;
+	}
+	.address-balance {
+		font: 600 clamp(21px, 2.5vw, 32px)/1.15 var(--font-number, var(--font-mono));
+		letter-spacing: -0.035em;
+		overflow-wrap: anywhere;
+		min-width: 0;
+	}
+	.address-balance small {
+		font: 500 12px var(--font-sans);
+		margin-inline-start: 6px;
+		letter-spacing: 0;
+		color: var(--fg-muted);
+	}
+	.address-id {
+		grid-column: 1/-1;
+		margin-top: 0;
+		font-size: 12px;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.address-id :global(.hash) {
+		display: inline;
+	}
+	.address-tools {
+		min-width: 0;
+	}
+	.address-facts {
+		margin: 0;
+		padding: 8px var(--density-panel, 16px);
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 10px;
+		border-block: var(--rule);
+	}
+	.address-facts dt {
+		color: var(--fg-muted);
+		font-size: 11px;
+		margin-bottom: 3px;
+	}
+	.address-facts dd {
+		font: 500 13px/1.3 var(--font-mono);
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+	.address-holdings {
+		min-width: 0;
+		border: var(--rule);
+		border-radius: var(--radius-control);
+		background: var(--surface-solid);
+	}
+	.address-holdings > summary {
+		padding: 10px var(--density-panel, 16px);
+		min-height: 44px;
+		cursor: pointer;
+		font-size: 13px;
+		font-weight: 650;
+	}
+	.address-holdings > summary span {
+		font-size: 12px;
+		font-weight: 400;
+		color: var(--fg-muted);
+		margin-inline-start: 8px;
+	}
+	.address-holdings > summary:focus-visible {
+		outline: 2px solid var(--accent-ink);
+		outline-offset: 2px;
+	}
+	.holdings-table {
+		padding: 0 var(--density-panel, 16px);
+	}
+	:global([data-appearance='prism']) .address-head {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+	}
+	:global([data-appearance='prism']) .address-masthead {
+		grid-column: 1/-1;
+	}
+	:global([data-appearance='prism']) .address-facts {
+		grid-column: 1/-1;
+	}
+	:global([data-appearance='atelier']) .address-masthead {
+		background: transparent;
+		border: 0;
+		border-block: 3px double var(--hairline);
+		border-radius: 0;
+		padding-inline: 0;
+	}
+	:global([data-appearance='atelier']) .address-holdings {
+		border-radius: 0;
+		border-inline: 0;
+		background: transparent;
+	}
+	:global([data-appearance='aurora']) .address-masthead {
+		border-top-width: 1px;
+		border-inline-start: 3px solid var(--accent-ink);
+	}
+	:global([data-appearance='aurora']) .address-title h1 {
+		font-weight: 400;
+	}
+	@media (min-width: 900px) {
+		:global([data-appearance='atelier']) .address-head {
+			display: grid;
+			grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+			gap: var(--density-gap, 16px);
+			align-items: center;
+		}
+		:global([data-appearance='atelier']) .address-facts {
+			grid-template-columns: 1fr 1fr;
+			border: 0;
+			border-inline-start: 3px double var(--hairline);
+		}
+	}
+	@media (max-width: 700px) {
+		.address-masthead {
+			padding: 10px 12px;
+			grid-template-columns: minmax(0, 1fr);
+			gap: 4px;
+		}
+		.address-title {
+			gap: 6px 12px;
+		}
+		.address-title h1 {
+			font-size: 26px;
+		}
+		.address-balance {
+			font-size: 21px;
+		}
+		.address-facts {
+			padding: 6px 0;
+			gap: 6px;
+		}
+		:global([data-appearance='prism']) .address-head {
+			display: flex;
+			align-items: stretch;
+		}
+		.address-tools :global(.save-trigger) {
+			min-height: 44px;
+		}
+		.address-tools {
+			grid-column: 1;
+			grid-row: 3;
+		}
 	}
 	.muted {
 		color: var(--fg-muted);

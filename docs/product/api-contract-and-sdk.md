@@ -12,6 +12,13 @@ block pin. Rent context distinguishes scan completeness from full chain coverage
 Mempool connections are optional for compatibility with older API deployments and
 cover only returned transactions. Preserve these fields when interpreting results.
 
+Transaction status optionally includes `pending.details` from the same cached node
+observation. It exposes input IDs, read-only data-input IDs and output values,
+scripts and raw token amounts without waiting for inclusion. Each list is bounded
+to 32 entries, scripts to 2 KiB, and the entire projection to 32 KiB. Truncation and
+unknown token coverage are explicit. Input balances, signatures and registers are
+not resolved; `complete` describes only the projection. Older servers may omit it.
+
 The generator at `frontend/scripts/api-contract.mjs` builds response schemas and
 portable TypeScript declarations from the explorer's wire types. Request paths and
 parameter rules live in the adjacent catalog. `npm run contract:check` rejects stale
