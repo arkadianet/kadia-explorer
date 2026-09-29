@@ -15,13 +15,12 @@
 	// preserve a user's locally expanded evidence while navigation resets it.
 </script>
 
-<section class="pending-details" aria-label="Pending transaction details">
-	<header>
-		<div>
-			<p class="eyebrow">NODE OBSERVATION · UNCONFIRMED</p>
-			<h2>Transaction details</h2>
-		</div>
-	</header>
+<section
+	class="pending-details"
+	class:available={!!details}
+	aria-label="Pending transaction details"
+>
+	{#if !details}<h2>Pending details</h2>{/if}
 	{#if stale || observation.mempool.observation !== 'present'}<p class="coverage" role="status">
 			These details are from the last successful pending observation{observation.mempool
 				.last_seen_at_ms !== null
@@ -37,15 +36,14 @@
 			available.
 		</p>
 	{:else}
-		<p class="detail-scope">Input values and assets are unresolved.</p>
 		{#if !details.complete}<p class="coverage" role="status">
-				Some transaction details are omitted or unavailable. See the coverage labels below.
+				Limited observation. Missing or omitted details are labelled below.
 			</p>{/if}
 		<div class="pending-flow">
 			<section class="pending-outputs" aria-label="Pending outputs">
-				<h3>
+				<h2>
 					Outputs <span>{details.outputs.length} of {pending.output_count} declared outputs</span>
-				</h3>
+				</h2>
 				<div class="outputs">
 					{#each details.outputs.slice(0, expanded.outputs ? undefined : 4) as output (output.index)}<article
 							aria-label={'Pending output ' + (output.index + 1)}
@@ -129,7 +127,7 @@
 					</p>{/if}
 			</section>
 			<section class="pending-inputs" aria-label="Pending inputs">
-				<h3>Inputs <span>{details.inputs.length} of {pending.input_count} references</span></h3>
+				<h2>Inputs <span>{details.inputs.length} of {pending.input_count} references</span></h2>
 				<p class="unknown-values">Input values and assets: unknown</p>
 				<ol>
 					{#each details.inputs.slice(0, expanded.inputs ? undefined : 4) as id (id)}<li>
@@ -185,17 +183,18 @@
 		padding: var(--density-panel, 16px);
 		background: var(--surface-solid);
 	}
-	header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 12px;
+	.pending-details.available,
+	:global([data-appearance]) .pending-details.available {
+		padding: 0;
+		border: 0;
+		background: transparent;
+		border-radius: 0;
 	}
-	.eyebrow {
-		font: 11px var(--font-mono);
-		letter-spacing: 0.07em;
-		color: var(--fg-muted);
+	.available > .coverage {
+		margin-block: 0 8px;
+		padding: 5px 8px;
+		font-size: 11px;
+		line-height: 1.5;
 	}
 	h2 {
 		font: var(--weight-display, 750) 24px/1.2 var(--font-display, var(--font-sans));
@@ -219,7 +218,7 @@
 		display: grid;
 		grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
 		gap: var(--density-gap, 16px);
-		margin-block: var(--density-gap, 16px);
+		margin-block: 0 var(--density-gap, 16px);
 		align-items: start;
 	}
 	.pending-inputs,
@@ -234,13 +233,18 @@
 		grid-column: 2;
 		grid-row: 1;
 	}
-	h3 {
-		font-size: 14px;
+	.pending-flow h2 {
+		font-size: 18px;
 		line-height: 1.6;
 		border-bottom: 1px solid var(--hairline);
-		padding-bottom: 8px;
+		padding-bottom: 4px;
+		margin: 0;
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 0 8px;
 	}
-	h3 > span {
+	.pending-flow h2 > span {
 		display: block;
 		font: 11px var(--font-mono);
 		color: var(--fg-muted);
@@ -270,7 +274,7 @@
 	.outputs {
 		display: grid;
 		gap: var(--density-gap, 16px);
-		margin-top: 10px;
+		margin-top: 6px;
 	}
 	article {
 		min-width: 0;
@@ -409,7 +413,7 @@
 		background: var(--accent-wash);
 	}
 	@media (max-width: 700px) {
-		h3 {
+		.pending-flow h2 {
 			display: flex;
 			align-items: baseline;
 			flex-wrap: wrap;

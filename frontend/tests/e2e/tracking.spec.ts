@@ -260,13 +260,9 @@ test('pending details expose exact outputs and unresolved inputs before inclusio
 	const liveStatus = page.getByRole('region', { name: 'Live transaction status', exact: true });
 	await expect(liveStatus.getByText('0.0011 ERG', { exact: true })).toBeVisible();
 	await expect(liveStatus.getByText('512 bytes', { exact: true })).toBeHidden();
-	await liveStatus
-		.getByText('Confirmation progress and observation facts', { exact: true })
-		.click();
+	await liveStatus.getByText('Observation details', { exact: true }).click();
 	await expect(liveStatus.getByText('512 bytes', { exact: true })).toBeVisible();
-	await liveStatus
-		.getByText('Confirmation progress and observation facts', { exact: true })
-		.click();
+	await liveStatus.getByText('Observation details', { exact: true }).click();
 	await expect(
 		details.getByText('Input values and assets: unknown', { exact: true })
 	).toBeVisible();
@@ -379,6 +375,50 @@ test('legacy summaries and malformed extended evidence remain distinct unavailab
 });
 
 for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	test(`a normal pending output exposes its amount, address and token before mobile navigation in ${appearance}`, async ({
+		page
+	}) => {
+		await page.clock.install();
+		await page.addInitScript((appearance) => {
+			localStorage.setItem('xp-appearance', appearance);
+			localStorage.setItem('xp-density', 'standard');
+		}, appearance);
+		await page.setViewportSize({ width: 390, height: 844 });
+		const observation = detailedStatus();
+		const projection = observation.pending!.details!;
+		projection.outputs[0].value = '2000000000';
+		projection.outputs[0].tokens[0].amount = '1000';
+		projection.outputs[1].token_count = 0;
+		projection.complete = true;
+		await mock(page, observation);
+		await page.goto(`/tx/${tx.id}`);
+		const details = page.getByRole('region', { name: 'Pending transaction details', exact: true });
+		const output = details.getByRole('article', { name: 'Pending output 1', exact: true });
+		await expect(output).toBeVisible();
+		await expect(
+			page.getByRole('heading', { level: 1, name: 'Transaction', exact: true })
+		).toHaveCount(1);
+		await expect(
+			page.getByRole('button', { name: 'Copy transaction ID', exact: true })
+		).toBeVisible();
+		await page.evaluate(() => document.fonts.ready);
+		const navigationBounds = await page.locator('.tabbar').boundingBox();
+		for (const fact of [
+			output.getByText('2 ERG', { exact: true }),
+			output.getByRole('link', { name: '9f'.repeat(25), exact: true }),
+			output.getByText('1,000 raw units', { exact: true })
+		]) {
+			const bounds = await fact.boundingBox();
+			expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(navigationBounds!.y - 8);
+			await expect(fact).toBeInViewport({ ratio: 1 });
+		}
+		const liveStatus = page.getByRole('region', { name: 'Live transaction status', exact: true });
+		await liveStatus.getByText('Observation details', { exact: true }).focus();
+		await page.keyboard.press('Enter');
+		await expect(liveStatus.locator('code')).toHaveText(tx.id);
+		await expect(liveStatus.locator('code')).toBeVisible();
+		await expect(liveStatus).toContainText('Pending status reflects one configured node.');
+	});
 	for (const density of ['standard', 'compact']) {
 		test(`pending output values precede unresolved references above mobile navigation in ${appearance} ${density}`, async ({
 			page
@@ -409,6 +449,7 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 				.getByRole('region', { name: 'Pending inputs', exact: true })
 				.boundingBox();
 			const navigationBounds = await page.locator('.tabbar').boundingBox();
+			expect(amountBounds!.y).toBeLessThanOrEqual(650);
 			expect(amountBounds!.y + amountBounds!.height).toBeLessThanOrEqual(navigationBounds!.y - 8);
 			expect(inputBounds!.y).toBeGreaterThan(amountBounds!.y + amountBounds!.height);
 			await expect(amount).toBeInViewport({ ratio: 1 });

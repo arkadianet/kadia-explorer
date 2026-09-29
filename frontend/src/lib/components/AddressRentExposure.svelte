@@ -70,19 +70,6 @@
 	<header class="rent-head">
 		<div>
 			<h2 id={`${uid}-title`}>Storage rent exposure</h2>
-			{#if result}<div class="snapshot" class:stale={exposure.stale}>
-					<strong>{exposure.stale ? 'Previous snapshot · stale' : 'Snapshot at read time'}</strong>
-					<span
-						>{#if result.context.anchor}<a href={`/blocks/${result.context.anchor.block_id}`}
-								>Block {result.context.anchor.height.toLocaleString('en-US')}</a
-							>{:else}Canonical block anchor unavailable{/if}</span
-					>
-					{#if exposure.checkedAt}<time
-							datetime={new Date(exposure.checkedAt).toISOString()}
-							title={new Date(exposure.checkedAt).toISOString()}
-							>Checked {new Date(exposure.checkedAt).toISOString().slice(11, 19)} UTC</time
-						>{/if}
-				</div>{/if}
 		</div>
 		<button
 			class="load"
@@ -96,6 +83,33 @@
 			>{exposure.busy ? 'Checking…' : result ? 'Refresh' : 'Load exposure'}</button
 		>
 	</header>
+	{#if result && summary}<div class="rent-context">
+			<div class="snapshot" class:stale={exposure.stale}>
+				<strong>{exposure.stale ? 'Previous snapshot · stale' : 'Snapshot'}</strong>
+				<span
+					>{#if result.context.anchor}<a href={`/blocks/${result.context.anchor.block_id}`}
+							>Block {result.context.anchor.height.toLocaleString('en-US')}</a
+						>{:else}Canonical block anchor unavailable{/if}</span
+				>
+				{#if exposure.checkedAt}<time
+						datetime={new Date(exposure.checkedAt).toISOString()}
+						title={new Date(exposure.checkedAt).toISOString()}
+						aria-label={`Checked ${new Date(exposure.checkedAt).toISOString()}`}
+						>{new Date(exposure.checkedAt).toISOString().slice(11, 19)} UTC</time
+					>{/if}
+			</div>
+			<div class="filter">
+				<label for={`${uid}-category`}>Box category</label><select
+					id={`${uid}-category`}
+					value={Object.hasOwn(RENT_CATEGORIES, category) ? category : 'all'}
+					onchange={(event) => select('rent_filter', event.currentTarget.value)}
+					><option value="all">All scanned boxes</option
+					>{#each Object.entries(RENT_CATEGORIES) as [key, label] (key)}<option value={key}
+							>{label} ({summary.counts[key as RentCategory]})</option
+						>{/each}</select
+				>
+			</div>
+		</div>{/if}
 	{#if exposure.error}<p class="warning" role="alert">
 			{exposure.error}{#if exposure.stale}
 				Previous snapshot retained; it is stale.{/if}
@@ -128,7 +142,17 @@
 				</div>
 				<dl class="primary-totals">
 					<div>
-						<dt>Within next {horizon.toLocaleString('en-US')} blocks</dt>
+						<dt>
+							<select
+								id={`${uid}-horizon`}
+								aria-label="Approaching horizon"
+								value={horizon}
+								onchange={(event) => select('rent_horizon', event.currentTarget.value)}
+								>{#each horizons as value (value)}<option {value}
+										>Next {value.toLocaleString('en-US')} blocks</option
+									>{/each}</select
+							>
+						</dt>
 						<dd>
 							{summary.approaching === null ? 'Unavailable' : `${erg(summary.approaching)} ERG`}
 						</dd>
@@ -136,29 +160,6 @@
 				</dl>
 			</aside>
 			<div class="rent-evidence">
-				<div class="filters">
-					<div class="filter">
-						<label for={`${uid}-horizon`}>Approaching horizon</label><select
-							id={`${uid}-horizon`}
-							value={horizon}
-							onchange={(event) => select('rent_horizon', event.currentTarget.value)}
-							>{#each horizons as value (value)}<option {value}
-									>{value.toLocaleString('en-US')} blocks</option
-								>{/each}</select
-						>
-					</div>
-					<div class="filter">
-						<label for={`${uid}-category`}>Box category</label><select
-							id={`${uid}-category`}
-							value={Object.hasOwn(RENT_CATEGORIES, category) ? category : 'all'}
-							onchange={(event) => select('rent_filter', event.currentTarget.value)}
-							><option value="all">All scanned boxes</option
-							>{#each Object.entries(RENT_CATEGORIES) as [key, label] (key)}<option value={key}
-									>{label} ({summary.counts[key as RentCategory]})</option
-								>{/each}</select
-						>
-					</div>
-				</div>
 				{#if !result.items.length}<p class="empty">
 						No unspent boxes were found in this indexed address snapshot.{#if !summary.complete}
 							This does not establish zero exposure for the full address.{/if}
@@ -351,9 +352,9 @@
 	.snapshot {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 3px 14px;
+		gap: 2px 8px;
 		padding-block: 0;
-		margin-top: 6px;
+		margin-top: 0;
 		font-size: 11px;
 	}
 	.snapshot time {
@@ -364,14 +365,14 @@
 	}
 	.rent-workspace {
 		display: grid;
-		gap: var(--density-gap, 16px);
+		gap: 8px var(--density-gap, 16px);
 	}
 	.rent-summary {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		gap: 4px 16px;
 		min-width: 0;
-		padding-block: 6px;
+		padding-block: 4px;
 		border-bottom: 1px solid var(--hairline);
 	}
 	.eyebrow {
@@ -426,17 +427,24 @@
 	.primary-totals dd {
 		font-size: 18px;
 	}
+	.primary-totals select {
+		margin: 0 0 3px;
+		padding-inline: 6px;
+		font-size: 11px;
+		background: transparent;
+	}
 	.scan-totals {
 		border-top: 1px solid var(--hairline);
 	}
 	.rent-evidence {
 		min-width: 0;
 	}
-	.filters {
+	.rent-context {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+		grid-template-columns: minmax(0, 1fr) minmax(220px, 0.75fr);
+		align-items: center;
 		gap: 10px;
-		margin-bottom: 8px;
+		margin-block: 4px 8px;
 	}
 	label {
 		font-size: 11px;
@@ -444,6 +452,15 @@
 	}
 	.filter {
 		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.filter label {
+		flex-shrink: 0;
+	}
+	.filter select {
+		margin-top: 0;
 	}
 	select {
 		display: block;
@@ -636,17 +653,6 @@
 		grid-column: 1/-1;
 	}
 	@media (min-width: 851px) {
-		.filter {
-			display: flex;
-			align-items: center;
-			gap: 8px;
-		}
-		.filter label {
-			flex-shrink: 0;
-		}
-		.filter select {
-			margin-top: 0;
-		}
 		:global([data-appearance='aurora']) .rent-summary {
 			grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1fr) minmax(0, 1fr);
 			align-items: center;
@@ -656,6 +662,18 @@
 		}
 	}
 	@media (max-width: 850px) {
+		.rent-context {
+			grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr);
+			gap: 6px;
+		}
+		.filter label {
+			max-width: 42px;
+			line-height: 1.2;
+		}
+		.filter select {
+			padding-inline: 6px;
+			font-size: 11px;
+		}
 		:global([data-appearance]) .rent-workspace {
 			grid-template-columns: minmax(0, 1fr);
 		}
@@ -663,7 +681,7 @@
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 			gap: 4px 12px;
-			padding: 6px 0;
+			padding: 4px 0;
 			border: 0;
 			border-bottom: 1px solid var(--hairline);
 			border-radius: 0;
@@ -732,11 +750,16 @@
 	}
 	@media (max-width: 360px) {
 		.rent-head {
-			align-items: stretch;
-			flex-direction: column;
+			align-items: center;
 		}
-		.load {
-			width: 100%;
+		h2 {
+			font-size: 17px;
+		}
+		.rent-context {
+			grid-template-columns: minmax(0, 1fr);
+		}
+		.filter label {
+			max-width: none;
 		}
 		.exposure-total strong {
 			font-size: 22px;

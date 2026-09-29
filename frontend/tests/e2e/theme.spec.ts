@@ -109,7 +109,7 @@ test('appearance supports radio keys, contained focus, Escape and reopening the 
 	await expect(page.locator('html')).toHaveAttribute('data-appearance', 'atelier');
 	expect(await page.evaluate(() => localStorage.getItem('xp-appearance'))).toBe('atelier');
 	await page.keyboard.press('Tab');
-	await expect(dialog.getByRole('radio', { name: 'Standard', exact: true })).toBeFocused();
+	await expect(dialog.getByRole('radio', { name: 'Compact', exact: true })).toBeFocused();
 	await page.keyboard.press('Tab');
 	await expect(close).toBeFocused();
 	await page.keyboard.press('Tab');

@@ -9,6 +9,8 @@
 		observation?.state === 'confirmed' || (tracking.tx !== null && observation === null)
 	);
 	const hasPendingDetails = $derived(!!observation?.pending?.details && !confirmed);
+	const hasConfirmedReceipt = $derived(confirmed && tracking.tx !== null);
+	const contextId = $derived(observation?.id ?? tracking.tx?.id ?? '');
 	const title = $derived(
 		observation?.state === 'pending'
 			? 'Waiting for a block'
@@ -27,6 +29,17 @@
 								: 'Live status unavailable'
 	);
 </script>
+
+{#snippet trackingLabel()}
+	<p class="eyebrow">
+		<span class="dot" class:stale={!!tracking.error || tracking.unsupported}></span>
+		{tracking.unsupported
+			? 'Live tracking unavailable'
+			: tracking.error
+				? 'Last known status'
+				: 'Live transaction tracking'}
+	</p>
+{/snippet}
 
 {#snippet checkedAt()}
 	<p>
@@ -87,25 +100,77 @@
 	</p>
 {/snippet}
 
+{#snippet connectionLink()}
+	{#if observation?.pending}
+		<p class="connections-link">
+			<a
+				href={'/mempool?focus=' + observation.id}
+				aria-label="Inspect connections in a mempool snapshot"
+				>{hasPendingDetails ? 'Connections ↗' : 'Inspect connections in a mempool snapshot ↗'}</a
+			>
+		</p>
+	{/if}
+{/snippet}
+
+{#snippet observationNote()}
+	<div class="observation-note">
+		{#if !confirmed && !hasPendingDetails}{@render checkedAt()}{/if}
+		{#if observation || hasConfirmedReceipt}<details class:progress-details={hasPendingDetails}>
+				<summary
+					>{hasPendingDetails
+						? 'Observation details'
+						: confirmed
+							? 'Observation details'
+							: 'What this observation covers'}</summary
+				>
+				{#if confirmed || hasPendingDetails}{@render checkedAt()}{/if}{#if hasPendingDetails || hasConfirmedReceipt}<p
+						class="full-transaction-id"
+					>
+						<strong>Transaction ID</strong><code>{contextId}</code>
+					</p>{/if}
+				{#if hasPendingDetails}
+					{@render statusDescription()}{@render progress()}
+					<dl class="pending-facts">{@render secondaryPendingFacts()}</dl>{/if}
+				{#if observation}<p>
+						Pending status reflects one configured node. First observed means when this explorer
+						observed a requested ID, not when the transaction was broadcast. Observation history is
+						temporary and may be cleared early. It expires after {Math.round(
+							observation.retention_seconds / 60
+						)} minutes without a check and resets when the explorer restarts. Absence from one node’s
+						mempool does not establish rejection. Confirmations refer to indexed blocks.
+					</p>{/if}
+			</details>{/if}
+	</div>
+{/snippet}
+
 <section
-	class="tracking"
-	class:confirmed
+	class={hasPendingDetails
+		? 'pending-context'
+		: hasConfirmedReceipt
+			? 'confirmed-context'
+			: 'tracking'}
+	class:confirmed={confirmed && !hasConfirmedReceipt}
 	class:has-pending-details={hasPendingDetails}
 	aria-label="Live transaction status"
 >
-	<div class="tracking-top">
-		<p class="eyebrow">
-			<span class="dot" class:stale={!!tracking.error || tracking.unsupported}></span>
-			{tracking.unsupported
-				? 'Live tracking unavailable'
-				: tracking.error
-					? 'Last known status'
-					: 'Live transaction tracking'}
-		</p>
-		<button type="button" disabled={tracking.checking} onclick={onrefresh}
-			>{tracking.checking ? 'Checking…' : 'Check now'}</button
-		>
-	</div>
+	{#if hasPendingDetails || hasConfirmedReceipt}
+		<header class="pending-context-head">
+			<div class="pending-identity">
+				<h1>Transaction</h1>
+				<Hash value={contextId} head={6} tail={4} copyLabel="Copy transaction ID" />
+			</div>
+			<button type="button" disabled={tracking.checking} onclick={onrefresh}
+				>{tracking.checking ? 'Checking…' : 'Check now'}</button
+			>
+		</header>
+	{:else}
+		<div class="tracking-top">
+			{@render trackingLabel()}
+			<button type="button" disabled={tracking.checking} onclick={onrefresh}
+				>{tracking.checking ? 'Checking…' : 'Check now'}</button
+			>
+		</div>
+	{/if}
 	{#if !confirmed}
 		<h2 aria-live="polite" aria-atomic="true">{title}</h2>
 		{#if !hasPendingDetails}{@render statusDescription()}{/if}
@@ -130,9 +195,7 @@
 					</div>{/if}
 				{#if !observation.pending.details}{@render secondaryPendingFacts()}{/if}
 			</dl>
-			<p class="connections-link">
-				<a href={'/mempool?focus=' + observation.id}>Inspect connections in a mempool snapshot ↗</a>
-			</p>
+			{#if !hasPendingDetails}{@render connectionLink()}{/if}
 		{/if}
 	{:else if !tracking.tx}<p class="description">
 			Included at block {observation?.inclusion?.height.toLocaleString('en-US')}. Loading the
@@ -162,31 +225,268 @@
 			{/each}
 		</ul>
 	{/if}
-	<div class="observation-note">
-		{#if !confirmed && !hasPendingDetails}{@render checkedAt()}{/if}
-		{#if observation}<details class:progress-details={hasPendingDetails}>
-				<summary
-					>{hasPendingDetails
-						? 'Confirmation progress and observation facts'
-						: confirmed
-							? 'Observation details'
-							: 'What this observation covers'}</summary
-				>
-				{#if confirmed || hasPendingDetails}{@render checkedAt()}{/if}{#if hasPendingDetails}{@render statusDescription()}{@render progress()}
-					<dl class="pending-facts">{@render secondaryPendingFacts()}</dl>{/if}
-				<p>
-					Pending status reflects one configured node. First observed means when this explorer
-					observed a requested ID, not when the transaction was broadcast. Observation history is
-					temporary and may be cleared early. It expires after {Math.round(
-						observation.retention_seconds / 60
-					)} minutes without a check and resets when the explorer restarts. Absence from one node’s mempool
-					does not establish rejection. Confirmations refer to indexed blocks.
-				</p>
-			</details>{/if}
-	</div>
+	{#if hasConfirmedReceipt}<div class="confirmed-status-row">
+			{@render trackingLabel()}{@render observationNote()}
+		</div>{:else if hasPendingDetails}<div class="pending-actions">
+			{@render connectionLink()}{@render observationNote()}
+		</div>{:else}{@render observationNote()}{/if}
 </section>
 
 <style>
+	.confirmed-context {
+		display: grid;
+		gap: 0;
+		min-width: 0;
+		padding: 8px 0;
+		border-block: 1px solid var(--hairline);
+		color: var(--fg);
+	}
+	.confirmed-context .dot {
+		background: var(--accent-ink);
+	}
+	.confirmed-context .dot.stale {
+		background: #eeab71;
+	}
+	.confirmed-status-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 0 12px;
+		min-width: 0;
+	}
+	.confirmed-status-row .eyebrow {
+		font-size: 10px;
+		letter-spacing: 0.03em;
+		color: var(--fg-muted);
+	}
+	.confirmed-status-row .observation-note,
+	.confirmed-status-row details {
+		margin: 0;
+		opacity: 1;
+	}
+	.confirmed-status-row:has(details[open]) {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.confirmed-context > .warning,
+	.confirmed-context > .conflicts {
+		margin-block: 8px;
+	}
+	:global([data-appearance='prism']) .confirmed-context {
+		border-inline-start: 3px solid var(--accent-ink);
+		padding-inline: 12px;
+		background: linear-gradient(110deg, var(--surface-solid), var(--accent-wash));
+	}
+	:global([data-appearance='atelier']) .confirmed-context {
+		border-top: 3px double var(--fg);
+	}
+	:global([data-appearance='aurora']) .confirmed-context {
+		padding-inline: 12px;
+		border: 1px solid var(--hairline);
+		border-radius: 18px;
+		background: var(--surface-solid);
+	}
+	@media (min-width: 900px) {
+		.confirmed-context {
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 0 24px;
+		}
+		.confirmed-context .pending-context-head {
+			grid-column: 1;
+		}
+		.confirmed-context > .warning,
+		.confirmed-context > .conflicts {
+			grid-column: 1 / -1;
+		}
+		.confirmed-status-row {
+			grid-column: 2;
+			grid-row: 1;
+			gap: 0 20px;
+		}
+		.confirmed-status-row:has(details[open]) {
+			grid-column: 1 / -1;
+			grid-row: auto;
+		}
+		:global([data-appearance='atelier']) .confirmed-context {
+			grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+			column-gap: 32px;
+		}
+		:global([data-appearance='aurora']) .confirmed-context {
+			padding-inline: 20px;
+		}
+	}
+	.pending-context {
+		--hero-muted: var(--fg-muted);
+		--hero-highlight: var(--accent-ink);
+		--hero-hairline: var(--hairline);
+		--tracking-link: var(--accent-ink);
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 8px 18px;
+		min-width: 0;
+		color: var(--fg);
+		padding: 12px 0;
+		border-block: 1px solid var(--hairline);
+	}
+	.pending-context-head {
+		grid-column: 1 / -1;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+		min-width: 0;
+	}
+	.pending-identity {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0 8px;
+		min-width: 0;
+	}
+	:global(:root[data-density][data-appearance] .content[data-page='tx']) .pending-context h1,
+	:global(:root[data-density][data-appearance] .content[data-page='tx']) .confirmed-context h1 {
+		font: var(--weight-display, 750) 22px/1.15 var(--font-display, var(--font-sans));
+		letter-spacing: -0.03em;
+		margin: 0;
+	}
+	.pending-identity :global(.hash) {
+		font: 11px var(--font-mono);
+		color: var(--fg-muted);
+	}
+	.pending-identity :global(.copy) {
+		min-width: 44px;
+		min-height: 44px;
+	}
+	.pending-context > h2 {
+		margin: 0;
+		font-size: 18px;
+		line-height: 1.25;
+		letter-spacing: -0.02em;
+		align-self: center;
+	}
+	.pending-context > .pending-facts {
+		margin: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 20px;
+		align-items: center;
+	}
+	.pending-context dt {
+		font-size: 11px;
+	}
+	.pending-context dd {
+		margin-top: 2px;
+		font-size: 13px;
+	}
+	.pending-actions {
+		grid-column: 1 / -1;
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: start;
+		gap: 8px 20px;
+	}
+	.pending-actions .connections-link {
+		margin: 0;
+	}
+	.pending-actions .connections-link a {
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
+	}
+	.pending-actions .observation-note,
+	.pending-actions details {
+		margin: 0;
+		opacity: 1;
+	}
+	.pending-actions summary {
+		width: fit-content;
+		margin-left: auto;
+		font-size: 12px;
+	}
+	.pending-actions:has(details[open]) {
+		grid-template-columns: 1fr;
+	}
+	.pending-actions:has(details[open]) summary {
+		margin-left: 0;
+	}
+	.pending-context > :is(.warning, .conflicts) {
+		grid-column: 1 / -1;
+		margin-top: 0;
+	}
+	.pending-context .description {
+		color: var(--fg-muted);
+		font-size: 12px;
+	}
+	.full-transaction-id code {
+		display: block;
+		font: 11px/1.7 var(--font-mono);
+		overflow-wrap: anywhere;
+	}
+	.full-transaction-id strong {
+		font-size: 11px;
+	}
+	:global([data-appearance='prism']) .pending-context {
+		border: 1px solid var(--hairline);
+		border-radius: 14px;
+		padding: 10px 14px;
+		background: linear-gradient(135deg, var(--surface-solid), var(--accent-wash));
+	}
+	:global([data-appearance='atelier']) .pending-context {
+		border-top: 4px double var(--fg);
+		border-bottom: 1px solid var(--hairline);
+		padding-inline: 0;
+	}
+	:global([data-appearance='aurora']) .pending-context {
+		border: 1px solid var(--hairline);
+		border-radius: 22px;
+		padding: 10px 16px;
+		background: var(--surface-solid);
+	}
+	:global([data-appearance='aurora']) .pending-context > .pending-facts {
+		justify-content: end;
+	}
+	@media (min-width: 900px) {
+		:global([data-appearance='atelier']) .pending-context {
+			grid-template-columns: minmax(190px, 0.4fr) minmax(0, 1fr);
+			column-gap: 24px;
+		}
+		:global([data-appearance='atelier']) .pending-context-head {
+			grid-column: 1;
+			grid-row: 1 / 3;
+			display: grid;
+			align-content: start;
+			justify-content: start;
+			border-right: 1px solid var(--hairline);
+			padding-right: 18px;
+		}
+		:global([data-appearance='atelier']) .pending-context-head > button {
+			justify-self: start;
+		}
+		:global([data-appearance='atelier']) .pending-context > h2,
+		:global([data-appearance='atelier']) .pending-context > .pending-facts,
+		:global([data-appearance='atelier']) .pending-actions {
+			grid-column: 2;
+		}
+		:global([data-appearance='aurora']) .pending-context-head {
+			justify-content: center;
+			gap: 24px;
+		}
+	}
+	@media (max-width: 700px) {
+		.pending-context {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 6px;
+			padding-block: 8px;
+		}
+		.pending-context > .pending-facts {
+			gap: 8px 22px;
+		}
+		:global([data-appearance='aurora']) .pending-context > .pending-facts {
+			justify-content: start;
+		}
+		.pending-context .pending-actions {
+			column-gap: 12px;
+		}
+	}
 	.connections-link {
 		margin-block: 16px;
 		font-size: 12px;
@@ -376,31 +676,6 @@
 	.progress-details .steps {
 		margin-top: 8px;
 	}
-	.tracking.has-pending-details {
-		padding: var(--density-panel, 16px);
-	}
-	.has-pending-details h2 {
-		margin-top: 10px;
-		font-size: 24px;
-	}
-	.has-pending-details .description {
-		margin-top: 8px;
-		font-size: 12px;
-	}
-	.has-pending-details .pending-facts {
-		margin-top: 12px;
-		gap: 10px 24px;
-	}
-	.has-pending-details .pending-facts dt {
-		font-size: 11px;
-	}
-	.has-pending-details .pending-facts dd {
-		font-size: 12px;
-		margin-top: 3px;
-	}
-	.has-pending-details .connections-link {
-		margin-block: 8px;
-	}
 	details p {
 		max-width: 85ch;
 		margin-top: 8px;
@@ -414,12 +689,7 @@
 		margin-top: 8px;
 	}
 	@media (max-width: 500px) {
-		:global(:root[data-appearance='atelier'] .content[data-page='tx'])
-			.tracking.has-pending-details
-			.pending-facts {
-			padding-top: 0;
-		}
-		.tracking {
+		:global(:root[data-appearance='atelier'] .content[data-page='tx']) .tracking {
 			padding: 20px;
 		}
 		.steps {

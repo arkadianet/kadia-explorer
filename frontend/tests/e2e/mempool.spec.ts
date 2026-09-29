@@ -406,17 +406,22 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 			const list = page.getByRole('region', { name: 'Pending transactions', exact: true });
 			const graph = page.getByRole('region', { name: 'Pending connections', exact: true });
 			await expect(graph.getByRole('combobox')).toBeVisible();
+			await expect(page.locator('html')).toHaveAttribute('data-appearance', appearance);
 			await expect(page.locator('html')).toHaveAttribute('data-density', density);
 			await page.evaluate(() => document.fonts.ready);
-			const record = await list.getByRole('article').first().boundingBox();
-			const listBounds = await list.boundingBox();
-			const inspectorBounds = await graph.boundingBox();
-			expect(record!.y).toBeLessThan(600);
-			expect(record!.height).toBeLessThan(125);
-			expect(Math.abs(listBounds!.y - inspectorBounds!.y)).toBeLessThan(8);
-			if (appearance === 'atelier')
-				expect(inspectorBounds!.x + inspectorBounds!.width).toBeLessThanOrEqual(listBounds!.x);
-			else expect(listBounds!.x + listBounds!.width).toBeLessThanOrEqual(inspectorBounds!.x);
+			// The SPA can expose its controls before the route's first styled paint.
+			// Retry the complete geometry contract rather than measuring that intermediate frame.
+			await expect(async () => {
+				const record = await list.getByRole('article').first().boundingBox();
+				const listBounds = await list.boundingBox();
+				const inspectorBounds = await graph.boundingBox();
+				expect(record!.y).toBeLessThan(600);
+				expect(record!.height).toBeLessThan(125);
+				expect(Math.abs(listBounds!.y - inspectorBounds!.y)).toBeLessThan(8);
+				if (appearance === 'atelier')
+					expect(inspectorBounds!.x + inspectorBounds!.width).toBeLessThanOrEqual(listBounds!.x);
+				else expect(listBounds!.x + listBounds!.width).toBeLessThanOrEqual(inspectorBounds!.x);
+			}).toPass({ timeout: 5_000 });
 			await list.getByRole('article').nth(1).getByRole('button').click();
 			await expect(graph.getByRole('combobox')).toHaveValue(secondId);
 			await expect(graph.getByRole('list', { name: 'Observed consumers' })).toBeVisible();

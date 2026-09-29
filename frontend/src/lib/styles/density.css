@@ -151,70 +151,16 @@
 	:is(.observation-note, .connections-link, details) {
 	margin-block: 6px;
 }
-:root[data-density][data-appearance] .home-dashboard .hero-in {
+/* The homepage leads with a bounded network summary and real records, rather
+   than decorative hero/stat tiers. Presets retain their own record composition. */
+:root[data-density][data-appearance] .home-dashboard {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) minmax(240px, 360px);
-	align-items: center;
-	gap: var(--density-gap);
-	min-height: 0;
-	padding: var(--density-panel);
+	grid-template-columns: minmax(0, 1fr);
+	align-items: start;
 }
-:root[data-density][data-appearance] .hero-copy,
-:root[data-density][data-appearance] .home-dashboard .tipcard {
-	grid-column: auto;
+:root[data-density][data-appearance] .home-dashboard > * {
+	grid-column: 1;
 	grid-row: auto;
-	align-self: center;
-}
-:root[data-density][data-appearance] .home-dashboard .hero h1 {
-	font-size: clamp(28px, 3vw, 42px);
-	line-height: 1.1;
-	margin: 0;
-}
-:root[data-density][data-appearance] .hero .kicker {
-	margin-bottom: 6px;
-}
-:root[data-density][data-appearance] .hero .lede {
-	margin-top: 8px;
-	font-size: 14px;
-	line-height: 1.5;
-	max-width: 48ch;
-}
-:root[data-density][data-appearance] .home-dashboard .tipcard {
-	width: 100%;
-	margin: 0;
-	padding: 10px var(--density-panel);
-	display: grid;
-	grid-template-columns: 1fr auto;
-	gap: 4px 12px;
-}
-:root[data-density][data-appearance] .home-dashboard .tipcard-head,
-:root[data-density][data-appearance] .home-dashboard .tipcard-foot {
-	grid-column: 1 / -1;
-	margin: 0;
-}
-:root[data-density][data-appearance] .home-dashboard .tipcard-height {
-	font-size: 26px;
-	margin: 0;
-}
-:root[data-density][data-appearance] .home-dashboard .tipcard-age {
-	align-self: center;
-	margin: 0;
-}
-:root[data-density][data-appearance] .home-dashboard .stats {
-	gap: 8px;
-	margin: 0;
-	padding-block: 0;
-}
-:root[data-density][data-appearance] .home-dashboard .stat {
-	min-height: 0;
-	padding: var(--density-panel);
-}
-:root[data-density][data-appearance] .home-dashboard .stat-value {
-	font-size: 24px;
-	margin: 0;
-}
-:root[data-density][data-appearance] .home-dashboard .stat-foot {
-	padding-top: 4px;
 }
 :root[data-density][data-appearance] .home-dashboard .panels {
 	gap: var(--density-gap);
@@ -260,13 +206,6 @@
 	:root[data-density][data-appearance='atelier'] .topbar {
 		height: 56px;
 	}
-	:root[data-density][data-appearance] .home-dashboard .stats .stat > .spark {
-		height: 22px;
-	}
-	:root[data-density][data-appearance='prism'] .home-dashboard > .stats {
-		grid-column: 2;
-		grid-row: 3;
-	}
 }
 @media (max-width: 899px) {
 	:root[data-density] {
@@ -279,84 +218,6 @@
 		--density-panel: 8px;
 		--density-gap: 8px;
 		--density-title: 24px;
-	}
-	:root[data-density][data-appearance] .home-dashboard .hero-in {
-		grid-template-columns: minmax(0, 1fr);
-		gap: 10px;
-	}
-	:root[data-density][data-appearance] .hero .lede {
-		display: none;
-	}
-	:root[data-density][data-appearance] .home-dashboard .tipcard {
-		grid-template-columns: minmax(0, 1fr) auto;
-		padding: 8px 0 0;
-		background: transparent;
-		border: 0;
-		border-top: 1px solid var(--hero-hairline, var(--hairline));
-		box-shadow: none;
-		border-radius: 0;
-	}
-	:root[data-density][data-appearance] .home-dashboard .tipcard-head {
-		grid-column: 1;
-		grid-row: 1;
-	}
-	:root[data-density][data-appearance] .home-dashboard .tipcard-height {
-		grid-column: 2;
-		grid-row: 1;
-		font-size: 22px;
-	}
-	:root[data-density][data-appearance] .home-dashboard .tipcard-age {
-		grid-column: 2;
-		grid-row: 2;
-		text-align: right;
-	}
-	:root[data-density][data-appearance] .home-dashboard .tipcard-foot {
-		grid-column: 1;
-		grid-row: 2;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stats {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 6px;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 2px 6px;
-		padding: 8px;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat-value {
-		font-size: 19px;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat-label {
-		grid-column: 1 / -1;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat-label svg {
-		display: none;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat:nth-child(4) {
-		grid-column: span 2;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat-foot {
-		grid-column: 1 / -1;
-		font-size: 11px;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat > .spark {
-		display: none;
-	}
-	:root[data-density][data-appearance] .home-dashboard .stat:last-child {
-		grid-column: auto;
-		grid-template-columns: minmax(0, 1fr);
-		align-items: center;
-	}
-	:root[data-density][data-appearance] .home-dashboard .window-caption {
-		margin-block: 0;
-	}
-	:root[data-density][data-appearance]
-		.home-dashboard
-		.stat:last-child
-		:is(.stat-label, .stat-foot) {
-		grid-column: auto;
 	}
 	:root[data-density][data-appearance] .content .discovery-head {
 		display: block;
@@ -391,5 +252,94 @@
 		display: inline-flex;
 		align-items: center;
 		min-height: 44px;
+	}
+}
+
+/* Record-first desktop compositions: Original pairs panels, Prism puts the
+   ledger on the right, Atelier keeps an editorial heading margin, and Aurora
+   places the floating pending observation above its live transaction panel. */
+@media (min-width: 900px) {
+	:root[data-density][data-appearance='prism'] .home-records {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+	}
+	:root[data-density][data-appearance='prism'] .home-records .recent-blocks {
+		grid-column: 2;
+	}
+	:root[data-density][data-appearance='prism'] .home-records > :is(.live, .pending-preview) {
+		grid-column: 1;
+	}
+	:root[data-density][data-appearance='prism'] .network-overview {
+		border-inline-start: 4px solid var(--accent-ink);
+		border-radius: 14px;
+	}
+	:root[data-density][data-appearance='atelier'] .network-overview {
+		display: grid;
+		grid-template-columns: minmax(230px, 0.55fr) minmax(0, 1fr);
+		gap: 6px 24px;
+		padding-inline: 0;
+		border: 0;
+		border-block: 3px double var(--hairline);
+		border-radius: 0;
+		background: transparent;
+	}
+	:root[data-density][data-appearance='atelier'] .network-heading {
+		grid-row: 1 / 3;
+		display: block;
+	}
+	:root[data-density][data-appearance='atelier'] .network-heading h1 {
+		font-size: 28px;
+	}
+	:root[data-density][data-appearance='atelier'] .network-tip {
+		margin-top: 5px;
+	}
+	:root[data-density][data-appearance='atelier'] .network-actions {
+		margin-top: 8px;
+	}
+	:root[data-density][data-appearance='atelier'] .network-metrics {
+		margin: 0;
+		padding: 0;
+		border: 0;
+		grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.4fr);
+	}
+	:root[data-density][data-appearance='atelier'] .network-metrics > [data-metric='rent'] {
+		grid-column: auto;
+	}
+	:root[data-density][data-appearance='atelier'] .network-coverage {
+		grid-column: 2;
+		margin: 0;
+	}
+	:root[data-density][data-appearance='atelier'] .home-records {
+		grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+		column-gap: 24px;
+	}
+	:root[data-density][data-appearance='atelier'] .home-records .recent-blocks {
+		border: 0;
+		border-top: 3px double var(--fg);
+		border-radius: 0;
+		background: transparent;
+	}
+	:root[data-density][data-appearance='aurora'] .network-overview {
+		padding: 4px 0;
+		background: transparent;
+		border: 0;
+	}
+	:root[data-density][data-appearance='aurora'] .network-metrics {
+		padding-block: 8px;
+		border-block: 1px solid var(--hairline);
+	}
+	:root[data-density][data-appearance='aurora'] .home-records .recent-blocks {
+		border: 1px solid var(--hairline);
+		border-radius: 20px;
+		background: var(--surface-solid);
+		box-shadow: 0 10px 32px color-mix(in srgb, var(--accent-ink) 8%, transparent);
+	}
+	:root[data-density][data-appearance='aurora'] .home-records > .pending-preview {
+		grid-row: 1;
+	}
+	:root[data-density][data-appearance='aurora'] .home-records > .live {
+		grid-row: 2;
+	}
+	:root[data-density][data-appearance='aurora'] .home-records .card-head {
+		padding-inline: var(--density-panel);
 	}
 }

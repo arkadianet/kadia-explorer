@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-appearance="prism" data-density="standard">
+<html lang="en" data-appearance="prism" data-density="compact">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -40,7 +40,7 @@
 					appearance === 'prism'
 						? appearance
 						: 'prism';
-				document.documentElement.dataset.density = density === 'compact' ? 'compact' : 'standard';
+				document.documentElement.dataset.density = density === 'standard' ? 'standard' : 'compact';
 			})();
 		</script>
 		%sveltekit.head%

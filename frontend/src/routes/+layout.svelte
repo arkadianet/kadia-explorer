@@ -138,7 +138,7 @@
 <div class="shell">
 	<aside class="rail">
 		<div class="rail-in">
-			<a class="brand" href="/">
+			<a class="brand" href="/" aria-label="Kadia Ergo Explorer">
 				<span class="mark" aria-hidden="true">Σ</span>
 				<span class="wordmark">
 					<span class="name">Kadia</span>
@@ -303,6 +303,7 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
 		min-height: 100vh;
+		--topbar-h: 60px;
 	}
 
 	/* ------------------------------------------------------------------------- the rail */
@@ -783,6 +784,42 @@
 	/* Under 900 px the dark column becomes a dark strip: brand and chain height only, with
 	   navigation moved to the thumb at the bottom of the screen. */
 	@media (max-width: 899px) {
+		.shell {
+			--topbar-h: 56px;
+		}
+		:global(:root[data-density][data-appearance]) .rail-in {
+			min-height: 44px;
+			padding-block: 0;
+		}
+		:global(:root[data-density][data-appearance]) .rail .brand {
+			min-height: 44px;
+			padding-inline: 0;
+			gap: 8px;
+		}
+		:global(:root[data-density][data-appearance]) .rail .mark {
+			width: 26px;
+			height: 26px;
+			font-size: 16px;
+		}
+		:global(:root[data-density][data-appearance]) .rail .name {
+			font-size: 20px;
+		}
+		:global(:root[data-density][data-appearance]) .rail .sub {
+			display: none;
+		}
+		:global(:root[data-density][data-appearance]) .rail .chain {
+			min-height: 44px;
+			padding: 0;
+		}
+		:global(:root[data-density][data-appearance]) .topbar {
+			height: var(--topbar-h);
+			gap: 6px;
+		}
+		.theme-toggle,
+		.topbar :global(.appearance-trigger) {
+			min-width: 44px;
+			min-height: 44px;
+		}
 		.rail-in {
 			flex-direction: row;
 			align-items: center;

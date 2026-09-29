@@ -7,7 +7,7 @@ const APPEARANCE_KEY = 'xp-appearance';
 
 let current = $state<Mode>('light');
 let currentAppearance = $state<Appearance>('prism');
-let currentDensity = $state<Density>('standard');
+let currentDensity = $state<Density>('compact');
 
 function appearanceOrDefault(value: string | null): Appearance {
 	return value === 'original' || value === 'aurora' || value === 'atelier' || value === 'prism'
@@ -93,13 +93,13 @@ export const density = {
 		try {
 			saved = localStorage.getItem('xp-density');
 		} catch {
-			// Standard density remains available without browser storage.
+			// Compact density remains available without browser storage.
 		}
-		currentDensity = saved === 'compact' ? 'compact' : 'standard';
+		currentDensity = saved === 'standard' ? 'standard' : 'compact';
 		document.documentElement.dataset.density = currentDensity;
 	},
 	set(value: Density) {
-		currentDensity = value === 'compact' ? 'compact' : 'standard';
+		currentDensity = value === 'standard' ? 'standard' : 'compact';
 		document.documentElement.dataset.density = currentDensity;
 		try {
 			localStorage.setItem('xp-density', currentDensity);

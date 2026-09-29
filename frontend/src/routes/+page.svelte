@@ -54,19 +54,15 @@
 	);
 	const dayTxs = $derived(summary?.transaction_count ?? 0);
 	const txPerHour = $derived(summary?.transactions_per_hour ?? []);
-	const blocksPerHour = $derived(summary?.blocks_per_hour ?? []);
 	const totalFees = $derived(summary?.fees ?? '0');
 	const roundedFees = $derived(BigInt(totalFees) % 1_000_000n !== 0n);
-	const feesPerHour = $derived(
-		(summary?.fees_per_hour ?? []).map((n) => Number(BigInt(n) / 1_000_000n) / 1000)
-	);
 
 	const hashrate = $derived(latest ? formatHashrate(hashrateHs(latest.difficulty)) : '—');
 
 	const rentItems = $derived(data.rent.data?.items ?? []);
 	const rentDue = $derived(rentItems.reduce((t, i) => t + BigInt(i.box.rent.due_nano), 0n));
 
-	const recentBlocks = $derived(blocks.slice(0, 6));
+	const recentBlocks = $derived(blocks.slice(0, 10));
 
 	// ------------------------------------------------------------------ live transactions
 	// The list follows the tip: when the status poll reports a new indexed height, the newest
@@ -141,138 +137,88 @@
 </svelte:head>
 
 <div class="home-dashboard">
-	<!-- ------------------------------------------------------------------------------- hero -->
-	<section class="hero">
-		<div class="hero-in">
-			<div class="hero-copy">
-				<p class="kicker">KADIA / EXPLORER</p>
-				<h1>Ergo mainnet</h1>
-				<p class="lede">Blocks, transactions and the assets moving between them.</p>
-			</div>
-
-			{#if latest}
-				<div class="tipcard">
-					<div class="tipcard-head">
-						<Icon name="box" size={20} />
-						<span>Snapshot indexed height</span>
-					</div>
-					<p class="tipcard-height">{latest.height.toLocaleString('en-US')}</p>
-					<p class="tipcard-age">{latestAge}</p>
-					<p
-						class="tipcard-foot"
-						title={`Difficulty ${latest.difficulty} divided by Ergo's ${TARGET_BLOCK_SECONDS} s target block time — the hashrate that would produce this difficulty on average.`}
-					>
-						<span>Estimated hashrate</span>
-						<b>{hashrate}</b>
-					</p>
-				</div>
-			{/if}
-		</div>
-	</section>
-
-	<!-- ------------------------------------------------------------------------------ stats -->
-	<section class="stats" aria-label="Recent indexed chain">
-		<div class="stat glass">
-			<p class="stat-label"><Icon name="txs" size={16} />Transactions</p>
-			<p
-				class="stat-value"
-				title={`Sum of tx_count over the ${count} indexed blocks in this window. ${dayNote}`}
-			>
-				{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')}
+	<section class="network-overview" aria-label="Network summary">
+		<header class="network-heading">
+			<h1>Ergo mainnet</h1>
+			<p class="network-tip">
+				{#if latest}<span>Snapshot height</span>
+					<a href={`/blocks/${latest.height}`} aria-label={`Snapshot block ${latest.height}`}
+						>{latest.height.toLocaleString('en-US')}</a
+					><span>{latestAge}</span>
+				{:else}<span>Snapshot height unavailable</span>{/if}
 			</p>
-			<Sparkline
-				values={txPerHour}
-				color="var(--accent-ink)"
-				kind="bars"
-				title="Transactions from the sampled blocks, placed in hourly buckets below the tip timestamp. Uncovered hours are not proof of no activity."
-			/>
-			<p class="stat-foot">
-				{data.blocks.error ? 'Window unavailable' : scope}
-			</p>
-		</div>
-
-		<div class="stat glass">
-			<p class="stat-label"><Icon name="blocks" size={16} />Blocks</p>
-			<p class="stat-value" title={`Exact count in the bounded block sample. ${dayNote}`}>
-				{data.blocks.error ? 'Unavailable' : count.toLocaleString('en-US')}
-			</p>
-			<Sparkline
-				values={blocksPerHour}
-				color="var(--accent-ink)"
-				kind="line"
-				title="Sampled blocks placed in hourly buckets below the tip timestamp."
-			/>
-			<p class="stat-foot" title="Ergo targets one block every 120 seconds.">
-				{scope}
-			</p>
-		</div>
-
-		<div class="stat glass">
-			<p class="stat-label"><Icon name="spark" size={16} />Transaction fees</p>
-			<p
-				class="stat-value"
-				title={`Exact transaction fees: ${totalFees} nanoERG. Displayed to three decimal places. ${dayNote}`}
-			>
-				{data.blocks.error
-					? 'Unavailable'
-					: `${roundedFees ? '≈ ' : ''}${formatErg(totalFees, { maxFrac: 3 })}`}<span class="unit"
-					>ERG</span
+			<div class="network-actions">
+				<span class="network-health tone-{h.tone}" title={h.detail}
+					>Indexer: {h.label}{#if status && status.lag_blocks > 0}
+						· {status.lag_blocks.toLocaleString('en-US')} behind{/if}</span
 				>
-			</p>
-			<Sparkline
-				values={feesPerHour}
-				color="var(--accent-ink)"
-				kind="line"
-				title="Transaction fees from sampled blocks, placed in hourly buckets below the tip timestamp."
-			/>
-			<p class="stat-foot">{scope}</p>
-		</div>
-
-		<div class="stat glass">
-			<p class="stat-label"><Icon name="rent-coin" size={16} />Storage rent</p>
-			<p
-				class="stat-value"
-				title="Boxes whose storage-rent maturity falls within the next 720 blocks, from /v1/rent/upcoming."
-			>
-				{data.rent.error
-					? 'Unavailable'
-					: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}
-			</p>
-			<p class="stat-sub">
-				{#if data.rent.error}Unavailable{:else}{data.rent.data?.complete === true
-						? ''
-						: '≥ '}<Amount nano={rentDue.toString()} maxFrac={3} /> due{/if}
-			</p>
-			<p class="stat-foot">
-				maturing in 720 blocks{data.rent.data?.complete === true ? '' : ' · incomplete'}
-			</p>
-		</div>
-
-		<div class="stat glass">
-			<p class="stat-label"><Icon name="status" size={16} />Indexer</p>
-			<p class="stat-value tone-{h.tone}" title={h.detail}>{h.label}</p>
-			<p class="stat-sub">
-				{status ? `${status.lag_blocks.toLocaleString('en-US')} blocks behind` : '—'}
-			</p>
-			<p class="stat-foot">{status ? `${status.mode} mode` : ''}</p>
-		</div>
+				<a href="/mempool">Mempool <span aria-hidden="true">↗</span></a>
+			</div>
+		</header>
+		<dl class="network-metrics">
+			<div data-metric="transactions">
+				<dt>Transactions</dt>
+				<dd>{data.blocks.error ? 'Unavailable' : dayTxs.toLocaleString('en-US')}</dd>
+			</div>
+			<div data-metric="blocks">
+				<dt>Sampled blocks</dt>
+				<dd>{data.blocks.error ? 'Unavailable' : count.toLocaleString('en-US')}</dd>
+			</div>
+			<div data-metric="fees">
+				<dt>Transaction fees</dt>
+				<dd
+					title={data.blocks.error
+						? undefined
+						: `Exact transaction fees: ${totalFees} nanoERG. Displayed to three decimal places. ${dayNote}`}
+				>
+					{data.blocks.error
+						? 'Unavailable'
+						: `${roundedFees ? '≈ ' : ''}${formatErg(totalFees, { maxFrac: 3 })}`}{#if !data.blocks.error}<small
+						>
+							ERG</small
+						>{/if}
+				</dd>
+			</div>
+			<div data-metric="hashrate">
+				<dt
+					title={`Difficulty divided by Ergo's ${TARGET_BLOCK_SECONDS} s target block time; not a measured hashrate.`}
+				>
+					Estimated hashrate
+				</dt>
+				<dd>{latest ? hashrate : 'Unavailable'}</dd>
+			</div>
+			<div data-metric="rent">
+				<dt>Rent · next 720 blocks</dt>
+				<dd>
+					{data.rent.error
+						? 'Unavailable'
+						: `${data.rent.data?.complete === true ? '' : '≥ '}${rentItems.length.toLocaleString('en-US')}`}<small
+						>{data.rent.error ? '' : ' boxes'}</small
+					>
+					<span class="metric-note">
+						{#if data.rent.error}Rent unavailable{:else}{data.rent.data?.complete === true
+								? ''
+								: '≥ '}<Amount nano={rentDue.toString()} maxFrac={3} /> due{data.rent.data
+								?.complete === true
+								? ''
+								: ' · incomplete'}{/if}
+					</span>
+				</dd>
+			</div>
+		</dl>
+		<p class="network-coverage">
+			{#if summary && count > 0}Sample: latest {count.toLocaleString('en-US')} indexed blocks, heights
+				{summary.from_height?.toLocaleString('en-US')}–{summary.to_height?.toLocaleString('en-US')}.
+				Totals cover this sample only.
+				{#if summary.partial_from !== null}<strong
+						>Indexed history begins at block {summary.partial_from.toLocaleString('en-US')}.</strong
+					>{/if}
+			{:else}Network sample unavailable.{/if}
+		</p>
 	</section>
 
-	<MempoolPreview />
-
-	<!-- ----------------------------------------------------------------------------- panels -->
-	{#if summary && count > 0}
-		<p class="window-caption">
-			Network sample: heights {summary.from_height?.toLocaleString(
-				'en-US'
-			)}–{summary.to_height?.toLocaleString('en-US')}. Hourly charts cover these blocks only.
-			{#if summary.partial_from !== null}Indexed history begins at block {summary.partial_from.toLocaleString(
-					'en-US'
-				)}.{/if}
-		</p>
-	{/if}
-	<div class="panels">
-		<section class="panel card">
+	<div class="home-records">
+		<section class="panel card recent-blocks">
 			<div class="card-head">
 				<h2 class="card-title">Recent blocks</h2>
 				<a class="more" href="/blocks">View all<Icon name="chevron-right" size={14} /></a>
@@ -290,8 +236,8 @@
 							<th>Height</th>
 							<th>Age</th>
 							<th class="num">Txs</th>
-							<th class="num">Fees</th>
-							<th>Miner</th>
+							<th class="num block-secondary">Fees</th>
+							<th class="block-secondary">Miner</th>
 						</tr>
 					{/snippet}
 					{#each recentBlocks as block (block.id)}
@@ -299,13 +245,21 @@
 							<td><a class="height" href={`/blocks/${block.height}`}>{block.height}</a></td>
 							<td class="muted"><Age ms={block.timestamp} /></td>
 							<td class="num mono">{block.tx_count}</td>
-							<td class="num"><Amount nano={block.fees} maxFrac={3} /></td>
-							<td><MinerChip minerPk={block.miner_pk} /></td>
+							<td class="num block-secondary"><Amount nano={block.fees} maxFrac={3} /></td>
+							<td class="block-secondary"><MinerChip minerPk={block.miner_pk} /></td>
 						</tr>
 					{/each}
 				</Table>
+				<p class="record-count">
+					<span class="desktop-count">Latest {recentBlocks.length}</span><span class="mobile-count"
+						>Latest {Math.min(4, recentBlocks.length)}</span
+					>
+					indexed blocks · <a href="/blocks">Browse history</a>
+				</p>
 			{/if}
 		</section>
+
+		<MempoolPreview />
 
 		<section class="panel live ink">
 			<div class="card-head">
@@ -513,181 +467,129 @@
 </div>
 
 <style>
-	.window-caption {
-		color: var(--fg-muted);
-		font-size: var(--fs-micro);
-		margin: -12px 0 20px;
-		line-height: 1.6;
-	}
 	.home-dashboard {
-		display: contents;
+		display: grid;
+		gap: var(--density-gap);
+		min-width: 0;
 	}
-	/* Full-bleed sections cancel the content column's gutter and, for the hero, its top
-	   padding as well — the landscape has to run under the floating header. */
-	.hero,
+	.network-overview {
+		min-width: 0;
+		padding: var(--density-panel);
+		border: var(--rule);
+		border-radius: var(--radius-card);
+		background: var(--surface-solid);
+	}
+	.network-heading {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px 20px;
+	}
+	h1 {
+		margin: 0;
+		font: 650 26px/1.15 var(--font-display, var(--font-sans));
+		letter-spacing: -0.035em;
+	}
+	.network-tip {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 5px 8px;
+		margin: 0;
+		font-size: 12px;
+		color: var(--fg-muted);
+	}
+	.network-tip a {
+		font: 600 18px/1.25 var(--font-mono);
+		color: var(--fg);
+	}
+	.network-actions {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		margin-inline-start: auto;
+		font-size: 12px;
+	}
+	.network-actions a {
+		color: var(--accent-ink);
+		font-weight: 600;
+	}
+	.network-health {
+		font-size: 11px;
+	}
+	.network-metrics {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.4fr);
+		gap: 8px 16px;
+		margin: 10px 0 0;
+		padding-top: 8px;
+		border-top: var(--rule);
+	}
+	.network-metrics > div {
+		min-width: 0;
+	}
+	.network-metrics dt {
+		font-size: 11px;
+		color: var(--fg-muted);
+	}
+	.network-metrics dd {
+		margin: 2px 0 0;
+		font: 600 18px/1.3 var(--font-number, var(--font-mono));
+		overflow-wrap: anywhere;
+	}
+	.network-metrics small,
+	.metric-note {
+		font: 400 11px/1.4 var(--font-sans);
+		color: var(--fg-muted);
+	}
+	.metric-note {
+		display: block;
+		margin: 2px 0 0;
+	}
+	.network-coverage {
+		margin: 8px 0 0;
+		font-size: 11px;
+		line-height: 1.45;
+		color: var(--fg-muted);
+	}
+	.network-coverage strong {
+		font-weight: 500;
+		color: var(--fg);
+	}
+	.home-records {
+		display: grid;
+		grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+		gap: var(--density-gap);
+		align-items: start;
+	}
+	.recent-blocks {
+		grid-column: 1;
+		grid-row: 1 / span 2;
+	}
+	.home-records > .live {
+		grid-column: 2;
+		grid-row: 1;
+	}
+	.home-records > :global(.pending-preview) {
+		grid-column: 2;
+		grid-row: 2;
+	}
+	.record-count {
+		padding: 8px var(--density-panel);
+		margin: 0;
+		font-size: 11px;
+		color: var(--fg-muted);
+	}
+	.record-count a {
+		color: var(--accent-ink);
+	}
+	.mobile-count {
+		display: none;
+	}
 	.deeper {
 		position: relative;
 		isolation: isolate;
-		margin-inline: calc(var(--gutter) * -1);
 		overflow: hidden;
-	}
-
-	.hero {
-		margin: 8px 0 0;
-		border-radius: 20px;
-		background: var(--hero-bg, #103a28);
-		color: var(--hero-fg, #eef8e8);
-	}
-
-	.hero-in {
-		position: relative;
-		display: flex;
-		align-items: flex-end;
-		justify-content: space-between;
-		gap: var(--space-8);
-		padding: 36px;
-		min-height: 280px;
-	}
-
-	.hero-copy {
-		max-width: 480px;
-	}
-
-	/* The one loud element on the page: a light, very large display line. Nothing else here
-	   competes with it, which is why the buttons underneath are small and quiet. */
-	h1 {
-		font-size: var(--fs-display);
-		font-family: var(--font-display, var(--font-sans));
-		font-weight: var(--weight-display, 800);
-		line-height: 1.02;
-		letter-spacing: -0.028em;
-		color: var(--hero-fg, #e7ffc7);
-	}
-
-	.lede {
-		margin-top: var(--space-4);
-		font-size: 18px;
-		color: var(--hero-muted, #c9dccd);
-	}
-
-	:global(:root[data-theme='dark']) .hero h1 {
-		color: var(--hero-fg, #f2f6f3);
-	}
-
-	:global(:root[data-theme='dark']) .hero .lede {
-		color: var(--hero-muted, #c3d0c8);
-	}
-
-	/* The tip card: the single number a returning visitor came for, floating over the valley. */
-	.tipcard {
-		flex: none;
-		width: 250px;
-		/* The stat row rises 68 px into the hero; this keeps a clear 28 px of sky between the
-		   card's bottom edge and the top of those cards at every desktop width. */
-		margin-bottom: 0;
-		padding: var(--space-4) var(--space-5) var(--space-5);
-		border-radius: var(--radius-card);
-		background: var(--hero-tip-bg, #071f16);
-		backdrop-filter: blur(16px) saturate(1.2);
-		-webkit-backdrop-filter: blur(16px) saturate(1.2);
-		border: 1px solid var(--hero-hairline, rgba(233, 238, 234, 0.16));
-		box-shadow: var(--shadow-lift);
-		color: var(--hero-tip-fg, var(--ink-fg));
-	}
-
-	.tipcard-head {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--fs-micro);
-		font-weight: 600;
-		color: var(--hero-tip-muted, var(--ink-fg-muted));
-	}
-
-	.tipcard-height {
-		margin-top: var(--space-2);
-		font-size: var(--fs-key);
-		font-family: var(--font-number, var(--font-sans));
-		font-weight: var(--weight-number, 700);
-		letter-spacing: -0.03em;
-		line-height: 1.1;
-	}
-
-	.tipcard-age {
-		font-size: var(--fs-micro);
-		color: var(--hero-tip-muted, var(--ink-fg-muted));
-		margin-bottom: var(--space-3);
-	}
-
-	.tipcard-foot {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		margin-top: var(--space-2);
-		font-size: var(--fs-micro);
-		color: var(--hero-tip-muted, var(--ink-fg-muted));
-	}
-
-	.tipcard-foot b {
-		color: var(--hero-tip-fg, var(--ink-fg));
-		font-weight: 600;
-	}
-
-	/* ---------------------------------------------------------------------------- stats */
-	.stats {
-		display: grid;
-		grid-template-columns: repeat(5, minmax(0, 1fr));
-		gap: var(--space-6);
-		margin-top: 0;
-		position: relative;
-		z-index: 5;
-	}
-
-	.stat {
-		padding: var(--space-4) var(--space-4) var(--space-3);
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		min-width: 0;
-	}
-
-	.stat-label {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		font-size: var(--fs-micro);
-		font-weight: 600;
-		color: var(--fg-muted);
-	}
-
-	.stat-value {
-		font-size: 26px;
-		font-family: var(--font-number, var(--font-sans));
-		font-weight: var(--weight-number, 600);
-		letter-spacing: -0.03em;
-		line-height: 1.2;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.stat-value .unit {
-		font-size: 13px;
-		font-weight: 500;
-		color: var(--fg-muted);
-		margin-left: 4px;
-	}
-
-	.stat-sub {
-		font-size: var(--fs-data);
-		color: var(--fg-muted);
-	}
-
-	.stat-foot {
-		margin-top: auto;
-		padding-top: var(--space-2);
-		font-size: 11.5px;
-		color: var(--fg-muted);
 	}
 
 	.tone-ok {
@@ -1016,9 +918,6 @@
 
 	/* ------------------------------------------------------------------------ responsive */
 	@media (max-width: 1180px) {
-		.stats {
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-		}
 		.tools {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
 		}
@@ -1037,45 +936,86 @@
 		.panels {
 			grid-template-columns: minmax(0, 1fr);
 		}
-		/* Stacked, the card is no longer beside the copy and the stat row no longer climbs
-		   into the hero, so neither offset applies. */
-		.tipcard {
-			margin-bottom: 0;
+	}
+	@media (max-width: 899px) {
+		.network-heading {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 4px 8px;
 		}
-		.stats {
-			margin-top: var(--space-2);
+		h1 {
+			font-size: 24px;
 		}
-		.hero-in {
+		.network-actions {
+			grid-column: 2;
+			grid-row: 1 / 3;
+			flex-direction: column;
+			gap: 0;
+			margin: 0;
+			align-items: end;
+		}
+		.network-actions a {
+			min-height: 44px;
+			display: inline-flex;
+			align-items: center;
+		}
+		.network-tip {
+			grid-column: 1;
+			font-size: 11px;
+			gap: 2px 6px;
+		}
+		.network-tip a {
+			font-size: 16px;
+			min-height: 44px;
+			display: inline-flex;
+			align-items: center;
+		}
+		.network-metrics {
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: 6px 10px;
+			margin-top: 8px;
+		}
+		.network-metrics > [data-metric='rent'] {
+			grid-column: span 2;
+		}
+		.network-metrics dd {
+			font-size: 17px;
+		}
+		.network-coverage {
+			margin-top: 6px;
+		}
+		.home-records {
+			display: flex;
 			flex-direction: column;
 			align-items: stretch;
-			gap: var(--space-8);
-			padding: 24px;
-			min-height: 0;
 		}
-		.tipcard {
+		.home-records > * {
 			width: 100%;
 		}
-	}
-
-	@media (max-width: 700px) {
-		.stats {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
+		.recent-blocks :global(tbody tr:nth-child(n + 5)) {
+			display: none;
 		}
+		/* The homepage phone preview prioritizes height, age and transaction count.
+		   Fees and miner keys remain on the desktop preview and full block page. */
+		.recent-blocks .block-secondary {
+			display: none;
+		}
+		.mobile-count {
+			display: inline;
+		}
+		.desktop-count {
+			display: none;
+		}
+		.record-count a {
+			display: inline-flex;
+			align-items: center;
+			min-height: 44px;
+		}
+	}
+	@media (max-width: 700px) {
 		.tools {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
-		.hero {
-			border-radius: 16px;
-		}
-	}
-	.kicker {
-		font: 11px var(--font-mono);
-		letter-spacing: 0.12em;
-		color: var(--hero-highlight, #b7f25f);
-		margin-bottom: 18px;
-	}
-	.hero :global(:focus-visible) {
-		outline-color: var(--hero-focus, #b7f25f);
 	}
 	.deeper :global(:focus-visible) {
 		outline-color: var(--accent);

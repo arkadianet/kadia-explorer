@@ -32,11 +32,11 @@ test('a known address shows its balance and per-tab lists', async ({ page }) => 
 	// Balance, box count and the first/last-seen heights all come from the mock aggregate.
 	await expect(page.locator('.address-balance')).toBeVisible();
 	await expect(page.getByText('Boxes', { exact: true })).toBeVisible();
-	const holdings = page.locator('details.address-holdings');
-	await expect(holdings).not.toHaveAttribute('open', '');
-	await holdings.locator('summary').click();
+	const holdingsTab = page.getByRole('tab', { name: /^Tokens/ });
+	await expect(holdingsTab).toHaveAttribute('aria-selected', 'false');
+	await holdingsTab.click();
+	const holdings = page.getByRole('tabpanel');
 	await expect(holdings.getByRole('columnheader', { name: 'Amount', exact: true })).toBeVisible();
-	await holdings.locator('summary').click();
 
 	// The compact legacy transaction list remains available beside address activity.
 	await page.getByRole('tab', { name: 'Transactions', exact: true }).click();

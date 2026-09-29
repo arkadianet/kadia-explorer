@@ -74,6 +74,8 @@ test('shared rent controls require explicit load; classifications and exact fees
 test('partial and truncated reads remain scoped; refresh failure retains labelled stale evidence', async ({
 	page
 }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.addInitScript(() => localStorage.setItem('xp-density', 'standard'));
 	let calls = 0;
 	const data = snapshot();
 	data.context.full_history = false;
@@ -132,8 +134,6 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 				appearance
 			);
 			const data = snapshot();
-			data.context.full_history = false;
-			data.context.partial_from = 1_800_000;
 			await page.route(routePattern, (route) => route.fulfill({ json: data }));
 			const positions: number[] = [];
 			await page.goto('/');
@@ -144,21 +144,23 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 				await page.reload();
 				await expect(page.locator('html')).toHaveAttribute('data-density', density);
 				const view = page.getByRole('region', { name: 'Storage rent exposure' });
-				await expect(page.locator('details.address-holdings')).not.toHaveAttribute('open', '');
+				await expect(page.getByRole('tab', { name: /^Tokens/ })).toHaveAttribute(
+					'aria-selected',
+					'false'
+				);
 				await view.getByRole('button', { name: 'Load rent exposure' }).click();
 				const first = view.getByRole('list', { name: 'Scanned rent boxes' }).locator('li').first();
 				await expect(first).toBeVisible();
+				await page.evaluate(() => document.fonts.ready);
 				const top = await first.evaluate(
 					(element) => element.getBoundingClientRect().top + window.scrollY
 				);
 				positions.push(top);
-				expect(top).toBeLessThan(viewport.width === 390 ? 900 : 700);
+				expect(top).toBeLessThan(viewport.width === 390 ? 680 : 650);
 				expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
 					viewport.width
 				);
-				await expect(
-					view.getByText('earlier outputs and pre-index spends may be missing.', { exact: false })
-				).toBeVisible();
+				await expect(view.getByText('Complete indexed unspent set', { exact: true })).toBeVisible();
 				if (viewport.width === 390) {
 					for (const control of [
 						view.getByRole('button', { name: 'Refresh rent exposure' }),

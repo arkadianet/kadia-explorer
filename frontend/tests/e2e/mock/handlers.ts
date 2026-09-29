@@ -851,7 +851,7 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 			earliest_timestamp: rows.length ? Math.min(...rows.map((b) => b.timestamp)) : null,
 			latest_timestamp: rows.length ? Math.max(...rows.map((b) => b.timestamp)) : null,
 			partial_from: null,
-			recent_blocks: rows.slice(0, 6),
+			recent_blocks: rows.slice(0, 10),
 			blocks_per_hour: bucket(3600000, 24, () => 1),
 			transactions_per_hour: bucket(3600000, 24, (b) => b.tx_count),
 			fees_per_hour: bucket(3600000, 24, (b) => Number(b.fees)).map(String),

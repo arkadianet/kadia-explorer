@@ -16,6 +16,7 @@
 	import AddressActivity from '$lib/components/AddressActivity.svelte';
 	import AddressHistory from '$lib/components/AddressHistory.svelte';
 	import AddressRentExposure from '$lib/components/AddressRentExposure.svelte';
+	import { savedAddresses } from '$lib/addresses/saved.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager, type Pager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
@@ -26,21 +27,24 @@
 
 	const PAGE_SIZE = 50;
 
-	const TABS = [
-		{ id: 'activity', label: 'Activity' },
-		{ id: 'history', label: 'Historical snapshot' },
-		{ id: 'txs', label: 'Transactions' },
-		{ id: 'unspent', label: 'Unspent boxes' },
-		{ id: 'boxes', label: 'All boxes' },
-		{ id: 'rent', label: 'Rent' }
-	];
-	const TAB_IDS = TABS.map((t) => t.id);
-
 	let { data }: { data: PageData } = $props();
 
 	const addr = $derived(data.addr);
 	const info = $derived(data.info);
 	const tip = $derived(status.current?.indexed ?? null);
+	const savedIdentity = $derived(
+		savedAddresses.items.find((item) => item.address === info?.address)
+	);
+	const TABS = $derived([
+		{ id: 'activity', label: 'Activity' },
+		{ id: 'tokens', label: 'Tokens', count: info?.balance.tokens.length ?? 0 },
+		{ id: 'history', label: 'Historical snapshot' },
+		{ id: 'txs', label: 'Transactions' },
+		{ id: 'unspent', label: 'Unspent boxes' },
+		{ id: 'boxes', label: 'All boxes' },
+		{ id: 'rent', label: 'Rent' }
+	]);
+	const TAB_IDS = $derived(TABS.map((t) => t.id));
 
 	/** Active tab, driven by the URL hash so a tab is linkable and survives reload. */
 	const active = $derived.by(() => {
@@ -121,10 +125,14 @@
 					>{formatErg(info.balance.nano, { maxFrac: 9 })}<small>ERG</small></span
 				>
 			</div>
-			<div class="address-tools"><SaveAddress address={info.address} /></div>
+			<div class="address-tools"><SaveAddress address={info.address} compact /></div>
 			<div class="address-id">
 				<Hash value={info.address} head={info.address.length} tail={0} />
 			</div>
+			{#if savedIdentity?.label || savedIdentity?.group}<p class="address-labels">
+					{#if savedIdentity.label}<span>Local label <bdi>{savedIdentity.label}</bdi></span>{/if}
+					{#if savedIdentity.group}<span>Group <bdi>{savedIdentity.group}</bdi></span>{/if}
+				</p>{/if}
 		</header>
 		<dl class="address-facts">
 			<div>
@@ -146,9 +154,8 @@
 		</dl>
 	</div>
 
-	{#if info.balance.tokens.length > 0}
-		<details class="address-holdings">
-			<summary>Token holdings <span>{info.balance.tokens.length} assets</span></summary>
+	{#snippet holdings()}
+		{#if info.balance.tokens.length > 0}
 			<div class="holdings-table">
 				<Table>
 					{#snippet head()}
@@ -177,8 +184,8 @@
 					{/each}
 				</Table>
 			</div>
-		</details>
-	{/if}
+		{:else}<EmptyState message="No token balances in this indexed address snapshot." />{/if}
+	{/snippet}
 
 	<Panel>
 		<div class="address-section-tabs">
@@ -188,6 +195,8 @@
 		<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
 			{#if active === 'activity'}
 				<AddressActivity address={addr} />
+			{:else if active === 'tokens'}
+				{@render holdings()}
 			{:else if active === 'history'}
 				<AddressHistory address={addr} />
 			{:else if active === 'txs'}
@@ -327,7 +336,7 @@
 	.address-head {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: 0;
 		min-width: 0;
 	}
 	:global(
@@ -398,49 +407,48 @@
 	.address-tools {
 		min-width: 0;
 	}
+	.address-labels {
+		grid-column: 1/-1;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 16px;
+		margin: 0;
+		font-size: 12px;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.address-labels bdi {
+		color: var(--fg);
+		font-weight: 650;
+		margin-left: 6px;
+	}
 	.address-facts {
 		margin: 0;
-		padding: 8px var(--density-panel, 16px);
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 10px;
-		border-block: var(--rule);
+		padding: 0 var(--density-panel, 16px);
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0 20px;
+		border-bottom: var(--rule);
+	}
+	.address-facts > div {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 36px;
 	}
 	.address-facts dt {
 		color: var(--fg-muted);
 		font-size: 11px;
-		margin-bottom: 3px;
+		margin: 0;
 	}
 	.address-facts dd {
 		font: 500 13px/1.3 var(--font-mono);
 		margin: 0;
 		overflow-wrap: anywhere;
 	}
-	.address-holdings {
-		min-width: 0;
-		border: var(--rule);
-		border-radius: var(--radius-control);
-		background: var(--surface-solid);
-	}
-	.address-holdings > summary {
-		padding: 10px var(--density-panel, 16px);
-		min-height: 44px;
-		cursor: pointer;
-		font-size: 13px;
-		font-weight: 650;
-	}
-	.address-holdings > summary span {
-		font-size: 12px;
-		font-weight: 400;
-		color: var(--fg-muted);
-		margin-inline-start: 8px;
-	}
-	.address-holdings > summary:focus-visible {
-		outline: 2px solid var(--accent-ink);
-		outline-offset: 2px;
-	}
 	.holdings-table {
-		padding: 0 var(--density-panel, 16px);
+		padding: 0;
+		margin-top: 8px;
 	}
 	:global([data-appearance='prism']) .address-head {
 		display: grid;
@@ -460,11 +468,6 @@
 		border-radius: 0;
 		padding-inline: 0;
 	}
-	:global([data-appearance='atelier']) .address-holdings {
-		border-radius: 0;
-		border-inline: 0;
-		background: transparent;
-	}
 	:global([data-appearance='aurora']) .address-masthead {
 		border-top-width: 1px;
 		border-inline-start: 3px solid var(--accent-ink);
@@ -480,6 +483,7 @@
 			align-items: center;
 		}
 		:global([data-appearance='atelier']) .address-facts {
+			display: grid;
 			grid-template-columns: 1fr 1fr;
 			border: 0;
 			border-inline-start: 3px double var(--hairline);
@@ -488,21 +492,34 @@
 	@media (max-width: 700px) {
 		.address-masthead {
 			padding: 10px 12px;
-			grid-template-columns: minmax(0, 1fr);
-			gap: 4px;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 4px 8px;
 		}
 		.address-title {
 			gap: 6px 12px;
 		}
 		.address-title h1 {
-			font-size: 26px;
+			font-size: 24px;
 		}
 		.address-balance {
 			font-size: 21px;
 		}
 		.address-facts {
-			padding: 6px 0;
-			gap: 6px;
+			padding: 0;
+			gap: 0 10px;
+			justify-content: space-between;
+		}
+		.address-facts > div {
+			gap: 4px;
+			min-height: 44px;
+		}
+		.address-facts dd {
+			font-size: 11px;
+		}
+		.address-facts a {
+			display: inline-flex;
+			align-items: center;
+			min-height: 44px;
 		}
 		:global([data-appearance='prism']) .address-head {
 			display: flex;
@@ -510,10 +527,11 @@
 		}
 		.address-tools :global(.save-trigger) {
 			min-height: 44px;
+			padding-inline: 10px;
 		}
 		.address-tools {
-			grid-column: 1;
-			grid-row: 3;
+			grid-column: 2;
+			grid-row: 1;
 		}
 	}
 	.muted {
