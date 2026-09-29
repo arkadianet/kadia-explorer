@@ -1,13 +1,108 @@
 import { expect, test } from '@playwright/test';
 import { BLOCK_HEIGHTS, TIP } from './data.ts';
 
-test('home renders the hero and every panel with rows from the mock', async ({ page }) => {
+for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	for (const theme of ['light', 'dark']) {
+		test(`${appearance} ${theme} homepage keeps pending activity beside desktop records and after the mobile block preview`, async ({
+			page
+		}) => {
+			await page.addInitScript(
+				({ appearance, theme }) => {
+					localStorage.setItem('xp-appearance', appearance);
+					localStorage.setItem('xp-theme', theme);
+				},
+				{ appearance, theme }
+			);
+			await page.setViewportSize({ width: 1440, height: 1000 });
+			await page.goto('/');
+			const preview = page.getByRole('region', { name: 'Pending transactions' });
+			await expect(preview.locator('.pending-sample li')).toHaveCount(3);
+			const bounds = await preview.boundingBox();
+			const blocks = page.locator('.recent-blocks');
+			const ledger = (await blocks.boundingBox())!;
+			// Pending data occupies the other desktop column, never a preamble above the ledger.
+			expect(bounds!.y).toBeGreaterThanOrEqual(ledger.y - 1);
+			expect(
+				bounds!.x + bounds!.width <= ledger.x + 1 || ledger.x + ledger.width <= bounds!.x + 1
+			).toBe(true);
+			await page.setViewportSize({ width: 320, height: 800 });
+			await expect(blocks.locator('tbody tr:visible')).toHaveCount(4);
+			await expect(blocks.locator('.record-count')).toContainText('Latest 4');
+			const mobileBlocks = (await blocks.boundingBox())!;
+			const narrow = await preview.boundingBox();
+			expect(narrow!.y).toBeGreaterThanOrEqual(mobileBlocks.y + mobileBlocks.height);
+			await expect(
+				page.locator('.network-actions').getByRole('link', { name: 'Mempool' })
+			).toHaveAttribute('href', '/mempool');
+			expect(narrow!.x).toBeGreaterThanOrEqual(0);
+			expect(narrow!.x + narrow!.width).toBeLessThanOrEqual(320);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+		});
+	}
+}
+
+test('homepage exposes a bounded mempool sample without transaction detail fan-out', async ({
+	page
+}) => {
+	const requests: string[] = [];
+	page.on('request', (request) => requests.push(new URL(request.url()).pathname));
+	await page.goto('/');
+	const preview = page.getByRole('region', { name: 'Pending transactions' });
+	await expect(preview.locator('.pending-sample li')).toHaveCount(3);
+	await expect(preview).toContainText('0.0011 ERG fee');
+	await expect(preview).toContainText('Fee unavailable');
+	await expect(preview.locator('time')).toContainText('UTC');
+	await expect(preview.getByRole('link', { name: 'Explore mempool' })).toHaveAttribute(
+		'href',
+		'/mempool'
+	);
+	expect(requests.filter((path) => path === '/v1/mempool')).toHaveLength(1);
+	expect(requests.filter((path) => /^\/v1\/txs\//.test(path))).toEqual([]);
+});
+
+test('homepage remains usable during an unavailable mempool check and supports retry', async ({
+	page
+}) => {
+	let attempts = 0;
+	await page.route('**/v1/mempool', (route) =>
+		++attempts === 1
+			? route.fulfill({
+					status: 503,
+					json: { code: 'mempool_unavailable', detail: 'The node is offline.' }
+				})
+			: route.continue()
+	);
+	await page.goto('/');
+	const preview = page.getByRole('region', { name: 'Pending transactions' });
+	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
+	await expect(preview).toContainText('Observation unavailable');
+	await expect(preview.locator('.preview-count')).toHaveCount(0);
+	await preview.getByRole('button', { name: 'Refresh pending preview' }).click();
+	await expect(preview.locator('.pending-sample li')).toHaveCount(3);
+	await expect(preview).not.toContainText('Observation unavailable');
+});
+
+test('an empty mempool observation differs from an unavailable observation', async ({ page }) => {
+	await page.route('**/v1/mempool', async (route) => {
+		const response = await route.fetch();
+		const data = await response.json();
+		await route.fulfill({
+			json: { ...data, connections: undefined, items: [], observed_count: 0 }
+		});
+	});
+	await page.goto('/');
+	const preview = page.getByRole('region', { name: 'Pending transactions' });
+	await expect(preview).toContainText('No pending transactions returned in this observation.');
+	await expect(preview.locator('.preview-count strong')).toHaveText('0');
+});
+
+test('home renders the network summary and every panel with rows from the mock', async ({
+	page
+}) => {
 	await page.goto('/');
 
-	// The hero states the chain's tip, and the panels below it name their own sections.
-	await expect(
-		page.getByRole('heading', { level: 1, name: 'Follow the chain. In every dimension.' })
-	).toBeVisible();
+	// The compact summary states the chain and the panels name their own sections.
+	await expect(page.getByRole('heading', { level: 1, name: 'Ergo mainnet' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Live transactions' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Rent maturing soon' })).toBeVisible();
@@ -19,8 +114,8 @@ test('home renders the hero and every panel with rows from the mock', async ({ p
 		has: page.getByRole('heading', { name: 'Recent blocks' })
 	});
 	await expect(blocks.locator('tbody tr').first().locator('td').first()).toHaveText(String(TIP));
-	// The mock serves 13 blocks; the panel shows the newest six of them.
-	await expect(blocks.locator('tbody tr')).toHaveCount(6);
+	// The mock serves 13 blocks; desktop exposes ten of them without a separate request.
+	await expect(blocks.locator('tbody tr')).toHaveCount(10);
 	for (const h of BLOCK_HEIGHTS) {
 		await expect(blocks.getByRole('link', { name: String(h), exact: true })).toBeVisible();
 	}
@@ -67,13 +162,8 @@ test('failed statistic dependencies show unavailable instead of zero', async ({ 
 		route.fulfill({ status: 503, json: { detail: 'offline' } })
 	);
 	await page.goto('/');
-	for (const label of ['Transactions', 'Blocks', 'Transaction fees', 'Storage rent']) {
-		await expect(
-			page
-				.locator('.stat')
-				.filter({ has: page.locator('.stat-label', { hasText: label }) })
-				.locator('.stat-value')
-		).toContainText('Unavailable');
+	for (const metric of ['transactions', 'blocks', 'fees', 'rent']) {
+		await expect(page.locator(`[data-metric="${metric}"] dd`)).toContainText('Unavailable');
 	}
 });
 
@@ -84,8 +174,8 @@ test('capped rent totals are visible lower bounds', async ({ page }) => {
 		await route.fulfill({ json: { ...body, complete: false } });
 	});
 	await page.goto('/');
-	const card = page.locator('.stat').filter({ hasText: 'Storage rent' });
-	await expect(card.locator('.stat-value')).toContainText('≥');
+	const card = page.locator('[data-metric="rent"]');
+	await expect(card.locator('dd')).toContainText('≥');
 	await expect(card).toContainText('incomplete');
 });
 
@@ -100,7 +190,7 @@ test('overview uses bounded summaries instead of expanded transaction and block 
 	await page.goto('/');
 	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
 	await expect(page.locator('.txlist li')).toHaveCount(5);
-	await expect(page.locator('.stats')).toContainText('latest 13 indexed blocks');
+	await expect(page.locator('.network-coverage')).toContainText('latest 13 indexed blocks');
 	expect(forbidden).toEqual([]);
 });
 
@@ -112,13 +202,11 @@ test('fee precision and sampled history remain explicit', async ({ page }) => {
 		});
 	});
 	await page.goto('/');
-	const card = page.locator('.stat').filter({ hasText: 'Transaction fees' });
-	await expect(card.locator('.stat-value')).toContainText('≈ 1.999');
-	await expect(card.locator('.stat-value')).toHaveAttribute('title', /1999123456 nanoERG/);
-	await expect(page.locator('.window-caption')).toContainText(
-		'Hourly charts cover these blocks only'
-	);
-	await expect(page.locator('.window-caption')).toContainText(
+	const card = page.locator('[data-metric="fees"]');
+	await expect(card.locator('dd')).toContainText('≈ 1.999');
+	await expect(card.locator('dd')).toHaveAttribute('title', /1999123456 nanoERG/);
+	await expect(page.locator('.network-coverage')).toContainText('Totals cover this sample only');
+	await expect(page.locator('.network-coverage')).toContainText(
 		'Indexed history begins at block 123'
 	);
 });

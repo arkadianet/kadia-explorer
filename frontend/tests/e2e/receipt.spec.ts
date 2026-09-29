@@ -36,6 +36,28 @@ async function openReceipt(page: Page) {
 	await page.getByRole('tab', { name: 'Receipt', exact: true }).click();
 }
 
+function confirmedStatus(): TxStatusDto {
+	return {
+		id: tx.id,
+		state: 'confirmed',
+		checked_at_ms: Date.now(),
+		indexed_height: tx.indexed_height!,
+		inclusion: { block_id: tx.block_id!, height: tx.height, confirmations: tx.confirmations! },
+		previous_inclusion: null,
+		mempool: {
+			observation: 'not_checked',
+			checked_at_ms: null,
+			first_seen_at_ms: null,
+			last_seen_at_ms: null,
+			error: null
+		},
+		pending: null,
+		conflicts: [],
+		history_scope: 'process_local_requested_transactions',
+		retention_seconds: 3600
+	};
+}
+
 function expandedFlowTransaction(): TxDto {
 	const expanded = structuredClone(tx);
 	// Four extra input/change pairs keep the original address deltas and fee unchanged.
@@ -120,25 +142,7 @@ test('a confirmed receipt leads with its net amount and keeps observation detail
 	page
 }) => {
 	await page.setViewportSize({ width: 1265, height: 714 });
-	const status: TxStatusDto = {
-		id: tx.id,
-		state: 'confirmed',
-		checked_at_ms: Date.now(),
-		indexed_height: tx.indexed_height!,
-		inclusion: { block_id: tx.block_id!, height: tx.height, confirmations: tx.confirmations! },
-		previous_inclusion: null,
-		mempool: {
-			observation: 'not_checked',
-			checked_at_ms: null,
-			first_seen_at_ms: null,
-			last_seen_at_ms: null,
-			error: null
-		},
-		pending: null,
-		conflicts: [],
-		history_scope: 'process_local_requested_transactions',
-		retention_seconds: 3600
-	};
+	const status = confirmedStatus();
 	await page.route(`**/v1/txs/${tx.id}/status`, (route) => route.fulfill({ json: status }));
 	await openReceipt(page);
 	const receipt = page.getByRole('region', { name: 'Transaction receipt' });
@@ -152,6 +156,65 @@ test('a confirmed receipt leads with its net amount and keeps observation detail
 	await expect(live.getByText('Checks every 5 seconds', { exact: false })).toBeVisible();
 	await expect(live.getByText('Absence from one node’s mempool', { exact: false })).toBeVisible();
 });
+
+for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	for (const view of ['Receipt', 'Box flow'] as const) {
+		test(`${appearance} Standard mobile ${view} shows its first exact amount above fixed navigation`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width: 390, height: 844 });
+			await page.addInitScript((appearance) => {
+				localStorage.setItem('xp-appearance', appearance);
+				localStorage.setItem('xp-density', 'standard');
+				localStorage.setItem('xp-theme', 'light');
+			}, appearance);
+			await page.route(`**/v1/txs/${tx.id}/status`, (route) =>
+				route.fulfill({ json: confirmedStatus() })
+			);
+			await page.goto(`/tx/${tx.id}`);
+			await expect(page.locator('html')).toHaveAttribute('data-density', 'standard');
+			const receipt = page.getByRole('region', { name: 'Transaction receipt', exact: true });
+			await expect(
+				receipt.getByRole('heading', { name: 'Storage rent claim', exact: true })
+			).toBeVisible();
+			await expect(
+				receipt.getByText('8 confirmations at last check', { exact: true })
+			).toBeVisible();
+			await receipt.getByRole('tab', { name: view, exact: true }).click();
+			const panel = receipt.getByRole('tabpanel', { name: view, exact: true });
+			const amount =
+				view === 'Receipt'
+					? panel.getByText('+2,000', { exact: true })
+					: panel
+							.getByRole('article', { name: 'Input 1 box', exact: true })
+							.getByText('0.0001108 ERG', { exact: true });
+			await expect(amount).toBeVisible();
+			await page.evaluate(() => document.fonts.ready);
+			// A tab click can scroll its target into view. Check the initial page position,
+			// so a passing amount cannot be the result of Playwright's automatic scrolling.
+			await page.evaluate(() => window.scrollTo(0, 0));
+			await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+			const tabs = receipt.getByRole('tablist', { name: 'Transaction views' });
+			expect((await tabs.boundingBox())!.height).toBeLessThan(60);
+			await expect(tabs.getByRole('tab', { name: view, exact: true })).toBeInViewport({ ratio: 1 });
+			const navigation = page.locator('nav.tabbar');
+			await expect(navigation).toBeVisible();
+			await expect(navigation).toHaveCSS('position', 'fixed');
+			const bounds = await amount.boundingBox();
+			const navBounds = await navigation.boundingBox();
+			expect(bounds).not.toBeNull();
+			expect(navBounds).not.toBeNull();
+			expect(bounds!.y).toBeGreaterThanOrEqual(0);
+			expect(
+				bounds!.y + bounds!.height,
+				`${appearance} ${view} amount must clear the fixed navigation`
+			).toBeLessThan(navBounds!.y - 8);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+				390
+			);
+		});
+	}
+}
 
 test('source failure preserves exact balances without inventing a claim label', async ({
 	page

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../src/lib/api/client';
 import type { TxDto, TxStatusDto } from '../../src/lib/api/types';
 import { createTransactionTracker, type TrackingState } from '../../src/lib/tx/tracker';
+import { validatePendingDetails } from '../../src/lib/tx/pending';
+import type { PendingTxDetails } from '../../src/lib/api/types';
 
 const id = 'a'.repeat(64);
 const tx: TxDto = {
@@ -330,5 +332,134 @@ describe('transaction tracking', () => {
 		expect(t.latest().tx).toBeNull();
 		expect(t.latest().error).not.toBeNull();
 		t.tracker.stop();
+	});
+});
+
+describe('bounded pending transaction details', () => {
+	const counts = { input_count: 1, data_input_count: 1, output_count: 1 };
+	function details(): PendingTxDetails {
+		return {
+			inputs: ['1'.repeat(64)],
+			data_inputs: ['2'.repeat(64)],
+			outputs: [
+				{
+					index: 0,
+					id: '3'.repeat(64),
+					value: '9007199254740993',
+					ergo_tree: '0008d3',
+					tokens: [{ id: '4'.repeat(64), amount: '9007199254740993' }],
+					token_count: 1,
+					tokens_truncated: false,
+					ergo_tree_truncated: false
+				}
+			],
+			inputs_truncated: false,
+			data_inputs_truncated: false,
+			outputs_truncated: false,
+			complete: true
+		};
+	}
+	it('preserves amounts above safe integer precision and does not resolve input values', () => {
+		const parsed = validatePendingDetails(details(), counts);
+		expect(parsed?.outputs[0].value).toBe('9007199254740993');
+		expect(parsed?.outputs[0].tokens[0].amount).toBe('9007199254740993');
+		expect(parsed?.inputs).toEqual(['1'.repeat(64)]);
+	});
+	it('accepts unavailable output IDs and explicit unknown assets without inventing zero', () => {
+		const data = details();
+		data.outputs[0].id = null;
+		expect(validatePendingDetails(data, counts)?.complete).toBe(true);
+		data.outputs[0].token_count = null;
+		data.outputs[0].tokens = [];
+		data.complete = false;
+		expect(validatePendingDetails(data, counts)?.outputs[0].token_count).toBeNull();
+	});
+	it('accepts a bounded partial projection and rejects completeness contradictions', () => {
+		const data = details();
+		data.outputs[0].ergo_tree = null;
+		data.outputs[0].ergo_tree_truncated = true;
+		data.inputs_truncated = true;
+		data.outputs_truncated = true;
+		data.complete = false;
+		expect(
+			validatePendingDetails(data, { ...counts, input_count: 40, output_count: 40 })
+		).not.toBeNull();
+		data.complete = true;
+		expect(
+			validatePendingDetails(data, { ...counts, input_count: 40, output_count: 40 })
+		).toBeNull();
+	});
+	for (const [name, mutate] of [
+		[
+			'negative amount',
+			(d: PendingTxDetails) => {
+				d.outputs[0].value = '-1';
+			}
+		],
+		[
+			'rounded JSON amount',
+			(d: PendingTxDetails) => {
+				(d.outputs[0] as unknown as { value: number }).value = 9007199254740992;
+			}
+		],
+		[
+			'zero token amount',
+			(d: PendingTxDetails) => {
+				d.outputs[0].tokens[0].amount = '0';
+			}
+		],
+		[
+			'overflowing amount',
+			(d: PendingTxDetails) => {
+				d.outputs[0].value = '9223372036854775808';
+			}
+		],
+		[
+			'invalid input link',
+			(d: PendingTxDetails) => {
+				d.inputs[0] = 'javascript:alert(1)';
+			}
+		],
+		[
+			'misnumbered output',
+			(d: PendingTxDetails) => {
+				d.outputs[0].index = 8;
+			}
+		],
+		[
+			'duplicate token',
+			(d: PendingTxDetails) => {
+				d.outputs[0].tokens.push(d.outputs[0].tokens[0]);
+				d.outputs[0].token_count = 2;
+			}
+		],
+		[
+			'oversize script',
+			(d: PendingTxDetails) => {
+				d.outputs[0].ergo_tree = 'ff'.repeat(2049);
+			}
+		],
+		[
+			'oversize ID list',
+			(d: PendingTxDetails) => {
+				d.inputs = Array(33).fill('1'.repeat(64));
+			}
+		]
+	] as const) {
+		it('rejects ' + name, () => {
+			const data = details();
+			mutate(data);
+			expect(validatePendingDetails(data, counts)).toBeNull();
+		});
+	}
+	it('bounds combined retained detail bytes before exposing a projection', () => {
+		const data = details();
+		data.outputs = Array.from({ length: 32 }, (_, index) => ({
+			...data.outputs[0],
+			index,
+			id: null,
+			ergo_tree: 'aa'.repeat(2048)
+		}));
+		expect(validatePendingDetails(data, { ...counts, output_count: 32 })).toBeNull();
 	});
 });

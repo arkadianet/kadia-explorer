@@ -89,10 +89,18 @@ test('network range loads explicitly, preserves exact totals and pins refresh', 
 		'href',
 		'/network?from_height=1&to_height=4&buckets=2&end_block_id=' + 'a'.repeat(64)
 	);
+	await expect(result.getByRole('link', { name: 'Inspect mining signals' })).toHaveAttribute(
+		'href',
+		'/mining?from_height=1&to_height=4&end_block_id=' + 'a'.repeat(64)
+	);
 	await page.getByRole('button', { name: 'Load network history', exact: true }).click();
 	await expect(result).toBeVisible();
 	expect(urls).toHaveLength(2);
 	expect(new URL(urls[1]).searchParams.get('end_block_id')).toBe('a'.repeat(64));
+	const methodology = result.locator('details.coverage');
+	await expect(methodology).not.toHaveAttribute('open', '');
+	await methodology.getByText('Methodology and snapshot evidence', { exact: true }).click();
+	await expect(methodology).toContainText('Difficulty is not a measured hashrate.');
 });
 test('changed pinned block clears the old chart until an explicit unpinned load', async ({
 	page
@@ -155,6 +163,48 @@ test('editing the selection cancels an in-flight result', async ({ page }) => {
 	).toBeEnabled();
 });
 for (const appearance of ['original', 'aurora', 'atelier', 'prism']) {
+	for (const viewport of [
+		{ width: 1440, height: 900 },
+		{ width: 390, height: 844 }
+	]) {
+		test(`compact network brings exact values forward in ${appearance} at ${viewport.width}`, async ({
+			page
+		}) => {
+			await page.setViewportSize(viewport);
+			await page.addInitScript((appearance) => {
+				localStorage.setItem('xp-appearance', appearance);
+				localStorage.setItem('xp-density', 'compact');
+			}, appearance);
+			await setup(page);
+			await page.getByRole('button', { name: 'Load network history', exact: true }).click();
+			const result = page.getByRole('region', { name: 'Network history results', exact: true });
+			await expect(result).toBeVisible();
+			await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+			await page.evaluate(() => window.scrollTo(0, 0));
+			const graph = page.getByRole('img', { name: 'Transactions by block-height bucket' });
+			await expect(graph).toBeInViewport({ ratio: 1 });
+			const first = result.locator('tbody tr').first();
+			const bounds = (await first.boundingBox())!;
+			expect(bounds.y).toBeLessThan(viewport.width === 390 ? 950 : 850);
+			if (viewport.width === 1440) await expect(first).toBeInViewport({ ratio: 1 });
+			await expect(result.locator('.coverage-strip')).toContainText(
+				'The index is partial, from height 1.'
+			);
+			await expect(result.locator('.raw-values')).toHaveAttribute('open', '');
+			if (viewport.width === 390) {
+				for (const control of [
+					page.getByRole('button', { name: 'Load network history', exact: true }),
+					page.getByRole('button', { name: 'Clear end-block pin', exact: true }),
+					page.getByLabel('From height', { exact: true }),
+					page.getByRole('combobox', { name: 'Chart metric', exact: true })
+				]) {
+					const box = (await control.boundingBox())!;
+					expect(box.height).toBeGreaterThanOrEqual(44);
+					expect(box.width).toBeGreaterThanOrEqual(44);
+				}
+			}
+		});
+	}
 	for (const theme of ['light', 'dark']) {
 		test(`network history remains readable at 320 in ${appearance} ${theme}`, async ({ page }) => {
 			await page.setViewportSize({ width: 320, height: 1000 });

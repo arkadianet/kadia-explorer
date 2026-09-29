@@ -7,6 +7,8 @@ export interface Field {
 	initial?: string;
 	options?: string[];
 	max?: number;
+	minimum?: number;
+	maximum?: number;
 }
 export interface Endpoint {
 	id: string;
@@ -37,6 +39,71 @@ const amounts =
 const strictNote =
 	'Send next_cursor and next_snapshot together. A 409 means the anchor is no longer usable: restart from the first page. An empty page may still have a continuation.';
 export const ENDPOINTS: Endpoint[] = [
+	{
+		id: 'mempool',
+		name: 'Pending transactions',
+		group: 'Network',
+		path: '/mempool',
+		fields: [],
+		description: 'Up to 100 pending summaries and connections within the returned snapshot.',
+		note: 'One configured node, not network-wide coverage. A missing parent is not proof of a blocked transaction. Preserve observation time, limits and optional connection coverage.'
+	},
+	...(['network-history', 'mining'] as const).map((kind): Endpoint => ({
+		id: kind,
+		name: kind === 'mining' ? 'Mining and header signals' : 'Network history',
+		group: 'Network',
+		path: kind === 'mining' ? '/mining' : '/network/history',
+		fields: [
+			{ name: 'from_height', label: 'First height', kind: 'height', minimum: 1, required: true },
+			{ name: 'to_height', label: 'Last height', kind: 'height', minimum: 1, required: true },
+			kind === 'mining'
+				? {
+						name: 'top',
+						label: 'Maximum keys and vote tuples',
+						kind: 'height',
+						minimum: 1,
+						maximum: 50,
+						initial: '20'
+					}
+				: {
+						name: 'buckets',
+						label: 'Maximum chart buckets',
+						kind: 'height',
+						minimum: 1,
+						maximum: 120,
+						initial: '24'
+					},
+			{ name: 'end_block_id', label: 'Pinned last block ID (optional)', kind: 'id' }
+		],
+		description:
+			kind === 'mining'
+				? 'Mining keys, versions and raw vote tuples across canonical headers.'
+				: 'Exact activity and fee totals across canonical headers.',
+		note:
+			'One reader, at most 20,160 blocks per request. A changed pin returns 409. Missing or resource-limited coverage returns an error. ' +
+			(kind === 'mining'
+				? 'Keys do not establish pool ownership; raw votes are not approved protocol changes.'
+				: amounts)
+	})),
+	{
+		id: 'rent-exposure',
+		name: 'Address rent exposure',
+		group: 'Addresses',
+		path: '/addresses/{address}/rent',
+		fields: [
+			address,
+			{
+				name: 'view',
+				label: 'Response view',
+				kind: 'choice',
+				options: ['exposure'],
+				initial: 'exposure',
+				required: true
+			}
+		],
+		description: 'Compact unspent box evidence with indexed height and scan coverage.',
+		note: 'Preserve full_history, scan_complete, truncated and anchor. A partial scan is not the full address balance. Nominal due does not establish collectible value.'
+	},
 	{
 		id: 'status',
 		name: 'Index status',
@@ -280,7 +347,11 @@ function validate(field: Field, raw: string): string {
 	const hash = /^[a-fA-F0-9]{64}$/.test(value);
 	if (field.kind === 'id') valid &&= hash;
 	if (field.kind === 'block') valid &&= height || hash;
-	if (field.kind === 'height') valid &&= height;
+	if (field.kind === 'height')
+		valid &&=
+			height &&
+			Number(value) >= (field.minimum ?? 0) &&
+			Number(value) <= (field.maximum ?? 4_294_967_295);
 	if (field.kind === 'limit')
 		valid &&= /^\d{1,3}$/.test(value) && Number(value) >= 1 && Number(value) <= 100;
 	if (field.kind === 'address') valid &&= /^[1-9A-HJ-NP-Za-km-z]{7,4096}$/.test(value);
@@ -308,6 +379,12 @@ export function buildRequest(key: string, values: Record<string, string>): strin
 				'Send the cursor and snapshot token together, or leave both empty for the first page.'
 			);
 		params.set('consistency', 'strict');
+	}
+	if (key === 'network-history' || key === 'mining') {
+		const from = Number(params.get('from_height'));
+		const to = Number(params.get('to_height'));
+		if (from > to) throw new Error('First height must not exceed last height.');
+		if (to - from >= 20160) throw new Error('Choose at most 20,160 blocks per request.');
 	}
 	return `/v1${path}${params.size ? `?${params}` : ''}`;
 }

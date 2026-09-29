@@ -58,6 +58,35 @@ not a continuing guarantee that a transaction remains pending: it may have been
 confirmed, evicted or replaced after observation. The existing transaction-status
 route independently checks inclusion when an ID is opened.
 
+The additive `connections` object derives relationships only from the exact same
+parsed response. Parsing first builds a unique output-ID map, then matches spending
+and read-only references, so node ordering does not affect the result. Optional
+output IDs are permitted, with `identified_output_count` disclosing coverage.
+Malformed or duplicate output IDs, a supplied creator transaction ID that differs
+from its containing transaction, an inconsistent output index, or a transaction
+referencing its own reported output fail the observation with
+`mempool_invalid_response`. This is structural validation of trusted node facts,
+not independent cryptographic verification of box IDs.
+
+No new node route, database query, index or configuration is involved. The same
+10,000-work bound covers all transactions, inputs and outputs used for matching.
+Matching uses keyed collections rather than expanding shared inputs into every
+pair of competing transactions. The wire response returns at most 256 edges,
+16 shared-input groups and 256 shared-input transaction memberships. Exact counts
+describe the matched source scope; per-list and per-group truncation flags describe
+omitted results. All connection evidence expires and fails with its containing
+snapshot. An older API's omitted `connections` field is accepted by the client but
+displayed as unavailable, not as zero relationships.
+
+Primary implementation checked at Ergo commit
+[`23aabead88774d27f2c9190ace3c9abbc8f1d5cb`](https://github.com/ergoplatform/ergo/tree/23aabead88774d27f2c9190ace3c9abbc8f1d5cb):
+[`TransactionsApiRoute`](https://github.com/ergoplatform/ergo/blob/23aabead88774d27f2c9190ace3c9abbc8f1d5cb/src/main/scala/org/ergoplatform/http/api/TransactionsApiRoute.scala)
+returns transaction outputs and may enrich input boxes when available.
+[`ErgoMemPool`](https://github.com/ergoplatform/ergo/blob/23aabead88774d27f2c9190ace3c9abbc8f1d5cb/src/main/scala/org/ergoplatform/nodeView/mempool/ErgoMemPool.scala)
+replaces or rejects same-input contenders during admission. Consequently,
+same-snapshot shared-input groups are positive observations only; their absence
+does not establish a conflict-free network state or identify replacement history.
+
 The `/mempool` page requests one snapshot on entry and then refreshes only on user
 action. It filters only the already loaded IDs and labels page capacity, age and
 source scope. No background polling or third-party request is introduced.

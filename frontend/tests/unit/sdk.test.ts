@@ -261,4 +261,22 @@ describe('portable typed API client', () => {
 			contract.paths['/blocks'].get.parameters.find((parameter) => parameter.name === 'dir')?.schema
 		).toEqual({ type: 'string', enum: ['desc'] });
 	});
+	it('bounds mining ranges and requires the compact rent view before issuing requests', async () => {
+		const fetch = vi.fn<typeof globalThis.fetch>();
+		const client = createKadiaClient({ baseUrl, fetch });
+		for (const params of [
+			{ from_height: 0, to_height: 1 },
+			{ from_height: 5, to_height: 1 },
+			{ from_height: 1, to_height: 20161 },
+			{ from_height: 1, to_height: 10, top: 51 }
+		])
+			await expect(client.request('mining', params)).rejects.toThrow();
+		await expect(
+			client.request('addressRentExposure', { addr: '9abc' } as never)
+		).rejects.toThrow();
+		await expect(
+			client.request('addressRentExposure', { addr: '9abc', view: 'legacy' } as never)
+		).rejects.toThrow();
+		expect(fetch).not.toHaveBeenCalled();
+	});
 });

@@ -4,6 +4,7 @@
 	import { api } from '$lib/api/endpoints';
 	import { createTransactionTracker, type TrackingState } from '$lib/tx/tracker';
 	import TransactionTracking from '$lib/components/TransactionTracking.svelte';
+	import PendingTransactionDetails from '$lib/components/PendingTransactionDetails.svelte';
 	import TransactionReceipt from '$lib/components/TransactionReceipt.svelte';
 	import ApplicationWorkflow from '$lib/components/ApplicationWorkflow.svelte';
 	import RosenWorkflow from '$lib/components/RosenWorkflow.svelte';
@@ -37,6 +38,12 @@
 				}
 	);
 	const tx = $derived(tracking.tx);
+	const pendingContext = $derived(
+		!tx && !!tracking.status?.pending?.details && tracking.status.state !== 'confirmed'
+	);
+	const confirmedContext = $derived(
+		!!tx && (tracking.status?.state === 'confirmed' || tracking.status === null)
+	);
 	const applicationOrders = $derived(tx ? transactionOrders(tx) : []);
 	const bridgeDeposits = $derived(tx ? transactionDeposits(tx) : []);
 	// A live inclusion check updates confirmations, not mutable box-spend/rent details.
@@ -88,9 +95,15 @@
 	<title>Transaction {data.id} — Ergo Explorer</title>
 </svelte:head>
 
-<div class="head">
-	<PageHead title="Transaction" id={data.id} />
+<div class="head" class:pending-record={pendingContext}>
+	{#if !pendingContext && !confirmedContext}<PageHead title="Transaction" id={data.id} />{/if}
 	<TransactionTracking {tracking} onrefresh={refresh} />
+	{#if !tx && tracking.status?.pending && tracking.status.state !== 'confirmed'}
+		{#key data.id}<PendingTransactionDetails
+				observation={tracking.status}
+				stale={!!tracking.error}
+			/>{/key}
+	{/if}
 	{#if tx && receiptTx}
 		{#key `${tx.id}:${tx.block_id}:${tx.height}`}<TransactionReceipt
 				tx={receiptTx}

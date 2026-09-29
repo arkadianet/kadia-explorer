@@ -17,6 +17,24 @@
 
 	let refs: Record<string, HTMLButtonElement | undefined> = $state({});
 
+	$effect(() => {
+		const selected = refs[active];
+		const strip = selected?.parentElement;
+		if (!selected || !strip) return;
+		// Reveal hash-selected tabs in an overflowing strip without scrolling the page.
+		const reveal = () => {
+			const tabBounds = selected.getBoundingClientRect();
+			const stripBounds = strip.getBoundingClientRect();
+			if (tabBounds.left < stripBounds.left) strip.scrollLeft += tabBounds.left - stripBounds.left;
+			else if (tabBounds.right > stripBounds.right)
+				strip.scrollLeft += tabBounds.right - stripBounds.right;
+		};
+		reveal();
+		const observer = new ResizeObserver(reveal);
+		observer.observe(strip);
+		return () => observer.disconnect();
+	});
+
 	function move(delta: number) {
 		if (tabs.length === 0) return;
 		const at = tabs.findIndex((t) => t.id === active);

@@ -742,7 +742,7 @@
 
 	:root[data-appearance='atelier'] .home-dashboard > .stats {
 		grid-column: 2;
-		grid-row: 2;
+		grid-row: 3;
 		grid-template-columns: minmax(0, 1fr);
 		padding-left: 24px;
 		border-left: var(--rule);
@@ -750,7 +750,7 @@
 
 	:root[data-appearance='atelier'] .home-dashboard > .panels:not(.three) {
 		grid-column: 1;
-		grid-row: 2;
+		grid-row: 3;
 		grid-template-columns: minmax(0, 1fr);
 		gap: 30px;
 	}
@@ -760,8 +760,14 @@
 		grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
 	}
 
-	:root[data-appearance='atelier'] .home-dashboard > .deeper {
+	:root[data-appearance='atelier'] .home-dashboard > .deeper,
+	:root[data-appearance='atelier'] .home-dashboard > .window-caption {
 		grid-column: 1 / -1;
+	}
+	:root[data-appearance='atelier'] .home-dashboard > .pending-preview {
+		grid-column: 1 / -1;
+		grid-row: 2;
+		margin: 0;
 	}
 
 	:root[data-appearance='atelier'] .receipt-section {

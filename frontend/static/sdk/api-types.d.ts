@@ -28,6 +28,8 @@ export interface MempoolSnapshot {
 	limit_reached: boolean;
 	observed_count: number;
 	items: PendingTransaction[];
+	/** Absent on older API versions; absence is not evidence of zero connections. */
+	connections?: PendingConnections;
 }
 export interface PendingTransaction {
 	id: string;
@@ -36,6 +38,81 @@ export interface PendingTransaction {
 	output_count: number;
 	size: number | null;
 	fee: string | null;
+}
+export interface PendingConnections {
+	scope: 'returned_snapshot_only';
+	output_count: number;
+	identified_output_count: number;
+	edge_count: number;
+	edges_truncated: boolean;
+	edges: PendingConnection[];
+	shared_input_count: number;
+	shared_inputs_truncated: boolean;
+	shared_inputs: SharedPendingInput[];
+}
+export interface PendingConnection {
+	producer_id: string;
+	consumer_id: string;
+	box_id: string;
+	kind: 'spend' | 'read';
+}
+export interface SharedPendingInput {
+	box_id: string;
+	transaction_count: number;
+	transaction_ids: string[];
+	truncated: boolean;
+}
+export interface MiningOverview {
+	scope: 'canonical_block_headers';
+	consistency: 'single_reader';
+	complete: true;
+	from_height: number;
+	to_height: number;
+	block_count: number;
+	indexed_height: number;
+	full_history: boolean;
+	partial_from: number | null;
+	anchor: {
+		height: number;
+		block_id: string;
+	};
+	top: number;
+	totals: {
+		fees: string;
+		transaction_count: string;
+	};
+	miner_keys: {
+		distinct_count: number;
+		items: MiningKey[];
+		other_key_count: number;
+		other_block_count: number;
+		other_fees: string;
+	};
+	versions: {
+		version: number;
+		block_count: number;
+	}[];
+	votes: {
+		known_blocks: number;
+		unknown_blocks: number;
+		zero_vote_blocks: number;
+		distinct_tuples: number;
+		items: {
+			votes: string;
+			block_count: number;
+		}[];
+		other_tuple_count: number;
+		other_block_count: number;
+	};
+}
+export interface MiningKey {
+	public_key: string;
+	block_count: number;
+	first_height: number;
+	last_height: number;
+	first_block_id: string;
+	last_block_id: string;
+	fees: string;
 }
 export interface NetworkSummary {
 	scope: 'latest_indexed_blocks';
@@ -217,6 +294,8 @@ export interface TxStatusDto {
 		data_input_count: number;
 		size: number | null;
 		fee: string | null;
+		/** Older servers return summary counts only. */
+		details?: PendingTxDetails;
 	} | null;
 	conflicts: {
 		input_id: string;
@@ -225,6 +304,30 @@ export interface TxStatusDto {
 	}[];
 	history_scope: 'process_local_requested_transactions';
 	retention_seconds: number;
+}
+export interface PendingTxDetails {
+	inputs: string[];
+	data_inputs: string[];
+	outputs: {
+		index: number;
+		id: string | null;
+		value: string;
+		ergo_tree: string | null;
+		/** Derived with the same mainnet encoder as confirmed boxes when the script is supported. */
+		address?: string | null;
+		tokens: {
+			id: string;
+			amount: string;
+		}[];
+		token_count: number | null;
+		tokens_truncated: boolean;
+		ergo_tree_truncated: boolean;
+	}[];
+	inputs_truncated: boolean;
+	data_inputs_truncated: boolean;
+	outputs_truncated: boolean;
+	/** Completeness of this projection, never proof of network acceptance. */
+	complete: boolean;
 }
 export interface TxEvidence {
 	tx_id: string;
@@ -260,6 +363,39 @@ export interface AddressDto {
 export interface BalanceDto {
 	nano: string;
 	tokens: TokenDto[];
+}
+export interface RentExposure {
+	items: RentExposureBox[];
+	truncated: boolean;
+	context: {
+		scope: 'indexed_unspent_boxes';
+		address: string;
+		tree_hash: string;
+		indexed_height: number | null;
+		anchor: {
+			height: number;
+			block_id: string;
+		} | null;
+		full_history: boolean;
+		partial_from: number | null;
+		scanned_count: number;
+		scan_limit: number;
+		scan_complete: boolean;
+	};
+}
+export interface RentExposureBox {
+	id: string;
+	value: string;
+	creation_height: number;
+	size: number;
+	token_count: number;
+	rent: {
+		maturity_height: number;
+		due_nano: string;
+		claimable_at_tip: boolean;
+		consensus_fee_nano: string;
+		collectible: boolean;
+	};
 }
 export interface AddressActivityPageDto extends PageDto<AddressActivityDto> {
 	scanned: number;
@@ -413,6 +549,10 @@ export interface TokenSearchDto extends PageDto<TokenInfoDto> {
 export interface KadiaOperations {
 	status: { parameters: Record<string, never>; response: StatusDto };
 	mempool: { parameters: Record<string, never>; response: MempoolSnapshot };
+	mining: {
+		parameters: { from_height: number; to_height: number; top?: number; end_block_id?: string };
+		response: MiningOverview;
+	};
 	network: { parameters: Record<string, never>; response: NetworkSummary };
 	networkHistory: {
 		parameters: { from_height: number; to_height: number; buckets?: number; end_block_id?: string };
@@ -444,6 +584,7 @@ export interface KadiaOperations {
 	};
 	box: { parameters: { id: string }; response: BoxDto };
 	address: { parameters: { addr: string }; response: AddressDto };
+	addressRentExposure: { parameters: { addr: string; view: 'exposure' }; response: RentExposure };
 	addressActivity: {
 		parameters: {
 			addr: string;
