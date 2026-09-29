@@ -174,7 +174,12 @@ export async function fetchHistory(requested: NetworkRange, signal: AbortSignal)
 		credentials: 'omit',
 		redirect: 'error'
 	});
-	if (!response.body) throw new Error('Network history returned an empty response.');
+	if (!response.body)
+		throw new Error(
+			response.ok
+				? 'Network history returned an empty response.'
+				: 'Network history is unavailable.'
+		);
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
 	let size = 0;
@@ -196,12 +201,16 @@ export async function fetchHistory(requested: NetworkRange, signal: AbortSignal)
 		bytes.set(chunk, offset);
 		offset += chunk.length;
 	}
-	const data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-	if (!response.ok)
-		throw new Error(
-			typeof data.detail === 'string' ? data.detail : 'Network history is unavailable.'
-		);
-	return data;
+	if (!response.ok) {
+		let detail: unknown;
+		try {
+			detail = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))?.detail;
+		} catch {
+			// Failed responses may not contain valid JSON or UTF-8.
+		}
+		throw new Error(typeof detail === 'string' ? detail : 'Network history is unavailable.');
+	}
+	return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 }
 export interface HistoryState {
 	loading: boolean;

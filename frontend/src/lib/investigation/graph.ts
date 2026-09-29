@@ -245,6 +245,7 @@ function inspect(node: Node, data: TxDto | BoxDto, nodes: Node[], edges: Edge[])
 			conflict('A previously loaded box has changed immutable identity or amounts.');
 		if (
 			node.data &&
+			(node.data as BoxDto).spent_by !== null &&
 			((node.data as BoxDto).spent_by !== (data as BoxDto).spent_by ||
 				(node.data as BoxDto).spent_height !== (data as BoxDto).spent_height)
 		)

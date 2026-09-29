@@ -41,6 +41,7 @@ export function applicationSelector(
 ): ApplicationSelector {
 	if (kind !== 'tx' && kind !== 'box') throw new Error('Choose a transaction or a box.');
 	if (!hash.test(id.trim())) throw new Error('Enter a 64-character hexadecimal ID.');
+	block = block?.trim();
 	if (block && (kind !== 'tx' || !hash.test(block)))
 		throw new Error('A pinned block must be a transaction block ID.');
 	return { kind, id: id.trim().toLowerCase(), ...(block ? { block: block.toLowerCase() } : {}) };

@@ -205,6 +205,33 @@ describe('bounded explicit investigation', () => {
 			expect(() => exportEvidence(graph.state)).toThrow('no loaded evidence');
 		}
 	);
+	it('accepts a newly observed spend and allows following its spending transaction', async () => {
+		const { graph, api } = setup();
+		api.box.mockResolvedValueOnce({ ...box(), spent_by: null, spent_height: null });
+		await openBox(graph);
+		const key = graph.state.nodes[1].key;
+		await graph.load(key);
+		expect(graph.state.conflict).toBeNull();
+		expect(graph.state.nodes[1]).toMatchObject({ status: 'ready', data: box() });
+		await graph.expand(
+			key,
+			references(graph.state.nodes[1]).find((r) => r.edge.relation === 'spends')!
+		);
+		expect(graph.state.conflict).toBeNull();
+		expect(graph.state.nodes[2]).toMatchObject({ status: 'ready', data: spending() });
+	});
+	it.each([
+		{ spent_by: null, spent_height: null },
+		{ spent_by: id(7), spent_height: 11 },
+		{ spent_by: id(4), spent_height: 12 }
+	])('rejects a changed previously observed spend: %j', async (spend) => {
+		const { graph, api } = setup();
+		await openBox(graph);
+		api.box.mockResolvedValueOnce({ ...box(), ...spend });
+		await graph.load(graph.state.nodes[1].key);
+		expect(graph.state.conflict).toContain('spending reference for a loaded box changed');
+		expect(graph.state.nodes.every((node) => node.data === null)).toBe(true);
+	});
 	it('withholds graph after a pinned shared inclusion fails validation', async () => {
 		const { graph } = setup({
 			nodes: [{ ...seed, pin: { height: 10, block_id: id(500) } }],

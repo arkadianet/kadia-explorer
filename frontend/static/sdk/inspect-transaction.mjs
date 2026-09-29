@@ -14,6 +14,9 @@ if (!id || !/^[a-fA-F0-9]{64}$/.test(id)) {
 		if (observation.data.state === 'confirmed') {
 			const detail = await client.observe('transaction', { id });
 			// These are separate reads. Do not combine incompatible inclusions after a reorg.
+			if (!detail.data.block_id) {
+				throw new Error('The server does not expose the detail block ID.');
+			}
 			if (
 				!observation.data.inclusion ||
 				detail.data.block_id !== observation.data.inclusion.block_id

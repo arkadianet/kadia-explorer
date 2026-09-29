@@ -243,6 +243,30 @@ describe('explicit network loader', () => {
 		);
 		expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: 'omit', redirect: 'error' });
 	});
+	it('reports a string detail from a failed response', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(Response.json({ detail: 'Pinned block changed' }, { status: 409 }))
+		);
+		await expect(fetchHistory(requested, new AbortController().signal)).rejects.toThrow(
+			'Pinned block changed'
+		);
+	});
+	it.each([
+		null,
+		'',
+		'null',
+		'<html>Unavailable</html>',
+		'{',
+		'{}',
+		'{"detail":42}',
+		new Uint8Array([255])
+	])('uses the fallback for an unavailable failure detail (%s)', async (body) => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 503 })));
+		await expect(fetchHistory(requested, new AbortController().signal)).rejects.toThrow(
+			'Network history is unavailable.'
+		);
+	});
 	it('rejects oversized streamed responses before JSON parsing', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Uint8Array(256 * 1024 + 1))));
 		await expect(fetchHistory(requested, new AbortController().signal)).rejects.toThrow(

@@ -30,7 +30,9 @@ function setup() {
 }
 describe('application discovery controller', () => {
 	it('normalizes IDs and pins only transactions', () => {
-		expect(applicationSelector('tx', ' ' + id.toUpperCase() + ' ', block)).toEqual({
+		expect(
+			applicationSelector('tx', ' ' + id.toUpperCase() + ' ', ' ' + block.toUpperCase() + ' ')
+		).toEqual({
 			kind: 'tx',
 			id,
 			block
@@ -40,6 +42,10 @@ describe('application discovery controller', () => {
 		);
 		expect(() => applicationSelector('box', id, block)).toThrow();
 		expect(() => applicationSelector('tx', '../status')).toThrow();
+	});
+	it.each([undefined, null, '', ' \t '])('omits an empty block pin (%s)', (pin) => {
+		for (const kind of ['tx', 'box'])
+			expect(applicationSelector(kind, id, pin)).toEqual({ kind, id });
 	});
 	it('does no automatic reading, then uses only the requested detail route', async () => {
 		const { inspector, getTx, getBox, states } = setup();

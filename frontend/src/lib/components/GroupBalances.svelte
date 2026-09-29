@@ -124,7 +124,7 @@
 				</p>
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex (The bounded watch timeline must be keyboard scrollable.) -->
 				<ol tabindex="0" aria-label="Recent group watch observations">
-					{#each watchState.events as event (`${event.at}:${event.kind}`)}<li
+					{#each watchState.events as event, index (`${event.at}:${event.kind}:${index}`)}<li
 							class:changed={event.kind === 'change'}
 						>
 							<div class="event-caption">
