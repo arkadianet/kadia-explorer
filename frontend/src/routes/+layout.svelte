@@ -55,6 +55,7 @@
 		{ href: '/blocks', label: 'Blocks', icon: 'blocks', primary: true },
 		{ href: '/txs', label: 'Transactions', icon: 'txs', primary: true },
 		{ href: '/mempool', label: 'Mempool', icon: 'clock' },
+		{ href: '/mining', label: 'Mining', icon: 'blocks' },
 		{ href: '/richlist', label: 'Rich list', icon: 'richlist' },
 		{ href: '/tokens', label: 'Tokens', icon: 'token' },
 		{

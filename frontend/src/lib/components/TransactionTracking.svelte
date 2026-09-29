@@ -76,20 +76,43 @@
 			<div><span>03</span><strong>Confirmations</strong></div>
 		</div>
 		{#if observation?.pending}
+			{#if observation.mempool.observation !== 'present'}<p class="warning">
+					The pending facts below are from the last time this explorer observed the transaction{observation
+						.mempool.last_seen_at_ms !== null
+						? ` (${absTime(observation.mempool.last_seen_at_ms)})`
+						: ''}; they do not establish its current status.
+				</p>{/if}
 			<dl class="pending-facts">
 				<div>
 					<dt>Inputs / outputs</dt>
 					<dd>{observation.pending.input_count} / {observation.pending.output_count}</dd>
 				</div>
 				{#if observation.pending.fee !== null}<div>
-						<dt>Transaction fee</dt>
-						<dd>{formatErg(observation.pending.fee)} ERG</dd>
+						<dt>Miner-fee outputs</dt>
+						<dd title={observation.pending.fee + ' nanoERG'}>
+							{formatErg(observation.pending.fee)} ERG
+						</dd>
 					</div>{/if}
+				<div>
+					<dt>Read-only data inputs</dt>
+					<dd>{observation.pending.data_input_count}</dd>
+				</div>
+				<div>
+					<dt>Serialized size</dt>
+					<dd>
+						{observation.pending.size === null
+							? 'Not supplied'
+							: `${observation.pending.size.toLocaleString('en-US')} bytes`}
+					</dd>
+				</div>
 				{#if observation.mempool.first_seen_at_ms !== null}<div>
 						<dt>First observed by this explorer</dt>
 						<dd>{absTime(observation.mempool.first_seen_at_ms)}</dd>
 					</div>{/if}
 			</dl>
+			<p class="connections-link">
+				<a href={'/mempool?focus=' + observation.id}>Inspect connections in a mempool snapshot ↗</a>
+			</p>
 		{/if}
 	{:else if !tracking.tx}<p class="description">
 			Included at block {observation?.inclusion?.height.toLocaleString('en-US')}. Loading the
@@ -137,6 +160,14 @@
 </section>
 
 <style>
+	.connections-link {
+		margin-block: 16px;
+		font-size: 12px;
+		line-height: 1.7;
+	}
+	.connections-link a {
+		color: var(--tracking-link, var(--accent-ink));
+	}
 	.tracking {
 		min-width: 0;
 		position: relative;

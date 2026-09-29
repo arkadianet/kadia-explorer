@@ -8,6 +8,7 @@
 	import Hash from '$lib/components/Hash.svelte';
 	import Age from '$lib/components/Age.svelte';
 	import MinerChip from '$lib/components/MinerChip.svelte';
+	import MempoolPreview from '$lib/components/MempoolPreview.svelte';
 	import TokenBadge from '$lib/components/TokenBadge.svelte';
 	import { relTime } from '$lib/format/time';
 	import { formatErg } from '$lib/format/amount';
@@ -296,6 +297,8 @@
 			<p class="stat-foot">{status ? `${status.mode} mode` : ''}</p>
 		</div>
 	</section>
+
+	<MempoolPreview />
 
 	<!-- ----------------------------------------------------------------------------- panels -->
 	{#if summary && count > 0}

@@ -20,6 +20,7 @@ for (const theme of ['light', 'dark']) {
 			await expect(nav.getByRole('link', { name: 'Tokens', exact: true })).toBeHidden();
 			for (const [label, path] of [
 				['Mempool', '/mempool'],
+				['Mining', '/mining'],
 				['Tokens', '/tokens'],
 				['Rich list', '/richlist'],
 				['Status', '/status']
@@ -73,7 +74,7 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 		await page.goto('/status');
 		const nav = page.locator('.rail .nav');
 		const links = nav.getByRole('link');
-		await expect(links).toHaveCount(13);
+		await expect(links).toHaveCount(14);
 		for (const [full, compact] of [
 			['Storage rent', 'Rent'],
 			['Saved addresses', 'Saved'],
@@ -85,7 +86,7 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 			);
 		}
 		await links.first().focus();
-		for (let index = 0; index < 13; index++) {
+		for (let index = 0; index < 14; index++) {
 			const link = links.nth(index);
 			await expect(link).toBeFocused();
 			await expect(link).toBeInViewport({ ratio: 1 });
@@ -94,7 +95,7 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 				return { width: style.outlineWidth, style: style.outlineStyle };
 			});
 			expect(outline).toEqual({ width: '2px', style: 'solid' });
-			if (index < 12) await page.keyboard.press('Tab');
+			if (index < 13) await page.keyboard.press('Tab');
 		}
 		if (appearance === 'original' || appearance === 'aurora') {
 			await expect(nav.getByText('Scroll ↕', { exact: true })).toBeVisible();
@@ -127,8 +128,8 @@ for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
 		expect(geometry!.y).toBeGreaterThanOrEqual(8);
 		expect(geometry!.y + geometry!.height).toBeLessThanOrEqual((await nav.boundingBox())!.y - 7);
 		const links = menu.getByRole('link');
-		await expect(links).toHaveCount(9);
-		for (let index = 0; index < 9; index++) {
+		await expect(links).toHaveCount(10);
+		for (let index = 0; index < 10; index++) {
 			await page.keyboard.press('Tab');
 			await expect(links.nth(index)).toBeFocused();
 			await expect(links.nth(index)).toBeInViewport({ ratio: 1 });

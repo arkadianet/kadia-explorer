@@ -163,6 +163,10 @@
 					</h2>
 				</div>
 				<a href={share!}>Open pinned range ↗</a>
+				<a
+					href={`/mining?from_height=${data.totals.from_height}&to_height=${data.totals.to_height}&end_block_id=${data.anchor.block_id}`}
+					>Inspect mining signals ↗</a
+				>
 			</div>
 			<div class="summary">
 				<div>

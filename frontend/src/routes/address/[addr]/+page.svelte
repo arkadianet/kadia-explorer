@@ -11,14 +11,13 @@
 	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import Age from '$lib/components/Age.svelte';
-	import Badge from '$lib/components/Badge.svelte';
 	import RentBadge from '$lib/components/RentBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-	import ErrorState from '$lib/components/ErrorState.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 	import SaveAddress from '$lib/components/SaveAddress.svelte';
 	import AddressActivity from '$lib/components/AddressActivity.svelte';
 	import AddressHistory from '$lib/components/AddressHistory.svelte';
+	import AddressRentExposure from '$lib/components/AddressRentExposure.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager, type Pager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
@@ -62,33 +61,6 @@
 	let unspentPager = $state<Pager<BoxDto> | null>(null);
 	let boxPager = $state<Pager<BoxDto> | null>(null);
 
-	let rentItems = $state<BoxDto[] | null>(null);
-	let rentTruncated = $state(false);
-	let rentLoading = $state(false);
-	let rentError = $state<unknown>(null);
-
-	// Request generation counter, as on /rent: navigating to another address (or flipping back
-	// to the Rent tab) can leave an earlier request in flight, and without this guard its late
-	// reply would overwrite the current address's rows.
-	let rentGen = 0;
-
-	async function loadRent() {
-		const my = ++rentGen;
-		rentLoading = true;
-		rentError = null;
-		try {
-			const res = await api.addressRent(addr);
-			if (my !== rentGen) return;
-			rentItems = [...res.items].sort((a, b) => a.rent.maturity_height - b.rent.maturity_height);
-			rentTruncated = res.truncated;
-		} catch (e) {
-			if (my !== rentGen) return;
-			rentError = e;
-		} finally {
-			if (my === rentGen) rentLoading = false;
-		}
-	}
-
 	// Navigating from one address to another reuses this component, so the lazily-created
 	// per-tab state has to be dropped explicitly or the new address shows the old one's rows.
 	// Plain `let` (not `$state`) so reading it here does not make this effect depend on it.
@@ -100,12 +72,6 @@
 		txPager = null;
 		unspentPager = null;
 		boxPager = null;
-		// Invalidate any rent request still in flight for the previous address.
-		rentGen++;
-		rentItems = null;
-		rentTruncated = false;
-		rentLoading = false;
-		rentError = null;
 	});
 
 	$effect(() => {
@@ -128,8 +94,6 @@
 			);
 			boxPager = p;
 			void p.loadMore();
-		} else if (active === 'rent' && rentItems === null && !rentLoading && rentError === null) {
-			void loadRent();
 		}
 	});
 
@@ -330,49 +294,8 @@
 				{:else}
 					<Skeleton />
 				{/if}
-			{:else if rentLoading && rentItems === null}
-				<Skeleton />
-			{:else if rentError}
-				<ErrorState error={rentError} retry={() => void loadRent()} />
-			{:else if rentItems && rentItems.length > 0}
-				{#if rentTruncated}
-					<p class="notice">
-						Showing a partial sample of this address’s rent-bearing boxes, sorted by maturity among
-						those scanned; boxes not shown may mature sooner.
-					</p>
-				{/if}
-				<Table dense>
-					{#snippet head()}
-						<tr>
-							<th>Id</th>
-							<th class="num">Value</th>
-							<th class="num">Due rent</th>
-							<th class="num">Maturity height</th>
-							<th>Matures</th>
-						</tr>
-					{/snippet}
-					{#each rentItems as box (box.id)}
-						<tr>
-							<td><Hash value={box.id} href={`/box/${box.id}`} copy={false} /></td>
-							<td class="num"><Amount nano={box.value} maxFrac={9} /></td>
-							<td class="num"><Amount nano={box.rent.due_nano} maxFrac={9} /></td>
-							<td class="num mono">{box.rent.maturity_height}</td>
-							<td>
-								{#if box.rent.claimable_at_tip}
-									<Badge tone="danger">claimable</Badge>
-								{:else if tip !== null}
-									in {box.rent.maturity_height - tip} blocks
-								{:else}
-									<span class="muted">—</span>
-								{/if}
-							</td>
-						</tr>
-					{/each}
-				</Table>
-			{:else if rentItems}
-				<EmptyState message="No box at this address carries storage rent." />
 			{:else}
-				<Skeleton />
+				<AddressRentExposure address={addr} />
 			{/if}
 		</div>
 	</Panel>
@@ -403,11 +326,5 @@
 	/* A minted name is prose; only ids keep the mono face. */
 	.token-name {
 		font-weight: 500;
-	}
-	.notice {
-		padding-bottom: var(--space-3);
-		color: var(--warn-ink);
-		font-size: var(--fs-data);
-		max-width: 72ch;
 	}
 </style>

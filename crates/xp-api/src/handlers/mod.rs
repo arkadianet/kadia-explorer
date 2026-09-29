@@ -5,6 +5,7 @@ pub mod blocks;
 pub mod boxes;
 pub mod evidence;
 pub mod mempool;
+pub mod mining;
 pub mod network;
 pub mod network_history;
 pub mod registers;

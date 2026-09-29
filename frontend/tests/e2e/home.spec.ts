@@ -1,6 +1,89 @@
 import { expect, test } from '@playwright/test';
 import { BLOCK_HEIGHTS, TIP } from './data.ts';
 
+for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	for (const theme of ['light', 'dark']) {
+		test(`${appearance} ${theme} homepage puts pending activity before the block panels and fits mobile`, async ({
+			page
+		}) => {
+			await page.addInitScript(
+				({ appearance, theme }) => {
+					localStorage.setItem('xp-appearance', appearance);
+					localStorage.setItem('xp-theme', theme);
+				},
+				{ appearance, theme }
+			);
+			await page.setViewportSize({ width: 1440, height: 1000 });
+			await page.goto('/');
+			const preview = page.getByRole('region', { name: 'Pending transactions' });
+			await expect(preview.locator('.pending-sample li')).toHaveCount(3);
+			const bounds = await preview.boundingBox();
+			const panels = await page.locator('.panels').first().boundingBox();
+			expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(panels!.y);
+			await page.setViewportSize({ width: 320, height: 800 });
+			const narrow = await preview.boundingBox();
+			expect(narrow!.x).toBeGreaterThanOrEqual(0);
+			expect(narrow!.x + narrow!.width).toBeLessThanOrEqual(320);
+			expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+		});
+	}
+}
+
+test('homepage exposes a bounded mempool sample without transaction detail fan-out', async ({
+	page
+}) => {
+	const requests: string[] = [];
+	page.on('request', (request) => requests.push(new URL(request.url()).pathname));
+	await page.goto('/');
+	const preview = page.getByRole('region', { name: 'Pending transactions' });
+	await expect(preview.locator('.pending-sample li')).toHaveCount(3);
+	await expect(preview).toContainText('0.0011 ERG fee');
+	await expect(preview).toContainText('Fee unavailable');
+	await expect(preview.locator('time')).toContainText('UTC');
+	await expect(preview.getByRole('link', { name: 'Explore mempool' })).toHaveAttribute(
+		'href',
+		'/mempool'
+	);
+	expect(requests.filter((path) => path === '/v1/mempool')).toHaveLength(1);
+	expect(requests.filter((path) => /^\/v1\/txs\//.test(path))).toEqual([]);
+});
+
+test('homepage remains usable during an unavailable mempool check and supports retry', async ({
+	page
+}) => {
+	let attempts = 0;
+	await page.route('**/v1/mempool', (route) =>
+		++attempts === 1
+			? route.fulfill({
+					status: 503,
+					json: { code: 'mempool_unavailable', detail: 'The node is offline.' }
+				})
+			: route.continue()
+	);
+	await page.goto('/');
+	const preview = page.getByRole('region', { name: 'Pending transactions' });
+	await expect(page.getByRole('heading', { name: 'Recent blocks' })).toBeVisible();
+	await expect(preview).toContainText('Observation unavailable');
+	await expect(preview.locator('.preview-count')).toHaveCount(0);
+	await preview.getByRole('button', { name: 'Refresh pending preview' }).click();
+	await expect(preview.locator('.pending-sample li')).toHaveCount(3);
+	await expect(preview).not.toContainText('Observation unavailable');
+});
+
+test('an empty mempool observation differs from an unavailable observation', async ({ page }) => {
+	await page.route('**/v1/mempool', async (route) => {
+		const response = await route.fetch();
+		const data = await response.json();
+		await route.fulfill({
+			json: { ...data, connections: undefined, items: [], observed_count: 0 }
+		});
+	});
+	await page.goto('/');
+	const preview = page.getByRole('region', { name: 'Pending transactions' });
+	await expect(preview).toContainText('No pending transactions returned in this observation.');
+	await expect(preview.locator('.preview-count strong')).toHaveText('0');
+});
+
 test('home renders the hero and every panel with rows from the mock', async ({ page }) => {
 	await page.goto('/');
 

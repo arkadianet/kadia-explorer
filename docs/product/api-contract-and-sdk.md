@@ -1,9 +1,16 @@
 # Versioned workflow API contract and portable client
 
-`/openapi.json` is an OpenAPI 3.1.1 contract for 23 documented read operations,
+`/openapi.json` is an OpenAPI 3.1.1 contract for 25 documented read operations,
 including the read-only group-balances POST. It explicitly covers a subset of the
 server API, not every operational or legacy endpoint. Contract version 1.0.0 is
 independent of chain height, database schema and release version.
+
+The subset includes bounded mining/header observations (`mining`) and compact
+address rent evidence (`addressRentExposure`, requiring `view: "exposure"`). Mining
+ranges are inclusive and limited to 20,160 headers, with an optional canonical end
+block pin. Rent context distinguishes scan completeness from full chain coverage.
+Mempool connections are optional for compatibility with older API deployments and
+cover only returned transactions. Preserve these fields when interpreting results.
 
 The generator at `frontend/scripts/api-contract.mjs` builds response schemas and
 portable TypeScript declarations from the explorer's wire types. Request paths and

@@ -58,6 +58,11 @@ test('pending becomes a receipt, then confirmations increase without reloading b
 	await page.goto(`/tx/${tx.id}`);
 	await expect(page.getByRole('heading', { name: 'Waiting for a block' })).toBeVisible();
 	await expect(page.getByText('0.0011 ERG', { exact: true })).toBeVisible();
+	await expect(
+		page.getByRole('link', { name: 'Inspect connections in a mempool snapshot' })
+	).toHaveAttribute('href', '/mempool?focus=' + tx.id);
+	await expect(page.getByText('Read-only data inputs', { exact: true })).toBeVisible();
+	await expect(page.getByText('512 bytes', { exact: true })).toBeVisible();
 	await expect(page.getByRole('region', { name: 'Transaction receipt' })).toHaveCount(0);
 	current.value = status('confirmed');
 	await page.clock.runFor(5500);

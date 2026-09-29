@@ -142,6 +142,9 @@ async fn exact_summaries_are_node_local_and_cached_without_extra_requests() {
     assert_eq!(body["observed_count"], 1);
     assert_eq!(body["limit_reached"], false);
     assert_eq!(body["cached"], false);
+    assert_eq!(body["connections"]["scope"], "returned_snapshot_only");
+    assert_eq!(body["connections"]["output_count"], 2);
+    assert_eq!(body["connections"]["identified_output_count"], 0);
     assert_eq!(
         body["expires_at_ms"].as_u64().unwrap() - body["checked_at_ms"].as_u64().unwrap(),
         5000
@@ -149,8 +152,37 @@ async fn exact_summaries_are_node_local_and_cached_without_extra_requests() {
     let (_, cached) = get(&app, "/v1/mempool").await;
     assert_eq!(cached["cached"], true);
     assert_eq!(cached["checked_at_ms"], body["checked_at_ms"]);
+    assert_eq!(cached["connections"], body["connections"]);
     assert_eq!(source.calls.load(Ordering::SeqCst), 1);
     assert!(body.get("total_count").is_none());
+}
+#[tokio::test]
+async fn connections_use_only_one_node_response_and_bad_producer_identity_fails_closed() {
+    let mut parent = tx(1);
+    let mut child = tx(2);
+    let box_id = hex::encode([77; 32]);
+    parent["outputs"][0]["boxId"] = json!(box_id);
+    parent["outputs"][0]["transactionId"] = parent["id"].clone();
+    parent["outputs"][0]["index"] = json!(0);
+    child["inputs"][0]["boxId"] = json!(box_id);
+    let source = Source::new(json!([child.clone(), parent.clone()]));
+    let (_dir, router) = app(Some(source.clone()));
+    let (status, body) = get(&router, "/v1/mempool").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["connections"]["edge_count"], 1);
+    assert_eq!(
+        body["connections"]["edges"][0],
+        json!({
+            "producer_id":parent["id"], "consumer_id":child["id"], "box_id":box_id, "kind":"spend"
+        })
+    );
+    assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+    parent["outputs"][0]["transactionId"] = child["id"].clone();
+    let (_dir, router) = app(Some(Source::new(json!([child, parent]))));
+    let (status, body) = get(&router, "/v1/mempool").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["code"], "mempool_invalid_response");
+    assert!(body.get("connections").is_none());
 }
 #[tokio::test]
 async fn empty_and_limit_reached_are_successful_observations_with_distinct_meanings() {
@@ -196,6 +228,7 @@ async fn stale_success_is_not_served_after_a_failed_refresh_and_errors_expire() 
     let (status, body) = get(&app, "/v1/mempool").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(body.get("items").is_none());
+    assert!(body.get("connections").is_none());
     source.mode.store(0, Ordering::SeqCst);
     assert_eq!(
         get(&app, "/v1/mempool").await.0,

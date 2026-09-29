@@ -59,12 +59,15 @@ function prepare(operation, parameters) {
 			throw new TypeError(`Invalid parameter: ${key}`);
 	}
 	if (
-		['compareBalances', 'networkHistory'].includes(operation) &&
+		['compareBalances', 'networkHistory', 'mining'].includes(operation) &&
 		parameters.from_height > parameters.to_height
 	)
 		throw new TypeError('from_height must not exceed to_height.');
-	if (operation === 'networkHistory' && parameters.to_height - parameters.from_height >= 20160)
-		throw new KadiaLimitError('Network history is limited to 20,160 blocks per request.');
+	if (
+		['networkHistory', 'mining'].includes(operation) &&
+		parameters.to_height - parameters.from_height >= 20160
+	)
+		throw new KadiaLimitError('Header observations are limited to 20,160 blocks per request.');
 	if (
 		operation === 'addressActivity' &&
 		parameters.from_ms !== undefined &&

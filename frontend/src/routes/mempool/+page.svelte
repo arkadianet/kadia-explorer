@@ -1,8 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import Icon from '$lib/components/Icon.svelte';
+	import PendingConnections from '$lib/components/PendingConnections.svelte';
 	import { formatErg, formatNano } from '$lib/format/amount';
-	import { createMempoolLoader, filterPending, type MempoolState } from '$lib/mempool/observations';
+	import {
+		createMempoolLoader,
+		filterPending,
+		parseMempoolFocus,
+		type MempoolState
+	} from '$lib/mempool/observations';
 
 	let view = $state<MempoolState>({ loading: true, snapshot: null, error: null });
 	let query = $state('');
@@ -16,6 +24,32 @@
 		return () => current.stop();
 	});
 	const matches = $derived(filterPending(view.snapshot?.items ?? [], query));
+	let requestedFocus = $state<string | null>(null);
+	let repeatedFocus = $state(false);
+	$effect(() => {
+		// Shallow replaceState updates browser history, not page.url. Keep local
+		// selection reactive and reset it when a real route navigation arrives.
+		requestedFocus = page.url.searchParams.get('focus');
+		repeatedFocus = page.url.searchParams.getAll('focus').length !== 1;
+	});
+	const invalidFocus = $derived(
+		requestedFocus !== null && (repeatedFocus || !parseMempoolFocus(requestedFocus))
+	);
+	const selected = $derived(
+		requestedFocus === null
+			? (view.snapshot?.items[0]?.id ?? null)
+			: invalidFocus
+				? null
+				: parseMempoolFocus(requestedFocus)
+	);
+	function selectConnection(id: string) {
+		if (!parseMempoolFocus(id)) return;
+		const url = new URL(window.location.href);
+		url.searchParams.set('focus', id);
+		replaceState(url, page.state);
+		requestedFocus = id;
+		repeatedFocus = false;
+	}
 	const problemTitle = $derived(
 		view.error?.code === 'mempool_not_configured'
 			? 'No node configured'
@@ -74,6 +108,9 @@
 		</section>
 	{:else if view.snapshot}
 		{@const snapshot = view.snapshot}
+		{#if snapshot.items.length || requestedFocus !== null}
+			<PendingConnections {snapshot} {selected} {invalidFocus} onselect={selectConnection} />
+		{/if}
 		<div class="mempool-layout">
 			<aside class="observation-summary" aria-label="Mempool observation details">
 				<div class="count-block">
@@ -204,6 +241,13 @@
 										</dd>
 									</div>
 								</dl>
+								<button
+									type="button"
+									class="secondary inspect-connections"
+									onclick={() => selectConnection(transaction.id)}
+									aria-label={'Inspect connections for listed transaction ' + transaction.id}
+									>Inspect connections</button
+								>
 							</article>
 						{/each}
 					</div>
@@ -441,6 +485,9 @@
 	.transaction-facts dd {
 		font-variant-numeric: tabular-nums;
 		margin-top: 4px;
+	}
+	.inspect-connections {
+		margin-top: 18px;
 	}
 	small {
 		display: block;

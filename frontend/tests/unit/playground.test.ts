@@ -12,6 +12,24 @@ import {
 } from '$lib/developer/playground';
 
 describe('API playground requests', () => {
+	it('bounds mining and history ranges and selects the compact rent response', () => {
+		for (const kind of ['mining', 'network-history']) {
+			for (const values of [
+				{ from_height: '0', to_height: '2' },
+				{ from_height: '3', to_height: '2' },
+				{ from_height: '1', to_height: '20161' }
+			])
+				expect(() => buildRequest(kind, values)).toThrow();
+		}
+		expect(() => buildRequest('mining', { from_height: '1', to_height: '2', top: '51' })).toThrow();
+		expect(() =>
+			buildRequest('network-history', { from_height: '1', to_height: '2', buckets: '121' })
+		).toThrow();
+		expect(buildRequest('rent-exposure', { address: '9addressTestQqWwee' })).toBe(
+			'/v1/addresses/9addressTestQqWwee/rent?view=exposure'
+		);
+		expect(buildRequest('mempool', {})).toBe('/v1/mempool');
+	});
 	it('builds only curated local API paths and uses strict paired continuation', () => {
 		const path = buildRequest('token-history', {
 			id: 'a'.repeat(64),
@@ -77,7 +95,7 @@ describe('API playground requests', () => {
 		for (const endpoint of ENDPOINTS) {
 			const values = defaults(endpoint);
 			for (const field of endpoint.fields) {
-				if (!field.required) continue;
+				if (!field.required || field.initial) continue;
 				values[field.name] =
 					field.kind === 'id'
 						? 'a'.repeat(64)

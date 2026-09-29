@@ -12,6 +12,16 @@ import { operations } from "../../../frontend/static/sdk/operations.js";
 const TOOLS = [
   ["kadia_status", "status", "Read indexed height, readiness and node health."],
   [
+    "kadia_mining",
+    "mining",
+    "Read mining-key distribution, header versions and raw vote tuples across at most 20,160 canonical headers. Keys do not establish pool ownership, fees are not miner earnings, and raw votes do not establish approved parameters. Preserve the anchor, range, remainder and unknown-vote coverage.",
+  ],
+  [
+    "kadia_address_rent_exposure",
+    "addressRentExposure",
+    "Read a compact bounded scan of an address's indexed unspent boxes with storage-rent evidence. Use view=exposure. Preserve context.anchor, full_history, scan_complete and truncated; a partial scan is not a complete balance. Positive collectible consensus fees, capped at box value, describe possible exposure; nominal due is not collectible value.",
+  ],
+  [
     "kadia_mempool",
     "mempool",
     "Read at most 100 pending transaction summaries from the configured primary node. Preserve observation time and limit_reached; this is neither network-wide coverage nor confirmation. At capacity, additional entries may exist. Unavailable is an error, not an empty pool.",
@@ -135,10 +145,12 @@ function inputSchema(operation) {
     if (spec.paged && (parameters.cursor === "" || parameters.snapshot === ""))
       issue("Continuation values must not be empty.");
     if (
-      operation === "compareBalances" &&
+      ["compareBalances", "mining"].includes(operation) &&
       parameters.from_height > parameters.to_height
     )
       issue("from_height must not exceed to_height.");
+    if (operation === "mining" && parameters.to_height - parameters.from_height >= 20160)
+      issue("Mining observations are limited to 20,160 blocks per request.");
     if (
       operation === "addressActivity" &&
       parameters.from_ms !== undefined &&

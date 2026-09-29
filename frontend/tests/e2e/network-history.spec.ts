@@ -89,6 +89,10 @@ test('network range loads explicitly, preserves exact totals and pins refresh', 
 		'href',
 		'/network?from_height=1&to_height=4&buckets=2&end_block_id=' + 'a'.repeat(64)
 	);
+	await expect(result.getByRole('link', { name: 'Inspect mining signals' })).toHaveAttribute(
+		'href',
+		'/mining?from_height=1&to_height=4&end_block_id=' + 'a'.repeat(64)
+	);
 	await page.getByRole('button', { name: 'Load network history', exact: true }).click();
 	await expect(result).toBeVisible();
 	expect(urls).toHaveLength(2);

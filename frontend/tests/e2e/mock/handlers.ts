@@ -27,6 +27,8 @@ import { readFileSync } from 'node:fs';
 import type { GroupBalances, GroupMember } from '../../../src/lib/addresses/groups.ts';
 import { range as networkRange } from '../../../src/lib/network/history.ts';
 import type { NetworkBucket } from '../../../src/lib/network/history.ts';
+import { range as miningRange } from '../../../src/lib/mining/overview.ts';
+import type { MiningKey, MiningOverview } from '../../../src/lib/mining/overview.ts';
 import type { PendingTransaction } from '../../../src/lib/mempool/observations.ts';
 import type {
 	AddressActivityDto,
@@ -691,7 +693,31 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 			limit: 100,
 			limit_reached: false,
 			observed_count: pendingFixtures.length,
-			items: pendingFixtures
+			items: pendingFixtures,
+			connections: {
+				scope: 'returned_snapshot_only',
+				output_count: 10,
+				identified_output_count: 10,
+				edge_count: 2,
+				edges_truncated: false,
+				edges: [
+					{
+						producer_id: pendingFixtures[0].id,
+						consumer_id: pendingFixtures[1].id,
+						box_id: 'd4'.repeat(32),
+						kind: 'spend'
+					},
+					{
+						producer_id: pendingFixtures[2].id,
+						consumer_id: pendingFixtures[1].id,
+						box_id: 'e5'.repeat(32),
+						kind: 'read'
+					}
+				],
+				shared_input_count: 0,
+				shared_inputs_truncated: false,
+				shared_inputs: []
+			}
 		});
 	}
 	const pendingFixture = pendingFixtures.find((tx) => path === `/v1/txs/${tx.id}/status`);
@@ -855,6 +881,93 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 			)
 		});
 	}
+	if (path === '/v1/mining') {
+		let requested;
+		try {
+			requested = miningRange(
+				url.searchParams.get('from_height') ?? '',
+				url.searchParams.get('to_height') ?? '',
+				url.searchParams.get('top') ?? '20',
+				url.searchParams.get('end_block_id') ?? undefined
+			);
+		} catch {
+			return badRequest(res, 'Choose 1–20,160 retained fixture blocks and 1–50 keys.');
+		}
+		const rows = d.blocks
+			.filter((b) => b.height >= requested.from_height && b.height <= requested.to_height)
+			.sort((a, b) => a.height - b.height);
+		if (rows.length !== requested.to_height - requested.from_height + 1)
+			return problem(
+				res,
+				422,
+				'Fixture history unavailable',
+				`This preview retains heights ${Math.min(...d.blocks.map((b) => b.height))}–${Math.max(...d.blocks.map((b) => b.height))}. Choose a range inside those heights.`
+			);
+		const last = rows.at(-1)!;
+		if (requested.end_block_id && requested.end_block_id !== last.id)
+			return problem(res, 409, 'Anchor changed', 'The pinned fixture end block differs.');
+		const keys = new Map<string, MiningKey>();
+		const versions = new Map<number, number>();
+		for (const block of rows) {
+			const key = keys.get(block.miner_pk) ?? {
+				public_key: block.miner_pk,
+				block_count: 0,
+				first_height: block.height,
+				first_block_id: block.id,
+				last_height: block.height,
+				last_block_id: block.id,
+				fees: '0'
+			};
+			key.block_count++;
+			key.last_height = block.height;
+			key.last_block_id = block.id;
+			key.fees = (BigInt(key.fees) + BigInt(block.fees)).toString();
+			keys.set(block.miner_pk, key);
+			versions.set(block.version, (versions.get(block.version) ?? 0) + 1);
+		}
+		const all = [...keys.values()].sort(
+			(a, b) => b.block_count - a.block_count || a.public_key.localeCompare(b.public_key)
+		);
+		const other = all.slice(requested.top);
+		const overview: MiningOverview = {
+			scope: 'canonical_block_headers',
+			consistency: 'single_reader',
+			complete: true,
+			from_height: requested.from_height,
+			to_height: requested.to_height,
+			top: requested.top,
+			block_count: rows.length,
+			indexed_height: d.status.indexed!,
+			full_history: false,
+			partial_from: Math.min(...d.blocks.map((b) => b.height)),
+			anchor: { height: last.height, block_id: last.id },
+			totals: {
+				fees: rows.reduce((sum, b) => sum + BigInt(b.fees), 0n).toString(),
+				transaction_count: rows.reduce((sum, b) => sum + BigInt(b.tx_count), 0n).toString()
+			},
+			miner_keys: {
+				distinct_count: keys.size,
+				items: all.slice(0, requested.top),
+				other_key_count: other.length,
+				other_block_count: other.reduce((sum, k) => sum + k.block_count, 0),
+				other_fees: other.reduce((sum, k) => sum + BigInt(k.fees), 0n).toString()
+			},
+			versions: [...versions]
+				.sort(([a], [b]) => a - b)
+				.map(([version, block_count]) => ({ version, block_count })),
+			// Compact fixture BlockDto records do not carry raw header votes.
+			votes: {
+				known_blocks: 0,
+				unknown_blocks: rows.length,
+				zero_vote_blocks: 0,
+				distinct_tuples: 0,
+				items: [],
+				other_tuple_count: 0,
+				other_block_count: 0
+			}
+		};
+		return sendJson(res, 200, overview);
+	}
 	const rewards = /^\/v1\/blocks\/([^/]+)\/rewards$/.exec(path);
 	if (rewards) {
 		const block = resolveBlock(d, decodeURIComponent(rewards[1]));
@@ -975,9 +1088,45 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 			case '/txs':
 				sendJson(res, 200, page(txSummariesOfTree(d, tree), cursor, limit));
 				return;
-			case '/rent':
+			case '/rent': {
+				const view = url.searchParams.get('view');
+				if (view !== null && view !== 'exposure') return badRequest(res, 'Unknown rent view.');
+				if (view === 'exposure') {
+					const items = boxesOfTree(d, tree, true)
+						.slice(0, 5000)
+						.map((box) => ({
+							id: box.id,
+							value: box.value,
+							creation_height: box.creation_height,
+							size: box.size,
+							token_count: box.tokens.length,
+							rent: {
+								...box.rent,
+								claimable_at_tip:
+									d.status.indexed !== null && box.rent.maturity_height <= d.status.indexed
+							}
+						}));
+					const tip = d.blocks.find((b) => b.height === d.status.indexed);
+					return sendJson(res, 200, {
+						items,
+						truncated: false,
+						context: {
+							scope: 'indexed_unspent_boxes',
+							address: addr,
+							tree_hash: tree,
+							indexed_height: d.status.indexed,
+							anchor: tip ? { height: tip.height, block_id: tip.id } : null,
+							full_history: false,
+							partial_from: Math.min(...d.blocks.map((b) => b.height)),
+							scanned_count: items.length,
+							scan_limit: 5000,
+							scan_complete: true
+						}
+					});
+				}
 				sendJson(res, 200, { items: boxesOfTree(d, tree, true), truncated: false });
 				return;
+			}
 			default: {
 				const info = d.addresses.get(addr);
 				return info ? sendJson(res, 200, info) : notFound(res);

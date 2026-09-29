@@ -247,6 +247,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         )
         .route("/v1/network/summary", get(handlers::network::summary))
         .route("/v1/mempool", get(handlers::mempool::snapshot))
+        .route("/v1/mining", get(handlers::mining::overview))
         .route(
             "/v1/network/history",
             get(handlers::network_history::history),
