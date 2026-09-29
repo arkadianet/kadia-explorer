@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { onDestroy, untrack } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import { createGroupBalances, type GroupState } from '$lib/addresses/groups';
+	import { createBalanceWatch, emptyWatch, MAX_WATCH_EVENTS } from '$lib/addresses/watch';
 	import type { SavedAddress } from '$lib/addresses/saved.svelte';
 	import { formatErg, formatNano } from '$lib/format/amount';
 	let { items, scope, available }: { items: SavedAddress[]; scope: string; available: boolean } =
@@ -8,13 +9,35 @@
 	const uid = $props.id();
 	let groupState = $state<GroupState>({ busy: false, result: null, stale: false, error: null });
 	const controller = createGroupBalances((next) => (groupState = next));
+	let watchState = $state(emptyWatch());
+	const watcher = createBalanceWatch({
+		read: async () => {
+			await controller.load();
+			const current = controller.state;
+			if (current.error || current.busy || !current.result)
+				throw new Error(current.error ?? 'This selection could not be read.');
+			return current.result;
+		},
+		onChange: (next) => (watchState = next),
+		visible: () => typeof document !== 'undefined' && document.visibilityState === 'visible'
+	});
+	onMount(() => {
+		const visibility = () => watcher.visibilityChanged();
+		document.addEventListener('visibilitychange', visibility);
+		return () => document.removeEventListener('visibilitychange', visibility);
+	});
+	const signed = (value: string, erg = false) =>
+		`${BigInt(value) > 0n ? '+' : ''}${erg ? formatErg(value) : formatNano(value)}`;
 	const addresses = $derived(available ? items.map((item) => item.address) : []);
 	let tokenQuery = $state('');
 	let tokenLimit = $state(50);
 	let memberLimits = $state<Record<number, number>>({});
 	$effect(() => {
 		const current = addresses;
-		untrack(() => controller.setAddresses(current));
+		untrack(() => {
+			watcher.setSelection(current);
+			controller.setAddresses(current);
+		});
 	});
 	$effect(() => {
 		void groupState.result;
@@ -22,7 +45,10 @@
 		tokenLimit = 50;
 		memberLimits = {};
 	});
-	onDestroy(() => controller.stop());
+	onDestroy(() => {
+		watcher.destroy();
+		controller.stop();
+	});
 	const result = $derived(
 		groupState.result?.members.length === addresses.length &&
 			groupState.result.members.every((member, index) => member.address === addresses[index])
@@ -47,7 +73,7 @@
 		<button
 			type="button"
 			class="load"
-			disabled={!available || !items.length || groupState.busy}
+			disabled={!available || !items.length || groupState.busy || watchState.active}
 			onclick={() => void controller.load()}
 			aria-describedby={`${uid}-privacy`}
 			>{groupState.busy
@@ -61,6 +87,88 @@
 		Loading sends these visible addresses together to the explorer. Local labels and group names
 		stay in this browser. Up to 100 addresses; this selection does not establish ownership.
 	</p>
+	<section class="balance-watch" aria-labelledby={`${uid}-watch-title`}>
+		<div class="watch-heading">
+			<div>
+				<h3 id={`${uid}-watch-title`}>Watch while this page is open</h3>
+				<p>
+					One check per minute at most. Pauses when hidden; stops when the selected addresses change
+					or you leave. No background push or saved opt-in.
+				</p>
+			</div>
+			{#if watchState.active}<button
+					type="button"
+					class="watch-button"
+					onclick={() => watcher.stop()}>Stop watching</button
+				>
+			{:else}<button
+					type="button"
+					class="watch-button"
+					disabled={!available || !items.length || groupState.busy}
+					onclick={() => watcher.start()}
+					aria-describedby={`${uid}-privacy`}>Start watching group</button
+				>{/if}
+		</div>
+		<p class="watch-status" role="status">
+			{watchState.message}{#if watchState.active && watchState.nextCheck !== null}<span
+					>Next check no earlier than {new Date(watchState.nextCheck).toISOString()}.</span
+				>{/if}
+		</p>
+		{#if watchState.events.length}<details class="watch-history" open>
+				<summary>Observed-change timeline ({watchState.events.length} / {MAX_WATCH_EVENTS})</summary
+				>
+				<p class="watch-scope">
+					Changes compare complete anchored snapshots for the same scripts. A higher tip alone
+					cannot rule out a reorganization between reads. These are observed balance differences,
+					not transfer or ownership claims.
+				</p>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex (The bounded watch timeline must be keyboard scrollable.) -->
+				<ol tabindex="0" aria-label="Recent group watch observations">
+					{#each watchState.events as event, index (`${event.at}:${event.kind}:${index}`)}<li
+							class:changed={event.kind === 'change'}
+						>
+							<div class="event-caption">
+								<strong
+									>{event.kind === 'change'
+										? 'Observed change'
+										: event.kind === 'baseline'
+											? 'Baseline'
+											: event.kind === 'reset'
+												? 'Baseline reset'
+												: event.kind === 'error'
+													? 'Check failed'
+													: 'Comparison unavailable'}</strong
+								><time datetime={new Date(event.at).toISOString()}
+									>{new Date(event.at).toISOString()}</time
+								>
+							</div>
+							<p>{event.message}</p>
+							{#if event.from || event.to}<div class="event-anchors">
+									{#if event.from}<a href={`/blocks/${event.from.block_id}`}
+											>From {event.from.height.toLocaleString('en-US')}</a
+										>{/if}{#if event.to}<a href={`/blocks/${event.to.block_id}`}
+											>To {event.to.height.toLocaleString('en-US')}</a
+										>{/if}
+								</div>{/if}
+							{#if event.change}<p class="watch-delta">
+									<strong>{signed(event.change.nano, true)} ERG</strong><span
+										>{signed(event.change.nano)} nanoERG · exact observed difference</span
+									>
+								</p>
+								<ul class="token-changes">
+									{#each event.change.tokens.slice(0, 20) as token (token.id)}<li>
+											<a href={`/token/${token.id}`}><code>{token.id}</code></a><strong
+												>{signed(token.delta)} raw units</strong
+											>
+										</li>{/each}
+								</ul>
+								{#if event.change.tokens.length > 20}<p>
+										Showing 20 of {event.change.tokens.length} changed token IDs.
+									</p>{/if}{/if}
+						</li>{/each}
+				</ol>
+			</details>{/if}
+	</section>
 	{#if groupState.busy}<p class="working" role="status">
 			Reading one snapshot{result ? '; the previous snapshot remains below' : ''}…
 		</p>{/if}
@@ -80,7 +188,11 @@
 							: `Indexed height ${result.indexed_height.toLocaleString('en-US')}`} · no retained block
 						anchor</span
 					>{/if}
-				<span>No automatic refresh</span>
+				<span
+					>{watchState.active
+						? 'Page-open watch; checks only while visible'
+						: 'No automatic refresh'}</span
+				>
 			</div>
 			{#if !result.full_history}<p class="coverage" role="status">
 					Partial index{result.partial_from === null
@@ -228,6 +340,173 @@
 </section>
 
 <style>
+	.balance-watch {
+		margin-top: 22px;
+		padding: 20px 0;
+		border-block: var(--rule);
+		min-width: 0;
+	}
+	.watch-heading {
+		display: flex;
+		gap: 20px;
+		align-items: center;
+		justify-content: space-between;
+	}
+	.watch-heading h3 {
+		margin: 0 0 8px;
+	}
+	.watch-heading p,
+	.watch-scope {
+		font-size: 11px;
+		line-height: 1.75;
+		color: var(--fg-muted);
+		max-width: 80ch;
+	}
+	.watch-button {
+		border: 1px solid var(--accent-ink);
+		border-radius: var(--radius-control);
+		color: var(--accent-ink);
+		background: var(--accent-wash);
+		padding: 10px 14px;
+		font-size: 12px;
+		flex-shrink: 0;
+		max-width: 100%;
+	}
+	.watch-button:disabled {
+		opacity: 0.55;
+		cursor: default;
+	}
+	.watch-status {
+		margin-top: 14px;
+		font: 11px/1.75 var(--font-mono);
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.watch-status span {
+		display: block;
+		margin-top: 4px;
+	}
+	.watch-history {
+		margin-top: 20px;
+		min-width: 0;
+	}
+	.watch-history summary {
+		cursor: pointer;
+		font-size: 12px;
+		font-weight: 650;
+	}
+	.watch-scope {
+		margin: 12px 0;
+	}
+	.watch-history > ol {
+		display: grid;
+		gap: 14px;
+		max-height: 460px;
+		overflow: auto;
+		padding: 4px;
+	}
+	.watch-history > ol > li {
+		padding: 16px;
+		border: var(--rule);
+		border-radius: var(--radius-control);
+		min-width: 0;
+	}
+	.watch-history > ol > li.changed {
+		border-left: 3px solid var(--accent-ink);
+	}
+	.event-caption {
+		display: flex;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 8px;
+		font-size: 12px;
+	}
+	.event-caption time {
+		font: 11px var(--font-mono);
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.watch-history li > p {
+		margin: 10px 0 0;
+		font-size: 11px;
+		line-height: 1.75;
+	}
+	.event-anchors {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 14px;
+		margin-top: 10px;
+		font-size: 11px;
+		color: var(--accent-ink);
+	}
+	.watch-history .watch-delta strong {
+		font: 22px/1.5 var(--font-number, var(--font-mono));
+		overflow-wrap: anywhere;
+	}
+	.watch-delta span {
+		display: block;
+		font: 11px/1.7 var(--font-mono);
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.token-changes {
+		margin-top: 10px;
+	}
+	.token-changes li {
+		display: grid;
+		gap: 5px;
+		padding: 10px 0;
+		border-top: var(--rule);
+	}
+	.token-changes code {
+		font-size: 11px;
+		overflow-wrap: anywhere;
+		color: var(--accent-ink);
+	}
+	.token-changes strong {
+		font: 12px var(--font-mono);
+		overflow-wrap: anywhere;
+	}
+	:global(:root[data-appearance='prism']) .balance-watch {
+		padding: 20px;
+		background: var(--surface-hover);
+		border: var(--rule);
+		border-radius: 14px;
+	}
+	:global(:root[data-appearance='atelier']) .watch-history > ol > li {
+		border: 0;
+		border-bottom: var(--rule);
+		border-radius: 0;
+		padding-inline: 0;
+	}
+	:global(:root[data-appearance='aurora']) .watch-heading {
+		display: block;
+		text-align: center;
+	}
+	:global(:root[data-appearance='aurora']) .watch-heading p {
+		margin-inline: auto;
+	}
+	:global(:root[data-appearance='aurora']) .watch-button {
+		margin-top: 16px;
+		border-radius: 100px;
+	}
+	:global(:root[data-appearance='aurora']) .watch-history > ol {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+	@media (max-width: 650px) {
+		.watch-heading {
+			flex-wrap: wrap;
+		}
+		.watch-button {
+			width: 100%;
+		}
+		:global(:root[data-appearance='prism']) .balance-watch {
+			padding: 16px;
+		}
+		:global(:root[data-appearance='aurora']) .watch-history > ol {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
 	.group-dashboard {
 		min-width: 0;
 		margin-bottom: 28px;

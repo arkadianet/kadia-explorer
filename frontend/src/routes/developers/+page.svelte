@@ -161,10 +161,55 @@
 			<p class="lead">API playground</p>
 			<p>Build a request, inspect the evidence and take the exact query into your own tools.</p>
 			<div class="traits">
-				<span>GET only</span><span>Same-origin requests</span><span>No wallet connection</span>
+				<span>GET playground</span><span>Same-origin requests</span><span>No wallet connection</span
+				>
 			</div>
 		</div>
 	</header>
+	<section class="integration-resources" aria-label="Developer integration resources">
+		<article>
+			<p class="eyebrow">01 / The contract</p>
+			<h2>OpenAPI 1.0</h2>
+			<p>
+				A versioned OpenAPI 3.1.1 document covering the 23 operations supported by the portable
+				client. Exact wire types, parameters and error behavior.
+			</p>
+			<a href="/openapi.json" download="kadia-openapi.json">Download OpenAPI ↗</a>
+		</article>
+		<article>
+			<p class="eyebrow">02 / The client</p>
+			<h2>Typed. Portable.</h2>
+			<p>
+				Browser and Node ES modules with exact amounts, coverage metadata, bounded requests and
+				strict page walking. Save all four files together.
+			</p>
+			<div class="sdk-links">
+				<a href="/sdk/kadia-client.js" download>Client JS ↗</a><a href="/sdk/operations.js" download
+					>Operations JS ↗</a
+				><a href="/sdk/kadia-client.d.ts" download>Client types ↗</a><a
+					href="/sdk/api-types.d.ts"
+					download>API types ↗</a
+				>
+			</div>
+		</article>
+		<article>
+			<p class="eyebrow">03 / Examples and agent tools</p>
+			<h2>Inspect a transaction.</h2>
+			<p>
+				A runnable Node example checks status, then reads confirmed details and verifies the
+				inclusion still agrees. Keep amounts as strings or BigInt.
+			</p>
+			<a href="/sdk/inspect-transaction.mjs" download>Download example ↗</a><small
+				>Node 22+ · place beside the client files · no package install</small
+			>
+			<a
+				href="https://github.com/arkadianet/kadia-explorer/tree/master/tools/mcp"
+				target="_blank"
+				rel="noreferrer">Set up the read-only MCP adapter ↗</a
+			>
+			<small>Ten tools for an API you configure, with exact values and coverage metadata.</small>
+		</article>
+	</section>
 	<div class="workbench">
 		<aside class="catalog" aria-label="API endpoints">
 			<label class="mobile-select" for="endpoint-select"
@@ -357,6 +402,75 @@
 </section>
 
 <style>
+	.integration-resources {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
+		margin-bottom: 2rem;
+	}
+	.integration-resources article {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.8rem;
+		padding: 1.5rem;
+		min-width: 0;
+		border: 1px solid var(--hairline);
+		border-radius: var(--radius-card);
+		background: var(--surface-solid);
+	}
+	.integration-resources h2 {
+		font-size: 1.4rem;
+		letter-spacing: -0.03em;
+	}
+	.integration-resources p {
+		line-height: 1.7;
+		font-size: 0.85rem;
+	}
+	.integration-resources a {
+		color: var(--accent-ink);
+		text-decoration: underline;
+		text-underline-offset: 0.25em;
+	}
+	.sdk-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.7rem;
+		font-size: 0.8rem;
+	}
+	.integration-resources small {
+		color: var(--fg-muted);
+		font-size: 0.75rem;
+	}
+	:global(html[data-appearance='prism']) .integration-resources article {
+		border-top: 3px solid var(--accent-ink);
+		box-shadow: var(--shadow-lift);
+	}
+	:global(html[data-appearance='atelier']) .integration-resources {
+		grid-template-columns: 1fr;
+	}
+	:global(html[data-appearance='atelier']) .integration-resources article {
+		border-radius: 0;
+		border-width: 1px 0 0;
+		display: grid;
+		grid-template-columns: 12rem 1fr;
+		background: transparent;
+	}
+	:global(html[data-appearance='atelier']) .integration-resources h2 {
+		font-family: var(--font-display, Georgia, serif);
+		font-size: 2rem;
+	}
+	:global(html[data-appearance='aurora']) .integration-resources article {
+		border-radius: 2rem;
+		background: linear-gradient(140deg, var(--surface-solid), var(--accent-wash));
+	}
+	@media (max-width: 850px) {
+		.integration-resources,
+		:global(html[data-appearance='atelier']) .integration-resources article {
+			grid-template-columns: 1fr;
+		}
+	}
+
 	.developer-workspace {
 		min-width: 0;
 	}

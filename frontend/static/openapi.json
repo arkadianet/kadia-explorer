@@ -1,0 +1,4584 @@
+{
+	"openapi": "3.1.1",
+	"info": {
+		"title": "Kadia explorer workflow API",
+		"version": "1.0.0",
+		"description": "Versioned documentation for the 23 operations supported by the portable SDK. Other server routes are outside this contract subset. Amounts and difficulty remain decimal strings; heights/counts are numbers. Exact historical address queries require full retained history; network history requires the entire requested range to be retained. Contract version is distinct from chain height and software release. Compatible fields may be added; unknown enum values should be surfaced rather than guessed."
+	},
+	"servers": [
+		{
+			"url": "/v1"
+		}
+	],
+	"paths": {
+		"/status": {
+			"get": {
+				"operationId": "status",
+				"summary": "status",
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/StatusDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/mempool": {
+			"get": {
+				"operationId": "mempool",
+				"summary": "mempool",
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/MempoolSnapshot"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/network/summary": {
+			"get": {
+				"operationId": "network",
+				"summary": "network",
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NetworkSummary"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/network/history": {
+			"get": {
+				"operationId": "networkHistory",
+				"summary": "network history",
+				"parameters": [
+					{
+						"name": "from_height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "to_height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "buckets",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 120
+						}
+					},
+					{
+						"name": "end_block_id",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NetworkHistory"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/supply": {
+			"get": {
+				"operationId": "supply",
+				"summary": "supply",
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SupplyDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/blocks": {
+			"get": {
+				"operationId": "blocks",
+				"summary": "blocks",
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 500
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "snapshot",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "dir",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["desc"]
+						}
+					},
+					{
+						"name": "consistency",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["strict", "best_effort"],
+							"default": "best_effort"
+						},
+						"description": "The SDK always requests strict consistency and carries cursor and snapshot together."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"items": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/BlockDto"
+											}
+										},
+										"next_cursor": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_snapshot": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"consistency": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "strict"
+												},
+												{
+													"type": "string",
+													"const": "best_effort"
+												}
+											]
+										},
+										"anchor": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"height": {
+															"type": "number"
+														},
+														"block_id": {
+															"type": "string"
+														}
+													},
+													"required": ["height", "block_id"]
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"observed_anchor": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"height": {
+															"type": "number"
+														},
+														"block_id": {
+															"type": "string"
+														}
+													},
+													"required": ["height", "block_id"]
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"required": ["items", "next_cursor"]
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/blocks/{height_or_id}": {
+			"get": {
+				"operationId": "block",
+				"summary": "block",
+				"parameters": [
+					{
+						"name": "height_or_id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								{
+									"type": "string",
+									"pattern": "^[a-fA-F0-9]{64}$"
+								}
+							]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BlockDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/blocks/{height_or_id}/rewards": {
+			"get": {
+				"operationId": "rewards",
+				"summary": "rewards",
+				"parameters": [
+					{
+						"name": "height_or_id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								{
+									"type": "string",
+									"pattern": "^[a-fA-F0-9]{64}$"
+								}
+							]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RewardBreakdown"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/txs/{id}": {
+			"get": {
+				"operationId": "transaction",
+				"summary": "transaction",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TxDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/txs/{id}/status": {
+			"get": {
+				"operationId": "transactionStatus",
+				"summary": "transaction status",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TxStatusDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/txs/{id}/evidence": {
+			"get": {
+				"operationId": "transactionEvidence",
+				"summary": "transaction evidence",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TxEvidence"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/tx-summaries": {
+			"get": {
+				"operationId": "transactions",
+				"summary": "transactions",
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 500
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "snapshot",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "dir",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["asc", "desc"]
+						}
+					},
+					{
+						"name": "consistency",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["strict", "best_effort"],
+							"default": "best_effort"
+						},
+						"description": "The SDK always requests strict consistency and carries cursor and snapshot together."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"items": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/TxSummaryDto"
+											}
+										},
+										"next_cursor": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_snapshot": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"consistency": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "strict"
+												},
+												{
+													"type": "string",
+													"const": "best_effort"
+												}
+											]
+										},
+										"anchor": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"height": {
+															"type": "number"
+														},
+														"block_id": {
+															"type": "string"
+														}
+													},
+													"required": ["height", "block_id"]
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"observed_anchor": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"height": {
+															"type": "number"
+														},
+														"block_id": {
+															"type": "string"
+														}
+													},
+													"required": ["height", "block_id"]
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"required": ["items", "next_cursor"]
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/blocks/{height_or_id}/tx-summaries": {
+			"get": {
+				"operationId": "blockTransactions",
+				"summary": "block transactions",
+				"parameters": [
+					{
+						"name": "height_or_id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								{
+									"type": "string",
+									"pattern": "^[a-fA-F0-9]{64}$"
+								}
+							]
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 500
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "snapshot",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "dir",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["asc", "desc"]
+						}
+					},
+					{
+						"name": "consistency",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["strict", "best_effort"],
+							"default": "best_effort"
+						},
+						"description": "The SDK always requests strict consistency and carries cursor and snapshot together."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"items": {
+											"type": "array",
+											"items": {
+												"$ref": "#/components/schemas/TxSummaryDto"
+											}
+										},
+										"next_cursor": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"next_snapshot": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"consistency": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "strict"
+												},
+												{
+													"type": "string",
+													"const": "best_effort"
+												}
+											]
+										},
+										"anchor": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"height": {
+															"type": "number"
+														},
+														"block_id": {
+															"type": "string"
+														}
+													},
+													"required": ["height", "block_id"]
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"observed_anchor": {
+											"anyOf": [
+												{
+													"type": "object",
+													"properties": {
+														"height": {
+															"type": "number"
+														},
+														"block_id": {
+															"type": "string"
+														}
+													},
+													"required": ["height", "block_id"]
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"required": ["items", "next_cursor"]
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/boxes/{id}": {
+			"get": {
+				"operationId": "box",
+				"summary": "box",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BoxDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/addresses/{addr}": {
+			"get": {
+				"operationId": "address",
+				"summary": "address",
+				"parameters": [
+					{
+						"name": "addr",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 4096
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/AddressDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/addresses/{addr}/activity": {
+			"get": {
+				"operationId": "addressActivity",
+				"summary": "address activity",
+				"parameters": [
+					{
+						"name": "addr",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "snapshot",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "dir",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["asc", "desc"]
+						}
+					},
+					{
+						"name": "asset",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string",
+									"pattern": "^[a-fA-F0-9]{64}$"
+								},
+								{
+									"type": "string",
+									"enum": ["all", "erg"]
+								}
+							]
+						}
+					},
+					{
+						"name": "direction",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["all", "received", "sent", "mixed", "neutral", "unknown"]
+						}
+					},
+					{
+						"name": "from_ms",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991
+						}
+					},
+					{
+						"name": "to_ms",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 9007199254740991
+						}
+					},
+					{
+						"name": "consistency",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["strict"],
+							"default": "strict"
+						},
+						"description": "The SDK always requests strict consistency and carries cursor and snapshot together."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/AddressActivityPageDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/addresses/balances": {
+			"post": {
+				"operationId": "groupBalances",
+				"summary": "group balances",
+				"parameters": [],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["addresses"],
+								"properties": {
+									"addresses": {
+										"type": "array",
+										"minItems": 1,
+										"maxItems": 100,
+										"items": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 4096
+										}
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/GroupBalances"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/addresses/{addr}/balance/at": {
+			"get": {
+				"operationId": "historicalBalance",
+				"summary": "historical balance",
+				"parameters": [
+					{
+						"name": "addr",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "block_id",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HistoryBalance"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/addresses/{addr}/boxes/at": {
+			"get": {
+				"operationId": "historicalBoxes",
+				"summary": "historical boxes",
+				"parameters": [
+					{
+						"name": "addr",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "block_id",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 500
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HistoryBoxes"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/addresses/{addr}/balance/compare": {
+			"get": {
+				"operationId": "compareBalances",
+				"summary": "compare balances",
+				"parameters": [
+					{
+						"name": "addr",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "from_height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "to_height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "from_block_id",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					},
+					{
+						"name": "to_block_id",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HistoryComparison"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/tokens/{id}": {
+			"get": {
+				"operationId": "token",
+				"summary": "token",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TokenInfoDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/tokens/{id}/holders": {
+			"get": {
+				"operationId": "tokenHolders",
+				"summary": "token holders",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 500
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "snapshot",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "consistency",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["strict", "best_effort"],
+							"default": "best_effort"
+						},
+						"description": "The SDK always requests strict consistency and carries cursor and snapshot together."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TokenHoldersPageDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/tokens/search": {
+			"get": {
+				"operationId": "searchTokens",
+				"summary": "search tokens",
+				"parameters": [
+					{
+						"name": "q",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 512,
+							"x-max-utf8-bytes": 512,
+							"description": "At most 512 UTF-8 bytes. ASCII whitespace is trimmed and collapsed; ASCII letters are lowercased. Non-ASCII text is matched exactly."
+						}
+					},
+					{
+						"name": "match",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["prefix", "exact"]
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 500
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "snapshot",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "consistency",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["strict", "best_effort"],
+							"default": "best_effort"
+						},
+						"description": "The SDK always requests strict consistency and carries cursor and snapshot together."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TokenSearchDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"StatusDto": {
+				"type": "object",
+				"properties": {
+					"source_observed_at_ms": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"source_error": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"indexed": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"best": {
+						"type": "number"
+					},
+					"mode": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "bulk"
+							},
+							{
+								"type": "string",
+								"const": "tip"
+							}
+						]
+					},
+					"source": {
+						"type": "string"
+					},
+					"halted": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"lag_blocks": {
+						"type": "number"
+					},
+					"stalled": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/StatusStalledDto"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"inflight_reads": {
+						"type": "number"
+					},
+					"rate_limited_total": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"indexed",
+					"best",
+					"mode",
+					"source",
+					"halted",
+					"lag_blocks",
+					"stalled",
+					"inflight_reads",
+					"rate_limited_total"
+				]
+			},
+			"StatusStalledDto": {
+				"type": "object",
+				"properties": {
+					"height": {
+						"type": "number"
+					},
+					"since_secs": {
+						"type": "number"
+					},
+					"reason": {
+						"type": "string"
+					}
+				},
+				"required": ["height", "since_secs", "reason"]
+			},
+			"MempoolSnapshot": {
+				"type": "object",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"const": "configured_node_mempool"
+					},
+					"source": {
+						"type": "string",
+						"const": "configured_primary_node"
+					},
+					"checked_at_ms": {
+						"type": "number"
+					},
+					"expires_at_ms": {
+						"type": "number"
+					},
+					"cached": {
+						"type": "boolean"
+					},
+					"limit": {
+						"type": "number",
+						"const": 100
+					},
+					"limit_reached": {
+						"type": "boolean"
+					},
+					"observed_count": {
+						"type": "number"
+					},
+					"items": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/PendingTransaction"
+						}
+					}
+				},
+				"required": [
+					"scope",
+					"source",
+					"checked_at_ms",
+					"expires_at_ms",
+					"cached",
+					"limit",
+					"limit_reached",
+					"observed_count",
+					"items"
+				]
+			},
+			"PendingTransaction": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"input_count": {
+						"type": "number"
+					},
+					"data_input_count": {
+						"type": "number"
+					},
+					"output_count": {
+						"type": "number"
+					},
+					"size": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"fee": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": ["id", "input_count", "data_input_count", "output_count", "size", "fee"]
+			},
+			"NetworkSummary": {
+				"type": "object",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"const": "latest_indexed_blocks"
+					},
+					"requested_blocks": {
+						"type": "number"
+					},
+					"block_count": {
+						"type": "number"
+					},
+					"transaction_count": {
+						"type": "number"
+					},
+					"fees": {
+						"type": "string"
+					},
+					"from_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"to_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"anchor_id": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"earliest_timestamp": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"latest_timestamp": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"partial_from": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"recent_blocks": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/BlockDto"
+						}
+					},
+					"blocks_per_hour": {
+						"type": "array",
+						"items": {
+							"type": "number"
+						}
+					},
+					"transactions_per_hour": {
+						"type": "array",
+						"items": {
+							"type": "number"
+						}
+					},
+					"fees_per_hour": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"blocks_per_ten_minutes": {
+						"type": "array",
+						"items": {
+							"type": "number"
+						}
+					}
+				},
+				"required": [
+					"scope",
+					"requested_blocks",
+					"block_count",
+					"transaction_count",
+					"fees",
+					"from_height",
+					"to_height",
+					"anchor_id",
+					"earliest_timestamp",
+					"latest_timestamp",
+					"partial_from",
+					"recent_blocks",
+					"blocks_per_hour",
+					"transactions_per_hour",
+					"fees_per_hour",
+					"blocks_per_ten_minutes"
+				]
+			},
+			"BlockDto": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"height": {
+						"type": "number"
+					},
+					"parent_id": {
+						"type": "string"
+					},
+					"timestamp": {
+						"type": "number"
+					},
+					"difficulty": {
+						"type": "string"
+					},
+					"miner_pk": {
+						"type": "string"
+					},
+					"tx_count": {
+						"type": "number"
+					},
+					"size": {
+						"type": "number"
+					},
+					"fees": {
+						"type": "string"
+					},
+					"reward": {
+						"type": "string"
+					},
+					"version": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"id",
+					"height",
+					"parent_id",
+					"timestamp",
+					"difficulty",
+					"miner_pk",
+					"tx_count",
+					"size",
+					"fees",
+					"reward",
+					"version"
+				]
+			},
+			"NetworkHistory": {
+				"type": "object",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"const": "canonical_block_headers"
+					},
+					"consistency": {
+						"type": "string",
+						"const": "single_reader"
+					},
+					"complete": {
+						"type": "boolean",
+						"const": true
+					},
+					"full_history": {
+						"type": "boolean"
+					},
+					"partial_from": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"indexed_height": {
+						"type": "number"
+					},
+					"anchor": {
+						"type": "object",
+						"properties": {
+							"height": {
+								"type": "number"
+							},
+							"block_id": {
+								"type": "string"
+							}
+						},
+						"required": ["height", "block_id"]
+					},
+					"requested_buckets": {
+						"type": "number"
+					},
+					"bucket_width": {
+						"type": "number"
+					},
+					"totals": {
+						"$ref": "#/components/schemas/NetworkBucket"
+					},
+					"buckets": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/NetworkBucket"
+						}
+					}
+				},
+				"required": [
+					"scope",
+					"consistency",
+					"complete",
+					"full_history",
+					"partial_from",
+					"indexed_height",
+					"anchor",
+					"requested_buckets",
+					"bucket_width",
+					"totals",
+					"buckets"
+				]
+			},
+			"NetworkBucket": {
+				"type": "object",
+				"properties": {
+					"from_height": {
+						"type": "number"
+					},
+					"to_height": {
+						"type": "number"
+					},
+					"block_count": {
+						"type": "number"
+					},
+					"transaction_count": {
+						"type": "string"
+					},
+					"fees": {
+						"type": "string"
+					},
+					"size_bytes": {
+						"type": "string"
+					},
+					"difficulty_min": {
+						"type": "string"
+					},
+					"difficulty_max": {
+						"type": "string"
+					},
+					"difficulty_end": {
+						"type": "string"
+					},
+					"first_timestamp": {
+						"type": "number"
+					},
+					"last_timestamp": {
+						"type": "number"
+					},
+					"earliest_timestamp": {
+						"type": "number"
+					},
+					"latest_timestamp": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"from_height",
+					"to_height",
+					"block_count",
+					"transaction_count",
+					"fees",
+					"size_bytes",
+					"difficulty_min",
+					"difficulty_max",
+					"difficulty_end",
+					"first_timestamp",
+					"last_timestamp",
+					"earliest_timestamp",
+					"latest_timestamp"
+				]
+			},
+			"SupplyDto": {
+				"type": "object",
+				"properties": {
+					"indexed_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"emission_remaining_nano": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"emitted_nano": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"outside_emission_nano": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"circulating_nano": {
+						"type": "null"
+					},
+					"definition": {
+						"type": "string",
+						"const": "genesis_allocation_minus_original_emission_reserve"
+					},
+					"genesis_total_nano": {
+						"type": "string"
+					},
+					"complete": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"indexed_height",
+					"emission_remaining_nano",
+					"emitted_nano",
+					"outside_emission_nano",
+					"circulating_nano",
+					"definition",
+					"genesis_total_nano",
+					"complete"
+				]
+			},
+			"RewardBreakdown": {
+				"type": "object",
+				"properties": {
+					"block_id": {
+						"type": "string"
+					},
+					"height": {
+						"type": "number"
+					},
+					"basis": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "observed_eip27_reward_box"
+							},
+							{
+								"type": "string",
+								"const": "unsupported"
+							}
+						]
+					},
+					"gross_reward": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"reemission_obligation": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"miner_subsidy": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"transaction_fees": {
+						"type": "string"
+					},
+					"reward_box_id": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"transaction_id": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"note": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"block_id",
+					"height",
+					"basis",
+					"gross_reward",
+					"reemission_obligation",
+					"miner_subsidy",
+					"transaction_fees",
+					"reward_box_id",
+					"transaction_id",
+					"note"
+				]
+			},
+			"TxDto": {
+				"type": "object",
+				"properties": {
+					"block_id": {
+						"type": "string"
+					},
+					"indexed_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"confirmations": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"id": {
+						"type": "string"
+					},
+					"height": {
+						"type": "number"
+					},
+					"index": {
+						"type": "number"
+					},
+					"timestamp": {
+						"type": "number"
+					},
+					"size": {
+						"type": "number"
+					},
+					"fee": {
+						"type": "string"
+					},
+					"inputs": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/InputDto"
+						}
+					},
+					"data_inputs": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"outputs": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/BoxDto"
+						}
+					}
+				},
+				"required": [
+					"id",
+					"height",
+					"index",
+					"timestamp",
+					"size",
+					"fee",
+					"inputs",
+					"data_inputs",
+					"outputs"
+				]
+			},
+			"InputDto": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"box": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/BoxDto"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": ["id", "box"]
+			},
+			"BoxDto": {
+				"type": "object",
+				"properties": {
+					"kind": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "box"
+							},
+							{
+								"type": "string",
+								"const": "fee"
+							},
+							{
+								"type": "string",
+								"const": "emission"
+							}
+						]
+					},
+					"id": {
+						"type": "string"
+					},
+					"tx_id": {
+						"type": "string"
+					},
+					"index": {
+						"type": "number"
+					},
+					"value": {
+						"type": "string"
+					},
+					"creation_height": {
+						"type": "number"
+					},
+					"ergo_tree": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"address": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"template_hash": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"tree_hash": {
+						"type": "string"
+					},
+					"tokens": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/TokenDto"
+						}
+					},
+					"registers": {
+						"anyOf": [
+							{
+								"type": "object",
+								"additionalProperties": {}
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"size": {
+						"type": "number"
+					},
+					"spent_by": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"spent_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"rent": {
+						"$ref": "#/components/schemas/RentDto"
+					}
+				},
+				"required": [
+					"id",
+					"tx_id",
+					"index",
+					"value",
+					"creation_height",
+					"ergo_tree",
+					"address",
+					"template_hash",
+					"tree_hash",
+					"tokens",
+					"registers",
+					"size",
+					"spent_by",
+					"spent_height",
+					"rent"
+				]
+			},
+			"TokenDto": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"amount": {
+						"type": "string"
+					},
+					"name": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"decimals": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": ["id", "amount", "name", "decimals"]
+			},
+			"RentDto": {
+				"type": "object",
+				"properties": {
+					"maturity_height": {
+						"type": "number"
+					},
+					"due_nano": {
+						"type": "string"
+					},
+					"claimable_at_tip": {
+						"type": "boolean"
+					},
+					"consensus_fee_nano": {
+						"type": "string"
+					},
+					"collectible": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"maturity_height",
+					"due_nano",
+					"claimable_at_tip",
+					"consensus_fee_nano",
+					"collectible"
+				]
+			},
+			"TxStatusDto": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"state": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "confirmed"
+							},
+							{
+								"type": "string",
+								"const": "pending"
+							},
+							{
+								"type": "string",
+								"const": "not_observed"
+							},
+							{
+								"type": "string",
+								"const": "no_longer_observed"
+							},
+							{
+								"type": "string",
+								"const": "unavailable"
+							},
+							{
+								"type": "string",
+								"const": "conflicted"
+							}
+						]
+					},
+					"checked_at_ms": {
+						"type": "number"
+					},
+					"indexed_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"inclusion": {
+						"anyOf": [
+							{
+								"type": "object",
+								"properties": {
+									"block_id": {
+										"type": "string"
+									},
+									"height": {
+										"type": "number"
+									},
+									"confirmations": {
+										"type": "number"
+									}
+								},
+								"required": ["block_id", "height", "confirmations"]
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"previous_inclusion": {
+						"anyOf": [
+							{
+								"type": "object",
+								"properties": {
+									"block_id": {
+										"type": "string"
+									},
+									"height": {
+										"type": "number"
+									}
+								},
+								"required": ["block_id", "height"]
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"mempool": {
+						"type": "object",
+						"properties": {
+							"observation": {
+								"anyOf": [
+									{
+										"type": "string",
+										"const": "present"
+									},
+									{
+										"type": "string",
+										"const": "absent"
+									},
+									{
+										"type": "string",
+										"const": "unavailable"
+									},
+									{
+										"type": "string",
+										"const": "not_checked"
+									}
+								]
+							},
+							"checked_at_ms": {
+								"anyOf": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"first_seen_at_ms": {
+								"anyOf": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"last_seen_at_ms": {
+								"anyOf": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"error": {
+								"anyOf": [
+									{
+										"type": "string",
+										"const": "unsupported"
+									},
+									{
+										"type": "string",
+										"const": "unavailable"
+									},
+									{
+										"type": "string",
+										"const": "busy"
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": [
+							"observation",
+							"checked_at_ms",
+							"first_seen_at_ms",
+							"last_seen_at_ms",
+							"error"
+						]
+					},
+					"pending": {
+						"anyOf": [
+							{
+								"type": "object",
+								"properties": {
+									"input_count": {
+										"type": "number"
+									},
+									"output_count": {
+										"type": "number"
+									},
+									"data_input_count": {
+										"type": "number"
+									},
+									"size": {
+										"anyOf": [
+											{
+												"type": "number"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"fee": {
+										"anyOf": [
+											{
+												"type": "string"
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								},
+								"required": ["input_count", "output_count", "data_input_count", "size", "fee"]
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"conflicts": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"input_id": {
+									"type": "string"
+								},
+								"tx_id": {
+									"type": "string"
+								},
+								"height": {
+									"type": "number"
+								}
+							},
+							"required": ["input_id", "tx_id", "height"]
+						}
+					},
+					"history_scope": {
+						"type": "string",
+						"const": "process_local_requested_transactions"
+					},
+					"retention_seconds": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"id",
+					"state",
+					"checked_at_ms",
+					"indexed_height",
+					"inclusion",
+					"previous_inclusion",
+					"mempool",
+					"pending",
+					"conflicts",
+					"history_scope",
+					"retention_seconds"
+				]
+			},
+			"TxEvidence": {
+				"type": "object",
+				"properties": {
+					"tx_id": {
+						"type": "string"
+					},
+					"block_id": {
+						"type": "string"
+					},
+					"height": {
+						"type": "number"
+					},
+					"assurance": {
+						"type": "string",
+						"const": "trusted_node_response"
+					},
+					"inputs": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"id": {
+									"type": "string"
+								},
+								"proof": {
+									"anyOf": [
+										{
+											"type": "string",
+											"const": "empty"
+										},
+										{
+											"type": "string",
+											"const": "nonempty"
+										}
+									]
+								},
+								"extension_127": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								}
+							},
+							"required": ["id", "proof", "extension_127"]
+						}
+					}
+				},
+				"required": ["tx_id", "block_id", "height", "assurance", "inputs"]
+			},
+			"TxSummaryDto": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"height": {
+						"type": "number"
+					},
+					"index": {
+						"type": "number"
+					},
+					"timestamp": {
+						"type": "number"
+					},
+					"size": {
+						"type": "number"
+					},
+					"fee": {
+						"type": "string"
+					},
+					"input_count": {
+						"type": "number"
+					},
+					"data_input_count": {
+						"type": "number"
+					},
+					"output_count": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"id",
+					"height",
+					"index",
+					"timestamp",
+					"size",
+					"fee",
+					"input_count",
+					"data_input_count",
+					"output_count"
+				]
+			},
+			"AddressDto": {
+				"type": "object",
+				"properties": {
+					"address": {
+						"type": "string"
+					},
+					"tree_hash": {
+						"type": "string"
+					},
+					"balance": {
+						"$ref": "#/components/schemas/BalanceDto"
+					},
+					"box_count": {
+						"type": "number"
+					},
+					"tx_count": {
+						"type": "number"
+					},
+					"first_seen": {
+						"type": "number"
+					},
+					"last_seen": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"address",
+					"tree_hash",
+					"balance",
+					"box_count",
+					"tx_count",
+					"first_seen",
+					"last_seen"
+				]
+			},
+			"BalanceDto": {
+				"type": "object",
+				"properties": {
+					"nano": {
+						"type": "string"
+					},
+					"tokens": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/TokenDto"
+						}
+					}
+				},
+				"required": ["nano", "tokens"]
+			},
+			"AddressActivityPageDto": {
+				"allOf": [
+					{
+						"type": "object",
+						"properties": {
+							"items": {
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/AddressActivityDto"
+								}
+							},
+							"next_cursor": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"next_snapshot": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"consistency": {
+								"anyOf": [
+									{
+										"type": "string",
+										"const": "strict"
+									},
+									{
+										"type": "string",
+										"const": "best_effort"
+									}
+								]
+							},
+							"anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"observed_anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["items", "next_cursor"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"scanned": {
+								"type": "number"
+							},
+							"scan_limit_reached": {
+								"type": "boolean"
+							},
+							"partial_from": {
+								"anyOf": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["scanned", "scan_limit_reached", "partial_from"]
+					}
+				]
+			},
+			"AddressActivityDto": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"height": {
+						"type": "number"
+					},
+					"block_id": {
+						"type": "string"
+					},
+					"timestamp": {
+						"type": "number"
+					},
+					"index": {
+						"type": "number"
+					},
+					"fee": {
+						"type": "string"
+					},
+					"input_count": {
+						"type": "number"
+					},
+					"output_count": {
+						"type": "number"
+					},
+					"coverage": {
+						"type": "object",
+						"properties": {
+							"complete": {
+								"type": "boolean"
+							},
+							"resolved_inputs": {
+								"type": "number"
+							},
+							"total_inputs": {
+								"type": "number"
+							}
+						},
+						"required": ["complete", "resolved_inputs", "total_inputs"]
+					},
+					"erg_delta": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"tokens": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"id": {
+									"type": "string"
+								},
+								"name": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"decimals": {
+									"anyOf": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"delta": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								}
+							},
+							"required": ["id", "name", "decimals", "delta"]
+						}
+					},
+					"direction": {
+						"$ref": "#/components/schemas/ActivityDirection"
+					},
+					"asset_match": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "definite"
+							},
+							{
+								"type": "string",
+								"const": "uncertain"
+							}
+						]
+					}
+				},
+				"required": [
+					"id",
+					"height",
+					"block_id",
+					"timestamp",
+					"index",
+					"fee",
+					"input_count",
+					"output_count",
+					"coverage",
+					"erg_delta",
+					"tokens",
+					"direction",
+					"asset_match"
+				]
+			},
+			"ActivityDirection": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "received"
+					},
+					{
+						"type": "string",
+						"const": "sent"
+					},
+					{
+						"type": "string",
+						"const": "mixed"
+					},
+					{
+						"type": "string",
+						"const": "neutral"
+					},
+					{
+						"type": "string",
+						"const": "unknown"
+					}
+				]
+			},
+			"GroupBalances": {
+				"type": "object",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"const": "selected_address_scripts"
+					},
+					"consistency": {
+						"type": "string",
+						"const": "single_reader"
+					},
+					"indexed_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"anchor": {
+						"anyOf": [
+							{
+								"type": "object",
+								"properties": {
+									"height": {
+										"type": "number"
+									},
+									"block_id": {
+										"type": "string"
+									}
+								},
+								"required": ["height", "block_id"]
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"full_history": {
+						"type": "boolean"
+					},
+					"partial_from": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"complete": {
+						"type": "boolean"
+					},
+					"requested_count": {
+						"type": "number"
+					},
+					"resolved_script_count": {
+						"type": "number"
+					},
+					"members": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/GroupMember"
+						}
+					},
+					"observed_totals": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/GroupBalance"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"scope",
+					"consistency",
+					"indexed_height",
+					"anchor",
+					"full_history",
+					"partial_from",
+					"complete",
+					"requested_count",
+					"resolved_script_count",
+					"members",
+					"observed_totals"
+				]
+			},
+			"GroupMember": {
+				"type": "object",
+				"properties": {
+					"address": {
+						"type": "string"
+					},
+					"tree_hash": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"status": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "resolved"
+							},
+							{
+								"type": "string",
+								"const": "unseen"
+							},
+							{
+								"type": "string",
+								"const": "invalid"
+							},
+							{
+								"type": "string",
+								"const": "duplicate"
+							}
+						]
+					},
+					"duplicate_of": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"balance": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/GroupBalance"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": ["address", "tree_hash", "status", "duplicate_of", "balance"]
+			},
+			"GroupBalance": {
+				"type": "object",
+				"properties": {
+					"nano": {
+						"type": "string"
+					},
+					"tokens": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/GroupToken"
+						}
+					}
+				},
+				"required": ["nano", "tokens"]
+			},
+			"GroupToken": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"amount": {
+						"type": "string"
+					}
+				},
+				"required": ["id", "amount"]
+			},
+			"HistoryBalance": {
+				"type": "object",
+				"properties": {
+					"address": {
+						"type": "string"
+					},
+					"at": {
+						"$ref": "#/components/schemas/HistoryAnchor"
+					},
+					"indexed_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"balance": {
+						"type": "object",
+						"properties": {
+							"nano": {
+								"type": "string"
+							},
+							"box_count": {
+								"type": "number"
+							},
+							"tokens": {
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/HistoryToken"
+								}
+							}
+						},
+						"required": ["nano", "box_count", "tokens"]
+					},
+					"complete": {
+						"type": "boolean"
+					}
+				},
+				"required": ["address", "at", "indexed_height", "balance", "complete"]
+			},
+			"HistoryAnchor": {
+				"type": "object",
+				"properties": {
+					"height": {
+						"type": "number"
+					},
+					"block_id": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": ["height", "block_id"]
+			},
+			"HistoryToken": {
+				"type": "object",
+				"properties": {
+					"token_id": {
+						"type": "string"
+					},
+					"amount": {
+						"type": "string"
+					}
+				},
+				"required": ["token_id", "amount"]
+			},
+			"HistoryBoxes": {
+				"type": "object",
+				"properties": {
+					"at": {
+						"$ref": "#/components/schemas/HistoryAnchor"
+					},
+					"items": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/HistoryBox"
+						}
+					},
+					"next_cursor": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": ["at", "items", "next_cursor"]
+			},
+			"HistoryBox": {
+				"type": "object",
+				"properties": {
+					"box_id": {
+						"type": "string"
+					},
+					"inclusion_height": {
+						"type": "number"
+					},
+					"nano": {
+						"type": "string"
+					},
+					"tokens": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/HistoryToken"
+						}
+					}
+				},
+				"required": ["box_id", "inclusion_height", "nano", "tokens"]
+			},
+			"HistoryComparison": {
+				"type": "object",
+				"properties": {
+					"address": {
+						"type": "string"
+					},
+					"indexed_height": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"complete": {
+						"type": "boolean"
+					},
+					"from": {
+						"type": "object",
+						"properties": {
+							"at": {
+								"$ref": "#/components/schemas/HistoryAnchor"
+							},
+							"balance": {
+								"type": "object",
+								"properties": {
+									"nano": {
+										"type": "string"
+									},
+									"box_count": {
+										"type": "number"
+									},
+									"tokens": {
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/HistoryToken"
+										}
+									}
+								},
+								"required": ["nano", "box_count", "tokens"]
+							}
+						},
+						"required": ["at", "balance"]
+					},
+					"to": {
+						"type": "object",
+						"properties": {
+							"at": {
+								"$ref": "#/components/schemas/HistoryAnchor"
+							},
+							"balance": {
+								"type": "object",
+								"properties": {
+									"nano": {
+										"type": "string"
+									},
+									"box_count": {
+										"type": "number"
+									},
+									"tokens": {
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/HistoryToken"
+										}
+									}
+								},
+								"required": ["nano", "box_count", "tokens"]
+							}
+						},
+						"required": ["at", "balance"]
+					}
+				},
+				"required": ["address", "indexed_height", "complete", "from", "to"]
+			},
+			"TokenInfoDto": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"name": {
+						"type": "string"
+					},
+					"description": {
+						"type": "string"
+					},
+					"decimals": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"token_type": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"kind": {
+						"$ref": "#/components/schemas/TokenKind"
+					},
+					"emission": {
+						"type": "string"
+					},
+					"burned": {
+						"type": "string"
+					},
+					"supply": {
+						"type": "string"
+					},
+					"holder_count": {
+						"type": "number"
+					},
+					"box_count": {
+						"type": "number"
+					},
+					"mint_tx": {
+						"type": "string"
+					},
+					"mint_box": {
+						"type": "string"
+					},
+					"mint_height": {
+						"type": "number"
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"description",
+					"decimals",
+					"token_type",
+					"kind",
+					"emission",
+					"burned",
+					"supply",
+					"holder_count",
+					"box_count",
+					"mint_tx",
+					"mint_box",
+					"mint_height"
+				]
+			},
+			"TokenKind": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "nft-picture"
+					},
+					{
+						"type": "string",
+						"const": "nft-audio"
+					},
+					{
+						"type": "string",
+						"const": "nft-video"
+					},
+					{
+						"type": "string",
+						"const": "membership"
+					},
+					{
+						"type": "string",
+						"const": "token"
+					}
+				]
+			},
+			"TokenHoldersPageDto": {
+				"allOf": [
+					{
+						"type": "object",
+						"properties": {
+							"items": {
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/TokenHolderDto"
+								}
+							},
+							"next_cursor": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"next_snapshot": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"consistency": {
+								"anyOf": [
+									{
+										"type": "string",
+										"const": "strict"
+									},
+									{
+										"type": "string",
+										"const": "best_effort"
+									}
+								]
+							},
+							"anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"observed_anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["items", "next_cursor"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"holder_context": {
+								"$ref": "#/components/schemas/TokenHolderContext"
+							}
+						}
+					}
+				]
+			},
+			"TokenHolderContext": {
+				"type": "object",
+				"properties": {
+					"supply": {
+						"type": "string"
+					},
+					"holder_count": {
+						"type": "number"
+					},
+					"definition": {
+						"type": "string",
+						"const": "indexed_emission_minus_burned"
+					}
+				},
+				"required": ["supply", "holder_count", "definition"]
+			},
+			"TokenHolderDto": {
+				"type": "object",
+				"properties": {
+					"address": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"tree_hash": {
+						"type": "string"
+					},
+					"amount": {
+						"type": "string"
+					},
+					"share_pct": {
+						"type": "string"
+					}
+				},
+				"required": ["address", "tree_hash", "amount", "share_pct"]
+			},
+			"TokenSearchDto": {
+				"allOf": [
+					{
+						"type": "object",
+						"properties": {
+							"items": {
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/TokenInfoDto"
+								}
+							},
+							"next_cursor": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"next_snapshot": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"consistency": {
+								"anyOf": [
+									{
+										"type": "string",
+										"const": "strict"
+									},
+									{
+										"type": "string",
+										"const": "best_effort"
+									}
+								]
+							},
+							"anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"observed_anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["items", "next_cursor"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"search": {
+								"type": "object",
+								"properties": {
+									"query": {
+										"type": "string"
+									},
+									"normalized_query": {
+										"type": "string"
+									},
+									"match": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "prefix"
+											},
+											{
+												"type": "string",
+												"const": "exact"
+											}
+										]
+									},
+									"index_version": {
+										"type": "number",
+										"const": 1
+									},
+									"coverage": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "complete"
+											},
+											{
+												"type": "string",
+												"const": "partial"
+											}
+										]
+									},
+									"partial_from": {
+										"anyOf": [
+											{
+												"type": "number"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"indexed_names": {
+										"type": "number"
+									},
+									"total_tokens": {
+										"type": "number"
+									},
+									"unindexed_tokens": {
+										"type": "number"
+									}
+								},
+								"required": [
+									"query",
+									"normalized_query",
+									"match",
+									"index_version",
+									"coverage",
+									"partial_from",
+									"indexed_names",
+									"total_tokens",
+									"unindexed_tokens"
+								]
+							}
+						},
+						"required": ["search"]
+					}
+				]
+			}
+		}
+	}
+}

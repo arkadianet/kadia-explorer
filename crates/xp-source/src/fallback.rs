@@ -115,6 +115,16 @@ impl BlockSource for Fallback {
         self.primary.unconfirmed_transaction_json(id).await
     }
 
+    async fn unconfirmed_transactions_json(
+        &self,
+        limit: u16,
+        max_bytes: usize,
+    ) -> Result<String, SourceError> {
+        self.primary
+            .unconfirmed_transactions_json(limit, max_bytes)
+            .await
+    }
+
     async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
         self.primary.genesis_boxes_json().await
     }

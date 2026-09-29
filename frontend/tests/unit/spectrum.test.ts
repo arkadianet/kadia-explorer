@@ -18,7 +18,42 @@ const fixture = JSON.parse(
 const source = fixture.order;
 const settlement = fixture.settlement;
 const order = spectrumOrder(source)!;
+if (order.kind !== 'swap_sell') throw new Error('Expected the captured ERG-to-token order');
 const copy = <T>(value: T): T => structuredClone(value);
+
+const addedFixtures = ['swap-buy', 'deposit', 'redeem'].map((name) => ({
+	name,
+	...(JSON.parse(
+		readFileSync(
+			new URL('../../../tests/fixtures/apps/spectrum-v3-' + name + '.json', import.meta.url),
+			'utf8'
+		)
+	) as { order: BoxDto; settlement: TxDto })
+}));
+
+describe('pinned token-to-ERG and liquidity workflows', () => {
+	it.each(addedFixtures)(
+		'decodes and matches the recorded $name settlement',
+		({ name, order: box, settlement: tx }) => {
+			const decoded = spectrumOrder(box);
+			expect(decoded?.kind).toBe(name === 'swap-buy' ? 'swap_buy' : name);
+			expect(decoded).not.toBeNull();
+			const outcome = spectrumOutcome(decoded!, tx);
+			expect(outcome.kind, JSON.stringify(outcome)).toBe('matched');
+			if (outcome.kind !== 'matched') return;
+			if (name === 'swap-buy') {
+				expect(outcome.received).toEqual([{ id: 'erg', amount: '10457609' }]);
+				expect(outcome.calculated).toEqual([{ id: 'erg', amount: '10147609' }]);
+			} else if (name === 'deposit') {
+				expect(outcome.received[0].amount).toBe('4206');
+				expect(outcome.calculated[0].amount).toBe('4206');
+			} else {
+				expect(outcome.received.map((asset) => asset.amount)).toEqual(['33654950', '5']);
+				expect(outcome.calculated.map((asset) => asset.amount)).toEqual(['33344950', '5']);
+			}
+		}
+	);
+});
 
 describe('pinned Spectrum v3 ERG to token interpretation', () => {
 	it('decodes a captured mainnet order without losing execution-fee precision', () => {
@@ -157,6 +192,141 @@ describe('pinned Spectrum v3 ERG to token interpretation', () => {
 		badLP.inputs[0].box!.tokens[1].amount = badLP.outputs[0].tokens[1].amount = 'not-a-number';
 		expect(spectrumOutcome(order, badLP).kind).toBe('unrecognized');
 	});
+});
+
+describe('token-to-ERG and liquidity evidence boundaries', () => {
+	it.each(addedFixtures)(
+		'rejects mutated serialized literals and funding for $name',
+		({ name, order: box }) => {
+			const count = name === 'swap-buy' ? '1a' : name === 'deposit' ? '17' : '12';
+			const tree = box.ergo_tree!;
+			const changed = tree.replace(count + '0400', count + '0402');
+			expect(changed).not.toBe(tree);
+			expect(spectrumOrder({ ...box, ergo_tree: changed })).toBeNull();
+			expect(spectrumOrder({ ...box, ergo_tree: tree.slice(0, -2) + 'ff' })).toBeNull();
+			const invalid = copy(box);
+			invalid.tokens[0].amount = '0';
+			expect(spectrumOrder(invalid)).toBeNull();
+			invalid.tokens[0].amount = '9223372036854775808';
+			expect(spectrumOrder(invalid)).toBeNull();
+			invalid.tokens[0].amount = 17 as unknown as string;
+			expect(spectrumOrder(invalid)).toBeNull();
+			invalid.tokens = [...box.tokens, copy(box.tokens[0])];
+			expect(spectrumOrder(invalid)).toBeNull();
+		}
+	);
+	it.each(addedFixtures)(
+		'keeps incomplete, altered or excessive $name evidence unknown',
+		({ order: box, settlement: tx }) => {
+			const decoded = spectrumOrder(box)!;
+			const mutations: ((tx: TxDto) => void)[] = [
+				(tx) => {
+					tx.inputs[0].box = null;
+				},
+				(tx) => {
+					tx.inputs[0].id = 'a'.repeat(64);
+				},
+				(tx) => {
+					tx.inputs[1].box!.tokens[0].amount = '1';
+				},
+				(tx) => {
+					tx.outputs[0].tokens[0].amount = '2';
+				},
+				(tx) => {
+					tx.outputs[0].tokens[1].id = 'b'.repeat(64);
+				},
+				(tx) => {
+					tx.outputs[0].value = '10000000';
+				},
+				(tx) => {
+					tx.outputs[0].registers = { R4: '04c70f' };
+				},
+				(tx) => {
+					tx.outputs[1].ergo_tree =
+						decoded.refundTree === decoded.recipientTree ? '00' : decoded.refundTree;
+				},
+				(tx) => {
+					tx.outputs[1].index = 0;
+				},
+				(tx) => {
+					tx.outputs[3].value = (decoded.maximumMinerFee + 1n).toString();
+				},
+				(tx) => {
+					tx.outputs[2].id = tx.outputs[1].id;
+				},
+				(tx) => {
+					tx.inputs = Array(101).fill(tx.inputs[0]);
+				}
+			];
+			for (const mutate of mutations) {
+				const changed = copy(tx);
+				mutate(changed);
+				expect(spectrumOutcome(decoded, changed).kind).toBe('unrecognized');
+			}
+		}
+	);
+	it('keeps token-to-ERG order funding, pool input and returned order ERG distinct', () => {
+		const fixture = addedFixtures[0];
+		const decoded = spectrumOrder(fixture.order)!;
+		if (decoded.kind !== 'swap_buy') throw new Error('Expected SwapBuy');
+		expect(decoded.baseAmount).toBe(22n);
+		expect(decoded.maximumExecutionFee).toBe(18n);
+		expect(decoded.executionDenominator).toBe(1_000_000_000_000_000_000n);
+		expect(decoded.executionNumerator).toBe(1_522_526_077_827n);
+		const unfunded = copy(fixture.order);
+		unfunded.tokens[0].amount = '39';
+		expect(spectrumOrder(unfunded)).toBeNull();
+		for (const mutate of [
+			(tx: TxDto) => {
+				tx.outputs[0].tokens[2].amount = (BigInt(tx.outputs[0].tokens[2].amount) + 1n).toString();
+			},
+			(tx: TxDto) => {
+				tx.outputs[1].value = '1000000';
+			},
+			(tx: TxDto) => {
+				tx.outputs[0].value = (BigInt(tx.outputs[0].value) + 1n).toString();
+			}
+		]) {
+			const tx = copy(fixture.settlement);
+			mutate(tx);
+			expect(spectrumOutcome(decoded, tx).kind).toBe('unrecognized');
+		}
+		expect(
+			spectrumOutcome({ ...decoded, baseAmount: 10_000_000_000_000_000n }, fixture.settlement)
+		).toMatchObject({ kind: 'unrecognized', reason: expect.stringContaining('arithmetic range') });
+		// The captured compiled tree divides by constant9, contrary to the parameter
+		// names in its source comments. A nonpositive remainder has no refund condition.
+		const noFeeRefund = copy(fixture.settlement);
+		noFeeRefund.outputs[1].tokens = [];
+		expect(spectrumOutcome(decoded, noFeeRefund).kind).toBe('matched');
+	});
+	it.each(addedFixtures.slice(1))(
+		'requires the exact LP movement and recipient return for $name',
+		({ order: box, settlement: tx }) => {
+			const decoded = spectrumOrder(box)!;
+			for (const mutate of [
+				(tx: TxDto) => {
+					tx.outputs[0].tokens[1].amount = tx.inputs[0].box!.tokens[1].amount;
+				},
+				(tx: TxDto) => {
+					tx.outputs[1].tokens[0].amount = '1';
+				},
+				(tx: TxDto) => {
+					tx.outputs[1].value = '1';
+				},
+				(tx: TxDto) => {
+					tx.inputs[0].box!.tokens[1].amount = '9223372036854775807';
+				},
+				(tx: TxDto) => {
+					tx.outputs[0].tokens[2].amount = tx.inputs[0].box!.tokens[2].amount;
+				}
+			]) {
+				const changed = copy(tx);
+				mutate(changed);
+				expect(spectrumOutcome(decoded, changed).kind).toBe('unrecognized');
+			}
+		}
+	);
 });
 
 describe('explicit workflow observations', () => {

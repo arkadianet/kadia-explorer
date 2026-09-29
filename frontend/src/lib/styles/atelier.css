@@ -647,14 +647,18 @@
 	}
 
 	:root[data-appearance='atelier'] .nav {
+		display: block;
 		grid-column: 1 / -1;
 		border-top: var(--rule);
 	}
 
 	:root[data-appearance='atelier'] .nav ul {
 		flex-direction: row;
-		justify-content: space-between;
-		gap: 6px;
+		flex-wrap: wrap;
+		justify-content: flex-start;
+		gap: 0 16px;
+		overflow: visible;
+		scrollbar-gutter: auto;
 	}
 
 	:root[data-appearance='atelier'] .nav a {
@@ -665,6 +669,7 @@
 		color: var(--fg-muted);
 		background: transparent;
 		border-bottom: 3px solid transparent;
+		white-space: nowrap;
 	}
 
 	:root[data-appearance='atelier'] .nav a > svg {

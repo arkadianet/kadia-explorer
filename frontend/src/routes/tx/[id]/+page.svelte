@@ -6,6 +6,8 @@
 	import TransactionTracking from '$lib/components/TransactionTracking.svelte';
 	import TransactionReceipt from '$lib/components/TransactionReceipt.svelte';
 	import ApplicationWorkflow from '$lib/components/ApplicationWorkflow.svelte';
+	import RosenWorkflow from '$lib/components/RosenWorkflow.svelte';
+	import { transactionDeposits } from '$lib/apps/rosen';
 	import { transactionOrders } from '$lib/tx/spectrum';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHead from '$lib/components/PageHead.svelte';
@@ -36,6 +38,7 @@
 	);
 	const tx = $derived(tracking.tx);
 	const applicationOrders = $derived(tx ? transactionOrders(tx) : []);
+	const bridgeDeposits = $derived(tx ? transactionDeposits(tx) : []);
 	// A live inclusion check updates confirmations, not mutable box-spend/rent details.
 	const receiptTx = $derived(
 		tx && tracking.status?.state === 'confirmed'
@@ -122,6 +125,13 @@
 {#key tx?.block_id}{#each applicationOrders as order (order.box.id)}<ApplicationWorkflow
 			{order}
 		/>{/each}{/key}
+{#key tx?.block_id}{#each bridgeDeposits as deposit (deposit.box.id)}<RosenWorkflow
+			{deposit}
+		/>{/each}{/key}
+{#if tx}<p class="investigation-link">
+		<a href={`/investigate?kind=tx&id=${tx.id}`}>Investigate this transaction ↗</a> ·
+		<a href={`/applications?kind=tx&id=${tx.id}`}>Inspect application activity ↗</a>
+	</p>{/if}
 
 <!-- Inputs on the left, outputs on the right, parted by a rule that the two column headings
      label. No arrow glyph: the headings already say which side is which. -->
@@ -158,6 +168,15 @@
 {/if}
 
 <style>
+	.investigation-link {
+		font-size: var(--fs-data);
+		grid-column: 1 / -1;
+	}
+	.investigation-link a {
+		color: var(--accent-ink);
+		text-decoration: underline;
+		text-underline-offset: 0.25em;
+	}
 	.detail-snapshot {
 		font-size: 12px;
 		color: var(--fg-muted);

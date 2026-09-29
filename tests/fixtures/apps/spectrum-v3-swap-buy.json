@@ -1,0 +1,231 @@
+{
+  "provenance": {
+    "captured_at": "2026-09-28",
+    "source_order": "https://api.ergoplatform.com/api/v1/boxes/7134a244040ce51f1cdd6e8244414473cee6ed6f69efe3cd7829748b56770623",
+    "source_transaction": "https://api.ergoplatform.com/api/v1/transactions/90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+    "upstream_example": "https://github.com/spectrum-finance/ergo-dex-backend/blob/5dc8e9d983f2361308d317be7514260795ef92c9/modules/utxo-tracker/src/test/scala/org/ergoplatform/dex/tracker/parsers/amm/N2TV3ParserSpec.scala",
+    "contract_commit": "8fe94e1f8b4e1ab9402fca6fbc3955e3ad1415f7",
+    "note": "Public mainnet facts projected with Python integer parsing. All monetary values are decimal strings; mutable observations are recorded, not live. indexed_height conservatively uses transaction inclusion, not the remote server current tip. Size/rent UI fields are not supplied. Outputs omit later spend observations. fee is the exact value of the recorded miner-contract output, not a missing explorer fee field."
+  },
+  "order": {
+    "id": "7134a244040ce51f1cdd6e8244414473cee6ed6f69efe3cd7829748b56770623",
+    "tx_id": "0c4648c2152036a2ff15aa9094fdea094e8fb6c9031904b4d6e8b590a75abda8",
+    "index": 0,
+    "value": "310000",
+    "creation_height": 940121,
+    "ergo_tree": "199c041a0400052c04c60f08cd03b196b978d77488fba3138876a40a40b9a046c2fbb5ecfa13d4ecf8f1eec52aec0404040604020524058080a0f6f4acdbe01b05868e82dacf5804000e201d5afc59838920bb5ef2a8f9d63825a55b1d48e269d7cecee335d637c3ff5f3f0e240008cd03b196b978d77488fba3138876a40a40b9a046c2fbb5ecfa13d4ecf8f1eec52aec05a0d2b20906010004000e20003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d001010502040404d00f0e691005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a5730405000500058092f4010100d802d601b2a4730000d6029c73017e730205eb027303d195ed92b1a4730493b1db630872017305d804d603db63087201d604b2a5730600d60599c17204c1a7d606997e7307069d9c7e7205067e7308067e730906ededededed938cb27203730a0001730b93c27204730c927205730d95917206730ed801d607b2db63087204730f00ed938c7207017310927e8c7207020672067311909c7ec17201067e7202069c7e9a72057312069a9c7e8cb2720373130002067e7314067e72020690b0ada5d90107639593c272077315c1720773167317d90107599a8c7207018c72070273187319",
+    "address": "4J8wkYtoeJ2gHH5jPzihSRcHcB5tgGFAEnL6kqJFeiAg3AcGcCbrqacccrU1rzJPfZLUyy7eBnbKUadAv7qnVboyYZFxKCbGTNg9N8ChGSTuk499nsA7ipKzgTxLbLwt9KjnJoXmqoFfBXFiiSWFWpw8rdnfpRoXZCGEbzmHvUWmwFMnMNrP6kGF769xooFTdWXnzA3YqKNdBr1wipvCFbYHzvW6pZukgRk8XNwby4Y51akY4EkSF85aWsTjhQThKrAXYCymGPAEDSbyrgyt8R3xpuBBXfvw2RXAFoj7tiXbetvMUx8wYc21aBdyTkZ3XMZc6rg4gRBS55uN9W3U85YjrKVQnSNR5MzuVinqBoHTh5CgC5AMCpVdH9LwWGoHzWMWacu5qrKJow95oG5Qs76sznCDdsmDJRtUCmAW7dGHevj33xXdHicdU4PxWTkenursT7Hk8NHwVwNMeUpnNqnty2RTZdys58U5HJ9ftsVhuuJ9PugUxSZTXQNbwEG7DhtK1oBynpvncp6fzkgf5BXjiXjr9FnDYsrbCZb6DtK9ydVFCSyWCkWBZrPdPsAjSadqeKKv2tgsy8g77NNTCwSuugosRWk3eCcnvPuEMiTE1S1wGS9F9Vib9isipMUngJkLNSGBMUGV1RkNVn6h3EKNqxAqtDpjPSd341vDsBsnbdqK3KnLszbJkSxJyw7Ktm5VFsbqtJcXf7wmchgMrq1MUYs7SiJwaGHmtcjr8o9b",
+    "tree_hash": "b8d38840edeb66dce3b1f78c0303d543fc87426ee8b293a0b84e7701ab1308bd",
+    "template_hash": null,
+    "tokens": [
+      {
+        "id": "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0",
+        "amount": "40",
+        "name": "SigRSV",
+        "decimals": 0
+      }
+    ],
+    "registers": {},
+    "spent_by": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+    "spent_height": 940125
+  },
+  "settlement": {
+    "id": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+    "block_id": "c4f9de234aedecba12c2dea1de37777213c036e23170c580fdbc524f324f1efe",
+    "height": 940125,
+    "indexed_height": 940125,
+    "timestamp": 1676374105726,
+    "index": 15,
+    "fee": "2000000",
+    "size": 1022,
+    "inputs": [
+      {
+        "id": "d12580731b32f5052a4901e1e80788f680f4dcfd44335d97f21f1958aef4e1db",
+        "box": {
+          "id": "d12580731b32f5052a4901e1e80788f680f4dcfd44335d97f21f1958aef4e1db",
+          "tx_id": "d7b4b4083922004af09b6107e3c7063b90dd45c5b6e6da90758a16652ce47be5",
+          "index": 0,
+          "value": "36699015199022",
+          "creation_height": 940088,
+          "ergo_tree": "1999030f0400040204020404040405feffffffffffffffff0105feffffffffffffffff01050004d00f040004000406050005000580dac409d819d601b2a5730000d602e4c6a70404d603db63087201d604db6308a7d605b27203730100d606b27204730200d607b27203730300d608b27204730400d6099973058c720602d60a999973068c7205027209d60bc17201d60cc1a7d60d99720b720cd60e91720d7307d60f8c720802d6107e720f06d6117e720d06d612998c720702720fd6137e720c06d6147308d6157e721206d6167e720a06d6177e720906d6189c72117217d6199c72157217d1ededededededed93c27201c2a793e4c672010404720293b27203730900b27204730a00938c7205018c720601938c7207018c72080193b17203730b9593720a730c95720e929c9c721072117e7202069c7ef07212069a9c72137e7214067e9c720d7e72020506929c9c721372157e7202069c7ef0720d069a9c72107e7214067e9c72127e7202050695ed720e917212730d907216a19d721872139d72197210ed9272189c721672139272199c7216721091720b730e",
+          "address": "5vSUZRZbdVbnk4sJWjg2uhL94VZWRg4iatK9VgMChufzUgdihgvhR8yWSUEJKszzV7Vmi6K8hCyKTNhUaiP8p5ko6YEU9yfHpjVuXdQ4i5p4cRCzch6ZiqWrNukYjv7Vs5jvBwqg5hcEJ8u1eerr537YLWUoxxi1M4vQxuaCihzPKMt8NDXP4WcbN6mfNxxLZeGBvsHVvVmina5THaECosCWozKJFBnscjhpr3AJsdaL8evXAvPfEjGhVMoTKXAb2ZGGRmR8g1eZshaHmgTg2imSiaoXU5eiF3HvBnDuawaCtt674ikZ3oZdekqswcVPGMwqqUKVsGY4QuFeQoGwRkMqEYTdV2UDMMsfrjrBYQYKUBFMwsQGMNBL1VoY78aotXzdeqJCBVKbQdD3ZZWvukhSe4xrz8tcF3PoxpysDLt89boMqZJtGEHTV9UBTBEac6sDyQP693qT3nKaErN8TCXrJBUmHPqKozAg9bwxTqMYkpmb9iVKLSoJxG7MjAj72SRbcqQfNCVTztSwN3cRxSrVtz4p87jNFbVtFzhPg7UqDwNFTaasySCqM",
+          "tree_hash": "99f30ad579a2c98ad31b432676627fcd9e303d43c06e898725f6155d8ac40aa9",
+          "template_hash": null,
+          "tokens": [
+            {
+              "id": "1d5afc59838920bb5ef2a8f9d63825a55b1d48e269d7cecee335d637c3ff5f3f",
+              "amount": "1",
+              "name": null,
+              "decimals": null
+            },
+            {
+              "id": "fa6326a26334f5e933b96470b53b45083374f71912b0d7597f00c2c7ebeb5da6",
+              "amount": "9223372012300513585",
+              "name": null,
+              "decimals": null
+            },
+            {
+              "id": "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0",
+              "amount": "79165561",
+              "name": "SigRSV",
+              "decimals": 0
+            }
+          ],
+          "registers": {
+            "R4": "04c60f"
+          },
+          "spent_by": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+          "spent_height": 940125
+        }
+      },
+      {
+        "id": "7134a244040ce51f1cdd6e8244414473cee6ed6f69efe3cd7829748b56770623",
+        "box": {
+          "id": "7134a244040ce51f1cdd6e8244414473cee6ed6f69efe3cd7829748b56770623",
+          "tx_id": "0c4648c2152036a2ff15aa9094fdea094e8fb6c9031904b4d6e8b590a75abda8",
+          "index": 0,
+          "value": "310000",
+          "creation_height": 940121,
+          "ergo_tree": "199c041a0400052c04c60f08cd03b196b978d77488fba3138876a40a40b9a046c2fbb5ecfa13d4ecf8f1eec52aec0404040604020524058080a0f6f4acdbe01b05868e82dacf5804000e201d5afc59838920bb5ef2a8f9d63825a55b1d48e269d7cecee335d637c3ff5f3f0e240008cd03b196b978d77488fba3138876a40a40b9a046c2fbb5ecfa13d4ecf8f1eec52aec05a0d2b20906010004000e20003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d001010502040404d00f0e691005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a5730405000500058092f4010100d802d601b2a4730000d6029c73017e730205eb027303d195ed92b1a4730493b1db630872017305d804d603db63087201d604b2a5730600d60599c17204c1a7d606997e7307069d9c7e7205067e7308067e730906ededededed938cb27203730a0001730b93c27204730c927205730d95917206730ed801d607b2db63087204730f00ed938c7207017310927e8c7207020672067311909c7ec17201067e7202069c7e9a72057312069a9c7e8cb2720373130002067e7314067e72020690b0ada5d90107639593c272077315c1720773167317d90107599a8c7207018c72070273187319",
+          "address": "4J8wkYtoeJ2gHH5jPzihSRcHcB5tgGFAEnL6kqJFeiAg3AcGcCbrqacccrU1rzJPfZLUyy7eBnbKUadAv7qnVboyYZFxKCbGTNg9N8ChGSTuk499nsA7ipKzgTxLbLwt9KjnJoXmqoFfBXFiiSWFWpw8rdnfpRoXZCGEbzmHvUWmwFMnMNrP6kGF769xooFTdWXnzA3YqKNdBr1wipvCFbYHzvW6pZukgRk8XNwby4Y51akY4EkSF85aWsTjhQThKrAXYCymGPAEDSbyrgyt8R3xpuBBXfvw2RXAFoj7tiXbetvMUx8wYc21aBdyTkZ3XMZc6rg4gRBS55uN9W3U85YjrKVQnSNR5MzuVinqBoHTh5CgC5AMCpVdH9LwWGoHzWMWacu5qrKJow95oG5Qs76sznCDdsmDJRtUCmAW7dGHevj33xXdHicdU4PxWTkenursT7Hk8NHwVwNMeUpnNqnty2RTZdys58U5HJ9ftsVhuuJ9PugUxSZTXQNbwEG7DhtK1oBynpvncp6fzkgf5BXjiXjr9FnDYsrbCZb6DtK9ydVFCSyWCkWBZrPdPsAjSadqeKKv2tgsy8g77NNTCwSuugosRWk3eCcnvPuEMiTE1S1wGS9F9Vib9isipMUngJkLNSGBMUGV1RkNVn6h3EKNqxAqtDpjPSd341vDsBsnbdqK3KnLszbJkSxJyw7Ktm5VFsbqtJcXf7wmchgMrq1MUYs7SiJwaGHmtcjr8o9b",
+          "tree_hash": "b8d38840edeb66dce3b1f78c0303d543fc87426ee8b293a0b84e7701ab1308bd",
+          "template_hash": null,
+          "tokens": [
+            {
+              "id": "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0",
+              "amount": "40",
+              "name": "SigRSV",
+              "decimals": 0
+            }
+          ],
+          "registers": {},
+          "spent_by": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+          "spent_height": 940125
+        }
+      },
+      {
+        "id": "ab1fe501ee88eb03bb65332cd0da759bc59c0267b72568f45b5778b4163bf1ee",
+        "box": {
+          "id": "ab1fe501ee88eb03bb65332cd0da759bc59c0267b72568f45b5778b4163bf1ee",
+          "tx_id": "9efe4125bbba0b9a1229d5ca2049941a9b076fb77016c75eec5f8d742cda00d3",
+          "index": 0,
+          "value": "1642650905",
+          "creation_height": 935704,
+          "ergo_tree": "0008cd02ddbe95b7f88d47bd8c2db823cc5dd1be69a650556a44d4c15ac65e1d3e34324c",
+          "address": "9gCigPc9cZNRhKgbgdmTkVxo1ZKgw79G8DvLjCcYWAvEF3XRUKy",
+          "tree_hash": "2adbb75fe0e3d2417c5581624dee9e5d21713b36bee84e56edf51717311a83f2",
+          "template_hash": null,
+          "tokens": [
+            {
+              "id": "ef802b475c06189fdbf844153cdc1d449a5ba87cce13d11bb47b5a539f27f12b",
+              "amount": "14972739835804",
+              "name": "WT_ERG",
+              "decimals": 9
+            }
+          ],
+          "registers": {},
+          "spent_by": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+          "spent_height": 940125
+        }
+      }
+    ],
+    "data_inputs": [],
+    "outputs": [
+      {
+        "id": "78e192088bd82bcafc24533f34c548c2482eb5bfb8af57cb6a877b4c28b87c86",
+        "tx_id": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+        "index": 0,
+        "value": "36699005051413",
+        "creation_height": 940122,
+        "ergo_tree": "1999030f0400040204020404040405feffffffffffffffff0105feffffffffffffffff01050004d00f040004000406050005000580dac409d819d601b2a5730000d602e4c6a70404d603db63087201d604db6308a7d605b27203730100d606b27204730200d607b27203730300d608b27204730400d6099973058c720602d60a999973068c7205027209d60bc17201d60cc1a7d60d99720b720cd60e91720d7307d60f8c720802d6107e720f06d6117e720d06d612998c720702720fd6137e720c06d6147308d6157e721206d6167e720a06d6177e720906d6189c72117217d6199c72157217d1ededededededed93c27201c2a793e4c672010404720293b27203730900b27204730a00938c7205018c720601938c7207018c72080193b17203730b9593720a730c95720e929c9c721072117e7202069c7ef07212069a9c72137e7214067e9c720d7e72020506929c9c721372157e7202069c7ef0720d069a9c72107e7214067e9c72127e7202050695ed720e917212730d907216a19d721872139d72197210ed9272189c721672139272199c7216721091720b730e",
+        "address": "5vSUZRZbdVbnk4sJWjg2uhL94VZWRg4iatK9VgMChufzUgdihgvhR8yWSUEJKszzV7Vmi6K8hCyKTNhUaiP8p5ko6YEU9yfHpjVuXdQ4i5p4cRCzch6ZiqWrNukYjv7Vs5jvBwqg5hcEJ8u1eerr537YLWUoxxi1M4vQxuaCihzPKMt8NDXP4WcbN6mfNxxLZeGBvsHVvVmina5THaECosCWozKJFBnscjhpr3AJsdaL8evXAvPfEjGhVMoTKXAb2ZGGRmR8g1eZshaHmgTg2imSiaoXU5eiF3HvBnDuawaCtt674ikZ3oZdekqswcVPGMwqqUKVsGY4QuFeQoGwRkMqEYTdV2UDMMsfrjrBYQYKUBFMwsQGMNBL1VoY78aotXzdeqJCBVKbQdD3ZZWvukhSe4xrz8tcF3PoxpysDLt89boMqZJtGEHTV9UBTBEac6sDyQP693qT3nKaErN8TCXrJBUmHPqKozAg9bwxTqMYkpmb9iVKLSoJxG7MjAj72SRbcqQfNCVTztSwN3cRxSrVtz4p87jNFbVtFzhPg7UqDwNFTaasySCqM",
+        "tree_hash": "99f30ad579a2c98ad31b432676627fcd9e303d43c06e898725f6155d8ac40aa9",
+        "template_hash": null,
+        "tokens": [
+          {
+            "id": "1d5afc59838920bb5ef2a8f9d63825a55b1d48e269d7cecee335d637c3ff5f3f",
+            "amount": "1",
+            "name": null,
+            "decimals": null
+          },
+          {
+            "id": "fa6326a26334f5e933b96470b53b45083374f71912b0d7597f00c2c7ebeb5da6",
+            "amount": "9223372012300513585",
+            "name": null,
+            "decimals": null
+          },
+          {
+            "id": "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0",
+            "amount": "79165583",
+            "name": "SigRSV",
+            "decimals": 0
+          }
+        ],
+        "registers": {
+          "R4": "04c60f"
+        },
+        "spent_by": null,
+        "spent_height": null
+      },
+      {
+        "id": "2f6288ad86b02acb0d94a1db1d8e03f8608c2c191ff763053500ee2cc9a439e8",
+        "tx_id": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+        "index": 1,
+        "value": "10457609",
+        "creation_height": 940122,
+        "ergo_tree": "0008cd03b196b978d77488fba3138876a40a40b9a046c2fbb5ecfa13d4ecf8f1eec52aec",
+        "address": "9hp1xXVF8VXkYEHdgvTJK7XSEW1vckcKqWx8JTHsAwwGzHH9hxq",
+        "tree_hash": "ac91054bbadf0e6e84290a1aa6b8589ff2bd2f06a06abb3e67250c40f0d3c714",
+        "template_hash": null,
+        "tokens": [
+          {
+            "id": "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0",
+            "amount": "3",
+            "name": "SigRSV",
+            "decimals": 0
+          }
+        ],
+        "registers": {},
+        "spent_by": null,
+        "spent_height": null
+      },
+      {
+        "id": "722d9e4efef5bab3d4f24af5b53e1cdac1fb128194ac08393d2369d461b8dcfa",
+        "tx_id": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+        "index": 2,
+        "value": "1640650905",
+        "creation_height": 940122,
+        "ergo_tree": "0008cd02ddbe95b7f88d47bd8c2db823cc5dd1be69a650556a44d4c15ac65e1d3e34324c",
+        "address": "9gCigPc9cZNRhKgbgdmTkVxo1ZKgw79G8DvLjCcYWAvEF3XRUKy",
+        "tree_hash": "2adbb75fe0e3d2417c5581624dee9e5d21713b36bee84e56edf51717311a83f2",
+        "template_hash": null,
+        "tokens": [
+          {
+            "id": "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0",
+            "amount": "15",
+            "name": "SigRSV",
+            "decimals": 0
+          }
+        ],
+        "registers": {},
+        "spent_by": null,
+        "spent_height": null
+      },
+      {
+        "id": "fe45af9f566aa4e42061603af56fbabcb64fd157cf502ad38647168c7b0f0eab",
+        "tx_id": "90c4848da58aa3b8ac6527fef8deb9844b66ea41ed42f85a3f5aa96493a0c61e",
+        "index": 3,
+        "value": "2000000",
+        "creation_height": 940122,
+        "ergo_tree": "1005040004000e36100204a00b08cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798ea02d192a39a8cc7a701730073011001020402d19683030193a38cc7b2a57300000193c2b2a57301007473027303830108cdeeac93b1a57304",
+        "address": "2iHkR7CWvD1R4j1yZg5bkeDRQavjAaVPeTDFGGLZduHyfWMuYpmhHocX8GJoaieTx78FntzJbCBVL6rf96ocJoZdmWBL2fci7NqWgAirppPQmZ7fN9V6z13Ay6brPriBKYqLp1bT2Fk4FkFLCfdPpe",
+        "tree_hash": "e540cceffd3b8dd0f401193576cc413467039695969427df94454193dddfb375",
+        "template_hash": null,
+        "tokens": [],
+        "registers": {},
+        "spent_by": null,
+        "spent_height": null
+      }
+    ]
+  }
+}

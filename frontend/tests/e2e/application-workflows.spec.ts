@@ -29,22 +29,23 @@ const settlement: TxDto = {
 };
 async function setup(page: Page, box = order, tx = settlement) {
 	const requests: string[] = [];
+	const spendId = box.spent_by ?? tx.id;
 	await page.route('**/v1/boxes/' + box.id, (route) => {
 		requests.push('order');
 		return route.fulfill({ json: box });
 	});
-	await page.route('**/v1/txs/' + settlement.id, (route) => {
+	await page.route('**/v1/txs/' + spendId, (route) => {
 		requests.push('spend');
 		return route.fulfill({ json: tx });
 	});
-	await page.route('**/v1/txs/' + settlement.id + '/status', (route) =>
+	await page.route('**/v1/txs/' + spendId + '/status', (route) =>
 		route.fulfill({
 			json: {
-				id: settlement.id,
+				id: spendId,
 				state: 'confirmed',
 				checked_at_ms: 1,
-				indexed_height: settlement.height,
-				inclusion: { block_id: settlement.block_id, height: settlement.height, confirmations: 1 },
+				indexed_height: tx.height,
+				inclusion: { block_id: tx.block_id, height: tx.height, confirmations: 1 },
 				previous_inclusion: null,
 				mempool: {
 					observation: 'not_checked',
@@ -61,6 +62,92 @@ async function setup(page: Page, box = order, tx = settlement) {
 		})
 	);
 	return requests;
+}
+
+const additions = ['swap-buy', 'deposit', 'redeem'].map((name) => {
+	const captured = JSON.parse(
+		readFileSync(
+			new URL('../../../tests/fixtures/apps/spectrum-v3-' + name + '.json', import.meta.url),
+			'utf8'
+		)
+	) as { order: BoxDto; settlement: TxDto };
+	return {
+		name,
+		order: displayBox(captured.order),
+		settlement: {
+			...captured.settlement,
+			inputs: captured.settlement.inputs.map((input) => ({
+				...input,
+				box: displayBox(input.box!)
+			})),
+			outputs: captured.settlement.outputs.map(displayBox)
+		},
+		region: name === 'swap-buy' ? 'Spectrum swap workflow' : 'Spectrum liquidity workflow',
+		stage:
+			name === 'swap-buy'
+				? 'Matching swap observed'
+				: name === 'deposit'
+					? 'Matching deposit observed'
+					: 'Matching redemption observed'
+	};
+});
+
+for (const recorded of additions) {
+	test(
+		'captured ' + recorded.name + ' exposes exact request and result without preloading',
+		async ({ page }) => {
+			const requests = await setup(page, recorded.order, recorded.settlement);
+			await page.goto('/box/' + recorded.order.id);
+			const workflow = page.getByRole('region', { name: recorded.region, exact: true });
+			await expect(workflow.getByRole('button', { name: 'Inspect workflow' })).toBeVisible();
+			expect(requests.filter((request) => request === 'spend')).toHaveLength(0);
+			await workflow.getByRole('button', { name: 'Inspect workflow' }).click();
+			await expect(workflow.getByText(recorded.stage, { exact: true })).toBeVisible();
+			await expect(workflow.getByRole('link', { name: 'Pool before' })).toHaveAttribute(
+				'href',
+				'/box/' + recorded.settlement.inputs[0].id
+			);
+			await expect(workflow.getByRole('link', { name: 'Recipient output' })).toHaveAttribute(
+				'href',
+				'/box/' + recorded.settlement.outputs[1].id
+			);
+			if (recorded.name === 'swap-buy') {
+				await expect(workflow.getByText('0.010457609', { exact: true })).toBeVisible();
+				await expect(workflow.getByText('0.010147609 ERG', { exact: true })).toBeVisible();
+				await expect(workflow).toContainText('returned order-box funding');
+			} else if (recorded.name === 'deposit') {
+				await expect(workflow.getByText('4,206', { exact: true })).toBeVisible();
+				await expect(workflow.getByText('Minimum LP return', { exact: true })).toBeVisible();
+			} else {
+				await expect(workflow.getByText('0.03365495', { exact: true })).toBeVisible();
+				await expect(workflow.getByText('0.03334495 ERG', { exact: true })).toBeVisible();
+				await expect(workflow.getByText('5', { exact: true })).toBeVisible();
+			}
+		}
+	);
+}
+
+for (const appearance of ['original', 'prism', 'atelier', 'aurora']) {
+	test(
+		'liquidity returns remain keyboard accessible at 320px in ' + appearance,
+		async ({ page }) => {
+			await page.addInitScript(
+				(appearance) => localStorage.setItem('xp-appearance', appearance),
+				appearance
+			);
+			await page.setViewportSize({ width: 320, height: 900 });
+			const recorded = additions[2];
+			await setup(page, recorded.order, recorded.settlement);
+			await page.goto('/box/' + recorded.order.id);
+			const workflow = page.getByRole('region', { name: recorded.region, exact: true });
+			await workflow.getByRole('button', { name: 'Inspect workflow' }).focus();
+			await page.keyboard.press('Enter');
+			await expect(workflow.getByText(recorded.stage, { exact: true })).toBeVisible();
+			await expect(workflow.getByRole('link', { name: 'Spending transaction' })).toBeVisible();
+			await expect(workflow).toContainText('not an address’s net gain');
+			expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+		}
+	);
 }
 
 test('a captured Spectrum order is explicit, exact and links the observed workflow evidence', async ({

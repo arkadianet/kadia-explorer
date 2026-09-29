@@ -215,6 +215,46 @@ impl BlockSource for RustNode {
         bounded_text(resp, 2 * 1024 * 1024).await.map(Some)
     }
 
+    async fn unconfirmed_transactions_json(
+        &self,
+        limit: u16,
+        max_bytes: usize,
+    ) -> Result<String, SourceError> {
+        if limit == 0 || limit > 100 || max_bytes > 2 * 1024 * 1024 {
+            return Err(SourceError::Decode(
+                "mempool request exceeds adapter limits".into(),
+            ));
+        }
+        let url = format!(
+            "{}/transactions/unconfirmed?offset=0&limit={limit}",
+            self.base
+        );
+        let response = self
+            .http
+            .get(&url)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(Self::map_reqwest_err)?;
+        let status = response.status();
+        if matches!(
+            status,
+            reqwest::StatusCode::NOT_FOUND
+                | reqwest::StatusCode::METHOD_NOT_ALLOWED
+                | reqwest::StatusCode::NOT_IMPLEMENTED
+        ) {
+            return Err(SourceError::Capability(
+                "mempool listing is unsupported".into(),
+            ));
+        }
+        if !status.is_success() {
+            return Err(SourceError::Http(format!(
+                "mempool listing status {status}"
+            )));
+        }
+        bounded_text(response, max_bytes).await
+    }
+
     async fn genesis_boxes_json(&self) -> Result<String, SourceError> {
         let url = format!("{}/utxo/genesis", self.base);
         let resp = self
@@ -265,6 +305,59 @@ fn canonical_id(headers: &[serde_json::Value], height: u32) -> Result<Option<Has
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn mempool_list_uses_one_bounded_node_page_and_preserves_capability_errors() {
+        use axum::{extract::Query, routing::get, Router};
+        use std::collections::HashMap;
+        let app = Router::new().route(
+            "/transactions/unconfirmed",
+            get(|Query(query): Query<HashMap<String, String>>| async move {
+                assert_eq!(query.len(), 2);
+                assert_eq!(query["offset"], "0");
+                assert_eq!(query["limit"], "100");
+                "[]"
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let node = RustNode::new(&format!("http://{}", listener.local_addr().unwrap()));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        assert_eq!(
+            node.unconfirmed_transactions_json(100, 1024).await.unwrap(),
+            "[]"
+        );
+        assert!(matches!(
+            node.unconfirmed_transactions_json(101, 1024).await,
+            Err(SourceError::Decode(_))
+        ));
+        server.abort();
+
+        for (status, body, capability) in [
+            (404, "[]".to_string(), true),
+            (500, "[]".to_string(), false),
+            (200, "x".repeat(1025), false),
+        ] {
+            let app = Router::new().route(
+                "/transactions/unconfirmed",
+                get(move || {
+                    let body = body.clone();
+                    async move { (axum::http::StatusCode::from_u16(status).unwrap(), body) }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let node = RustNode::new(&format!("http://{}", listener.local_addr().unwrap()));
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let error = node
+                .unconfirmed_transactions_json(100, 1024)
+                .await
+                .unwrap_err();
+            assert_eq!(matches!(error, SourceError::Capability(_)), capability);
+            if status == 200 {
+                assert!(matches!(error, SourceError::Decode(_)));
+            }
+            server.abort();
+        }
+    }
 
     #[test]
     fn canonical_entries_fail_closed() {

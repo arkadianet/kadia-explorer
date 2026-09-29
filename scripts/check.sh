@@ -30,7 +30,7 @@ record_manifest() (
         npm --version
         (cd frontend && ./node_modules/.bin/playwright --version) || echo 'Playwright version unavailable: provision npm ci'
     fi
-    sha256sum Cargo.lock frontend/package-lock.json rust-toolchain.toml frontend/.node-version scripts/check.sh .github/workflows/ci.yml
+    sha256sum Cargo.lock frontend/package-lock.json tools/mcp/package-lock.json rust-toolchain.toml frontend/.node-version scripts/check.sh .github/workflows/ci.yml
     git diff --binary
 )
 set +e
@@ -78,6 +78,7 @@ if [[ $suite != frontend ]]; then
     run_gate rust-tests "$root" 'cargo test --workspace --no-fail-fast'
 fi
 if [[ $suite != rust ]]; then
+    run_gate mcp "$root/tools/mcp" 'npm test'
     run_gate frontend "$root/frontend" 'npm test && npm run check && npm run lint && npm run build'
     run_gate playwright "$root/frontend" 'npx playwright test --workers=4'
 fi
