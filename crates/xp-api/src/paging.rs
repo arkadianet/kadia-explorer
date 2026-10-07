@@ -27,6 +27,7 @@ pub enum Route {
     Richlist,
     RegisterBoxes,
     RentEligible,
+    RentSchedule,
 }
 
 impl Route {
@@ -48,7 +49,8 @@ impl Route {
             | Self::Holders
             | Self::Richlist
             | Self::RegisterBoxes
-            | Self::RentEligible => Policy::CurrentState,
+            | Self::RentEligible
+            | Self::RentSchedule => Policy::CurrentState,
         }
     }
 }
@@ -80,6 +82,7 @@ mod policy_tests {
             Route::Richlist,
             Route::RegisterBoxes,
             Route::RentEligible,
+            Route::RentSchedule,
         ];
         for (routes, policy, label) in [
             (
@@ -101,7 +104,7 @@ mod policy_tests {
         }
         assert_eq!(
             doc.lines().filter(|line| line.starts_with("| `")).count(),
-            17
+            18
         );
     }
 }
@@ -150,6 +153,9 @@ pub enum Filter {
         token: Hash32,
         version: u32,
     },
+    RentSchedule {
+        query_hash: Hash32,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -171,10 +177,11 @@ impl Binding {
             TokensSearch => matches!(filter, Filter::TokenNames { .. }),
             TokenHistory => matches!(filter, Filter::TokenHistory { .. }),
             AddressActivity => matches!(filter, Filter::Activity { .. }),
+            RentSchedule => matches!(filter, Filter::RentSchedule { .. }),
         };
         let valid_order = match route {
             Blocks | TokensNewest | TokensHolders | Holders | Richlist => order == Order::Desc,
-            RentEligible | TokensSearch => order == Order::Asc,
+            RentEligible | RentSchedule | TokensSearch => order == Order::Asc,
             _ => true,
         };
         if !valid_filter || !valid_order {

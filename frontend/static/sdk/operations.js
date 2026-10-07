@@ -276,6 +276,40 @@ export const operations = {
 		},
 		required: ['addr', 'view']
 	},
+	rentSchedule: {
+		path: '/rent/schedule',
+		response: 'RentSchedulePageDto',
+		parameters: {
+			window: {
+				type: 'string',
+				enum: ['24h', '7d', '30d', '90d']
+			},
+			mode: {
+				type: 'string',
+				enum: ['all', 'collectible', 'full_claim']
+			},
+			token_id: {
+				type: 'string',
+				pattern: '^[a-fA-F0-9]{64}$'
+			},
+			limit: {
+				type: 'integer',
+				minimum: 1,
+				maximum: 100
+			},
+			cursor: {
+				type: 'string',
+				maxLength: 4096
+			},
+			snapshot: {
+				type: 'string',
+				maxLength: 4096
+			}
+		},
+		required: [],
+		paged: true,
+		strictOnly: true
+	},
 	addressActivity: {
 		path: '/addresses/{addr}/activity',
 		response: 'AddressActivityPageDto',

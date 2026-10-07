@@ -40,6 +40,40 @@ const strictNote =
 	'Send next_cursor and next_snapshot together. A 409 means the anchor is no longer usable: restart from the first page. An empty page may still have a continuation.';
 export const ENDPOINTS: Endpoint[] = [
 	{
+		id: 'rent-schedule',
+		name: 'Upcoming storage rent',
+		group: 'Network',
+		path: '/rent/schedule',
+		strict: true,
+		fields: [
+			{
+				name: 'window',
+				label: 'Time window',
+				kind: 'choice',
+				initial: '24h',
+				options: ['24h', '7d', '30d', '90d']
+			},
+			{
+				name: 'mode',
+				label: 'Claim mode',
+				kind: 'choice',
+				initial: 'all',
+				options: ['all', 'collectible', 'full_claim']
+			},
+			{ name: 'token_id', label: 'Token ID (optional)', kind: 'id' },
+			{ ...limit, maximum: 100 },
+			cursor,
+			snapshot
+		],
+		description:
+			'Soonest-first unspent boxes with estimated maturity, exact rent and token details.',
+		note:
+			'First-page hourly totals scan independently of the item cap. Preserve batch_complete and history coverage; a partial overview is not the whole window. Full-claim candidates do not establish transaction validity. Dates use the indexed header and 120-second block target. ' +
+			strictNote +
+			' ' +
+			amounts
+	},
+	{
 		id: 'mempool',
 		name: 'Pending transactions',
 		group: 'Network',

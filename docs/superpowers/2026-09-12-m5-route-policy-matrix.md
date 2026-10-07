@@ -1,6 +1,6 @@
 # M5 ordinary route policy matrix
 
-Counts: **5 immutable membership, 12 current-state** (17 route/order entries, 16 distinct paged paths). Both supported directions share a policy; both unspent filter values share a policy. Policy tests live in `crates/xp-api/src/paging.rs`.
+Counts: **5 immutable membership, 13 current-state** (18 route/order entries, 17 distinct paged paths). Both supported directions share a policy; both unspent filter values share a policy. Policy tests live in `crates/xp-api/src/paging.rs`.
 
 Immutable membership means canonical membership below the original height/transaction bound survives appends; continuation requires the anchor to survive. Current-state means ANY observed tip change invalidates continuation, even a normal append. Steps 1–2 established this contract; steps 3–4 now integrate and exercise it in the backend handlers.
 
@@ -23,6 +23,7 @@ Immutable membership means canonical membership below the original height/transa
 | `richlist` | /v1/richlist, desc | current-state | `handlers/richlist.rs::list`: `nano` changes both value and ranking. Legacy dir is ignored; strict binding must use effective desc order. |
 | `register_boxes` | /v1/registers/{reg}/{value}/boxes, asc/desc | current-state | `handlers/registers.rs::boxes`: register membership below gidx is stable but returned BoxDto spent/rent fields change. Bind register number and hash of decoded value bytes. |
 | `rent_eligible` | /v1/rent/eligible, asc | current-state | `handlers/rent.rs::eligible` and `items_of`: live RENT_MATURES membership is removed by spend; eligibility boundary moves with tip; expanded box rent state changes. Legacy dir is ignored; effective order is asc. |
+| `rent_schedule` | /v1/rent/schedule, asc | current-state | Strict only. Upcoming unspent membership and estimates share the current header anchor. Bind window, claim mode, token filter and exclusive maturity/gidx cursor; any tip change invalidates continuation. Bounded first-page hourly totals disclose their own scan coverage independently of item pagination. |
 
 Nonpaged exclusions: `/v1/rent/upcoming` is a capped window prefix (`complete`, always-null `next_cursor`), not a pageable list; `/v1/addresses/{addr}/rent` is a capped scan sorted afterward (`truncated`), not an exhaustive earliest-maturity answer. They remain explicitly samples. `/v1/blocks/{height_or_id}/txs` stays an all-or-error array. Detail/search/supply/template examples are not paged walks. `/v1/addresses/{addr}/balance/at` and `/boxes/at` keep their existing historical anchors and cursor contract unchanged; existing history tests remain regression targets.
 

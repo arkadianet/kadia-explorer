@@ -171,7 +171,7 @@
 			<p class="eyebrow">01 / The contract</p>
 			<h2>OpenAPI 1.0</h2>
 			<p>
-				A versioned OpenAPI 3.1.1 document covering the 25 operations supported by the portable
+				A versioned OpenAPI 3.1.1 document covering the 26 operations supported by the portable
 				client. Exact wire types, parameters and error behavior.
 			</p>
 			<a href="/openapi.json" download="kadia-openapi.json">Download OpenAPI ↗</a>

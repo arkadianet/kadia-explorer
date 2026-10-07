@@ -35,6 +35,19 @@ pub struct Page<T> {
     pub next_cursor: Option<Gidx>,
 }
 
+/// Fixed-size, unhydrated rent-index reference. Its ordering key is exclusive on resume.
+pub struct RentCandidate {
+    pub maturity_height: u32,
+    pub gidx: Gidx,
+    pub box_id: Hash32,
+}
+
+pub struct RentCandidatePage {
+    pub items: Vec<RentCandidate>,
+    /// One additional index key exists; its box has not been decoded.
+    pub more: bool,
+}
+
 /// Decodes a table value expected to be exactly a 32-byte id, failing with
 /// [`StoreError::Corrupt`] on any other width.
 pub(crate) fn as_hash32(v: &[u8]) -> Result<Hash32, StoreError> {
@@ -870,6 +883,57 @@ impl Reader {
         }
         let next_cursor = if items.len() == limit { last } else { None };
         Ok((items, next_cursor))
+    }
+
+    /// Bounded, unhydrated rent references within the inclusive height interval. A single
+    /// extra index key proves continuation without decoding another box. This intentionally
+    /// does not apply token/value filters: callers admit each row before decoding and apply
+    /// filters before their result cap, resuming after the last examined key.
+    pub fn rent_candidates(
+        &self,
+        from_height: u32,
+        to_height: u32,
+        after: Option<(u32, Gidx)>,
+        limit: usize,
+    ) -> Result<RentCandidatePage, StoreError> {
+        if limit == 0 || limit > 2_000 {
+            return Err(StoreError::ReadLimit("rent_candidate_limit"));
+        }
+        if from_height > to_height || after.is_some_and(|(h, _)| h > to_height) {
+            return Ok(RentCandidatePage {
+                items: vec![],
+                more: false,
+            });
+        }
+        let table = self.txn.open_table(RENT_MATURES)?;
+        let lo = k_rent(from_height, 0);
+        let hi = k_rent(to_height, u64::MAX);
+        let resume = after.map(|(height, gidx)| k_rent(height, gidx));
+        let lower = match resume
+            .as_ref()
+            .filter(|key| key.as_slice() >= lo.as_slice())
+        {
+            Some(key) => Bound::Excluded(key.as_slice()),
+            None => Bound::Included(lo.as_slice()),
+        };
+        let mut items = Vec::with_capacity(limit);
+        for entry in table.range::<&[u8]>((lower, Bound::Included(hi.as_slice())))? {
+            let (key, value) = entry?;
+            let key = key.value();
+            if key.len() != 12 {
+                return Err(StoreError::Corrupt("invalid rent index key width"));
+            }
+            let box_id = as_hash32(value.value())?;
+            if items.len() == limit {
+                return Ok(RentCandidatePage { items, more: true });
+            }
+            items.push(RentCandidate {
+                maturity_height: rent_key_height(key)?,
+                gidx: crate::keys::gidx_of_composite(key)?,
+                box_id,
+            });
+        }
+        Ok(RentCandidatePage { items, more: false })
     }
 
     /// Box ids maturing for rent at heights `[from_height, from_height + span)`, oldest first,

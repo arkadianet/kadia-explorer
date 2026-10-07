@@ -78,6 +78,20 @@ export const operations = {
 		},
 		['addr', 'view']
 	),
+	rentSchedule: op(
+		'/rent/schedule',
+		'RentSchedulePageDto',
+		{
+			window: { type: 'string', enum: ['24h', '7d', '30d', '90d'] },
+			mode: { type: 'string', enum: ['all', 'collectible', 'full_claim'] },
+			token_id: id,
+			limit: { type: 'integer', minimum: 1, maximum: 100 },
+			cursor: text,
+			snapshot: text
+		},
+		[],
+		{ paged: true, strictOnly: true }
+	),
 	addressActivity: op(
 		'/addresses/{addr}/activity',
 		'AddressActivityPageDto',

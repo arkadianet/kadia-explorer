@@ -40,6 +40,7 @@ import type {
 	TxSummaryDto
 } from '../../../src/lib/api/types.ts';
 import { buildDataset, FIXTURE_HEIGHTS, registerKey, type Dataset } from './fixtures.ts';
+import { rentScheduleResponse } from './rent-schedule.ts';
 
 /** Items per page, small enough that the app's 50-item requests still paginate. */
 export const PAGE_SIZE = 5;
@@ -1338,6 +1339,12 @@ export function handle(req: IncomingMessage, res: ServerResponse): void {
 
 	if (path === '/v1/rent/eligible') {
 		sendJson(res, 200, page(d.rentEligible, cursor, limit));
+		return;
+	}
+
+	if (path === '/v1/rent/schedule') {
+		const result = rentScheduleResponse(d, url);
+		sendJson(res, result.status, result.body);
 		return;
 	}
 

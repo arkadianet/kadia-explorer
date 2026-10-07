@@ -9,6 +9,8 @@ import type {
 	BoxRentDto,
 	PageDto,
 	RentItemDto,
+	RentScheduleFilters,
+	RentSchedulePageDto,
 	RichlistItemDto,
 	SearchDto,
 	StatusDto,
@@ -137,6 +139,25 @@ export const api = {
 		apiGet<PageDto<RentItemDto>>(
 			'/rent/eligible',
 			{ cursor, limit, consistency: 'strict', snapshot },
+			f
+		),
+
+	rentSchedule: (
+		filters: RentScheduleFilters = {},
+		cursor?: string | null,
+		snapshot?: string | null,
+		limit = 100,
+		f?: Fetch
+	) =>
+		apiGet<RentSchedulePageDto>(
+			'/rent/schedule',
+			{
+				...filters,
+				cursor: cursor ?? undefined,
+				snapshot: snapshot ?? undefined,
+				limit,
+				consistency: 'strict'
+			},
 			f
 		),
 

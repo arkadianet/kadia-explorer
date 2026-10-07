@@ -57,9 +57,9 @@ export interface RentDto {
 	/** Nominal rent. Not a collectible opportunity on its own — read with `collectible`. */
 	due_nano: string;
 	claimable_at_tip: boolean;
-	/** Storage fee as consensus computes it (wrapping i32), so negative above 1,717 bytes. */
+	/** Storage fee as consensus computes it (wrapping i32); its sign depends on box size. */
 	consensus_fee_nano: string;
-	/** False when the consensus fee is not positive: the box cannot be rent-claimed at all. */
+	/** Whether the signed consensus fee is positive. */
 	collectible: boolean;
 }
 
@@ -206,6 +206,70 @@ export interface AddressRentDto {
 export interface RentItemDto {
 	maturity_height: number;
 	box: BoxDto;
+}
+
+export type RentScheduleWindow = '24h' | '7d' | '30d' | '90d';
+export type RentScheduleMode = 'all' | 'collectible' | 'full_claim';
+
+export interface RentScheduleFilters {
+	window?: RentScheduleWindow;
+	mode?: RentScheduleMode;
+	token_id?: string;
+}
+
+/** Currently unspent indexed box; maturity time is estimated from the response anchor. */
+export interface RentScheduleItemDto {
+	box_id: string;
+	tx_id: string;
+	creation_height: number;
+	maturity_height: number;
+	estimated_maturity_ms: number;
+	value: string;
+	consensus_fee_nano: string;
+	collectible_due_nano: string;
+	collectible: boolean;
+	/** Positive fee covers value, excluding known EIP-27 constraints; not execution proof. */
+	full_claim: boolean;
+	protocol_constrained: boolean;
+	tokens: TokenDto[];
+}
+
+export interface RentScheduleBatchDto {
+	estimated_hour_start_ms: number;
+	box_count: number;
+	collectible_due_nano: string;
+	full_claim_count: number;
+	full_claim_value_nano: string;
+	selected_token_full_claim_amount: string | null;
+}
+
+export interface RentScheduleContextDto {
+	scope: 'indexed_unspent_rent_window';
+	anchor_timestamp_ms: number;
+	from_height: number;
+	to_height: number;
+	target_block_seconds: number;
+	window: RentScheduleWindow;
+	mode: RentScheduleMode;
+	token_id: string | null;
+	full_history: boolean;
+	partial_from: number | null;
+	scanned: number;
+	scan_limit: number;
+	scan_limit_reached: boolean;
+	complete: boolean;
+	batch_scanned: number | null;
+	batch_scan_limit: number;
+	batch_complete: boolean | null;
+	batch_stop_reason: 'candidate_limit' | 'decode_limit' | 'work_limit' | 'deadline' | null;
+	rent_factor: number;
+	fee_arithmetic: 'wrapping_i32';
+}
+
+export interface RentSchedulePageDto extends PageDto<RentScheduleItemDto> {
+	schedule_context: RentScheduleContextDto;
+	/** First-page overview independent of item limit; null on continuation pages. */
+	batches: RentScheduleBatchDto[] | null;
 }
 
 export interface RichlistItemDto {
