@@ -195,6 +195,38 @@ describe('portable typed API client', () => {
 			snapshot: 'snapshot-a'
 		});
 	});
+	it('retains schedule filters and exact batch/token amounts across strict pages', async () => {
+		const amount = '9007199254740993123';
+		const fetch = stub(
+			Response.json({ ...page('2:3'), batches: [{ selected_token_full_claim_amount: amount }] }),
+			Response.json({ ...page(null), batches: null, items: [{ tokens: [{ amount }] }] })
+		);
+		const client = createKadiaClient({ baseUrl, fetch });
+		const pages = [];
+		for await (const result of client.pages('rentSchedule', {
+			window: '90d',
+			mode: 'full_claim',
+			token_id: id,
+			limit: 10
+		}))
+			pages.push(result);
+		expect(pages[0].batches?.[0].selected_token_full_claim_amount).toBe(amount);
+		expect(pages[1].batches).toBeNull();
+		expect(pages[1].items[0].tokens[0].amount).toBe(amount);
+		expect(Object.fromEntries(new URL(String(fetch.mock.calls[1][0])).searchParams)).toEqual({
+			window: '90d',
+			mode: 'full_claim',
+			token_id: id,
+			limit: '10',
+			consistency: 'strict',
+			cursor: '2:3',
+			snapshot: 'snapshot-a'
+		});
+		await expect(client.request('rentSchedule', { limit: 101 })).rejects.toThrow(
+			'Invalid parameter'
+		);
+		expect(fetch).toHaveBeenCalledTimes(2);
+	});
 	it('fails instead of silently returning a complete-looking bounded walk', async () => {
 		const fetch = stub(Response.json(page('more')));
 		const walk = createKadiaClient({ baseUrl, fetch }).pages('blocks', {}, { maxPages: 1 });
@@ -260,5 +292,23 @@ describe('portable typed API client', () => {
 		expect(
 			contract.paths['/blocks'].get.parameters.find((parameter) => parameter.name === 'dir')?.schema
 		).toEqual({ type: 'string', enum: ['desc'] });
+	});
+	it('bounds mining ranges and requires the compact rent view before issuing requests', async () => {
+		const fetch = vi.fn<typeof globalThis.fetch>();
+		const client = createKadiaClient({ baseUrl, fetch });
+		for (const params of [
+			{ from_height: 0, to_height: 1 },
+			{ from_height: 5, to_height: 1 },
+			{ from_height: 1, to_height: 20161 },
+			{ from_height: 1, to_height: 10, top: 51 }
+		])
+			await expect(client.request('mining', params)).rejects.toThrow();
+		await expect(
+			client.request('addressRentExposure', { addr: '9abc' } as never)
+		).rejects.toThrow();
+		await expect(
+			client.request('addressRentExposure', { addr: '9abc', view: 'legacy' } as never)
+		).rejects.toThrow();
+		expect(fetch).not.toHaveBeenCalled();
 	});
 });

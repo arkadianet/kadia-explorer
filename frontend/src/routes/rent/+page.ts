@@ -1,23 +1,20 @@
 import { api } from '$lib/api/endpoints';
-import { ApiError } from '$lib/api/client';
-import type { RentItemDto } from '$lib/api/types';
+import { scheduleIssue, scheduleQuery, validateSchedule } from '$lib/rent/schedule';
+import type { RentSchedulePageDto } from '$lib/api/types';
 import type { PageLoad } from './$types';
 
-/** Default N (in blocks) for the Upcoming tab's rent-maturity horizon. */
-const DEFAULT_UPCOMING_BLOCKS = 720;
-
-/**
- * The Upcoming seed is returned as data rather than thrown: the Eligible tab is served by a
- * separate endpoint, so an error here must not replace the whole page (and its tabs) with the
- * generic error page.
- */
-export const load: PageLoad = async ({ fetch }) => {
+/** Keep schedule failures local: the separately paged Eligible view remains available. */
+export const load: PageLoad = async ({ fetch, url }) => {
+	const { query, error } = scheduleQuery(url.searchParams);
+	if (error) return { query, schedule: null as RentSchedulePageDto | null, error };
 	try {
-		const page = await api.rentUpcoming(DEFAULT_UPCOMING_BLOCKS, 100, fetch);
-		return { complete: page.complete === true, upcoming: page.items, error: null as unknown };
-	} catch (e) {
-		if (e instanceof ApiError)
-			return { complete: false, upcoming: [] as RentItemDto[], error: e as unknown };
-		throw e;
+		const schedule = validateSchedule(await api.rentSchedule(query, null, null, 100, fetch), query);
+		return {
+			query,
+			schedule: schedule as RentSchedulePageDto | null,
+			error: null as string | null
+		};
+	} catch (cause) {
+		return { query, schedule: null as RentSchedulePageDto | null, error: scheduleIssue(cause) };
 	}
 };

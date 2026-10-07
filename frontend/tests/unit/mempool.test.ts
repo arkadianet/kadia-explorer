@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	createMempoolLoader,
+	connectionsFor,
 	fetchMempool,
 	filterPending,
 	MempoolError,
+	parseMempoolFocus,
 	validateSnapshot,
 	type MempoolSnapshot,
 	type MempoolState
@@ -38,6 +40,41 @@ function fixture(): MempoolSnapshot {
 			}
 		]
 	};
+}
+function connected(): MempoolSnapshot {
+	const data = fixture();
+	data.connections = {
+		scope: 'returned_snapshot_only',
+		output_count: 4,
+		identified_output_count: 3,
+		edge_count: 2,
+		edges_truncated: false,
+		edges: [
+			{
+				producer_id: data.items[1].id,
+				consumer_id: data.items[0].id,
+				box_id: 'c'.repeat(64),
+				kind: 'spend'
+			},
+			{
+				producer_id: data.items[1].id,
+				consumer_id: data.items[0].id,
+				box_id: 'c'.repeat(64),
+				kind: 'read'
+			}
+		],
+		shared_input_count: 1,
+		shared_inputs_truncated: false,
+		shared_inputs: [
+			{
+				box_id: 'd'.repeat(64),
+				transaction_count: 2,
+				transaction_ids: data.items.map((item) => item.id),
+				truncated: false
+			}
+		]
+	};
+	return data;
 }
 afterEach(() => {
 	vi.useRealTimers();
@@ -142,6 +179,164 @@ describe('bounded node mempool observations', () => {
 		expect(filterPending(data.items, ' AAA ')).toEqual([data.items[0]]);
 		expect(filterPending(data.items, 'c')).toEqual([]);
 		expect(data.observed_count).toBe(2);
+	});
+});
+
+describe('snapshot-local connections', () => {
+	it('keeps older API absence distinct from a supported empty connection set', () => {
+		expect(validateSnapshot(fixture()).connections).toBeUndefined();
+		const empty = fixture();
+		empty.connections = {
+			scope: 'returned_snapshot_only',
+			output_count: 4,
+			identified_output_count: 0,
+			edge_count: 0,
+			edges_truncated: false,
+			edges: [],
+			shared_input_count: 0,
+			shared_inputs_truncated: false,
+			shared_inputs: []
+		};
+		expect(validateSnapshot(empty).connections?.edges).toEqual([]);
+	});
+	it('selects later-row producers and separates spending from read-only references', () => {
+		const data = validateSnapshot(connected());
+		const selection = connectionsFor(data, data.items[0].id);
+		expect(selection.incoming.map((edge) => edge.kind)).toEqual(['spend', 'read']);
+		expect(selection.outgoing).toEqual([]);
+		expect(selection.shared).toHaveLength(1);
+		expect(connectionsFor(data, data.items[1].id).outgoing).toHaveLength(2);
+		expect(connectionsFor(data, 'f'.repeat(64))).toEqual({
+			transaction: null,
+			incoming: [],
+			outgoing: [],
+			shared: []
+		});
+		data.items.reverse();
+		expect(validateSnapshot(data).connections).toEqual(connected().connections);
+	});
+	it.each([
+		(data: MempoolSnapshot) => {
+			data.connections!.scope = 'global' as 'returned_snapshot_only';
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.output_count = 5;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.identified_output_count = 5;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.identified_output_count = 0;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edge_count = 10001;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges_truncated = true;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges[0].producer_id = 'f'.repeat(64);
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges[0].consumer_id = data.items[1].id;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges[0].box_id = 'invalid';
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges[0].kind = 'transfer' as 'spend';
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges[1] = data.connections!.edges[0];
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges = Array(257).fill(data.connections!.edges[0]);
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.edges[1].box_id = 'e'.repeat(64);
+		},
+		(data: MempoolSnapshot) => {
+			data.items[0].data_input_count = 0;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_input_count = -1;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_input_count = 10001;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs_truncated = true;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs[0].box_id = 'invalid';
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs[0].transaction_count = 3;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs[0].transaction_ids = [data.items[0].id];
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs[0].transaction_ids[1] = data.items[0].id;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs[0].transaction_ids[1] = 'f'.repeat(64);
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs[0].truncated = true;
+		},
+		(data: MempoolSnapshot) => {
+			data.connections!.shared_inputs = Array(17).fill(data.connections!.shared_inputs[0]);
+		}
+	])('rejects contradictory, dangling or excessive connection data', (change) => {
+		const data = connected();
+		change(data);
+		expect(() => validateSnapshot(data)).toThrow(MempoolError);
+	});
+	it('allows explicitly capped lists without declaring missing relationships absent', () => {
+		const data = connected();
+		data.connections!.edges.pop();
+		data.connections!.edges_truncated = true;
+		data.connections!.shared_inputs = [];
+		data.connections!.shared_inputs_truncated = true;
+		expect(validateSnapshot(data).connections).toMatchObject({
+			edge_count: 2,
+			edges_truncated: true,
+			shared_input_count: 1,
+			shared_inputs_truncated: true
+		});
+	});
+	it('bounds shared group memberships independently of the group count', () => {
+		const data = fixture();
+		data.items = Array.from({ length: 100 }, (_, i) => ({
+			...data.items[0],
+			id: i.toString(16).padStart(64, '0'),
+			input_count: 10
+		}));
+		data.observed_count = 100;
+		data.limit_reached = true;
+		data.connections = {
+			scope: 'returned_snapshot_only',
+			output_count: 300,
+			identified_output_count: 0,
+			edge_count: 0,
+			edges_truncated: false,
+			edges: [],
+			shared_input_count: 3,
+			shared_inputs_truncated: false,
+			shared_inputs: [1, 2, 3].map((n) => ({
+				box_id: n.toString(16).repeat(64),
+				transaction_count: 100,
+				transaction_ids: data.items.map((item) => item.id),
+				truncated: false
+			}))
+		};
+		expect(() => validateSnapshot(data)).toThrow(MempoolError);
+	});
+	it('accepts only an exact lowercase ID for shared selection', () => {
+		expect(parseMempoolFocus('a'.repeat(64))).toBe('a'.repeat(64));
+		for (const raw of [null, '', 'A'.repeat(64), ' a'.repeat(32), '../tx', 'a'.repeat(65)])
+			expect(parseMempoolFocus(raw)).toBeNull();
 	});
 });
 

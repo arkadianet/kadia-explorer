@@ -1,6 +1,6 @@
 # Network overview and observed rewards
 
-`GET /v1/network/summary` aggregates at most 720 latest indexed headers in one reader snapshot. Decimal amount strings remain exact; hourly chart values are only presentation aids. The response includes its height range, canonical tip ID, retained-history boundary, six recent block DTOs and fixed-length chart arrays. Header decoding has the shared 2 MiB / 4 s admission budget. It never scans transaction boxes.
+`GET /v1/network/summary` aggregates at most 720 latest indexed headers in one reader snapshot. Decimal amount strings remain exact; hourly chart values are only presentation aids. The response includes its height range, canonical tip ID, retained-history boundary, up to ten recent block DTOs and fixed-length chart arrays. Header decoding has the shared 2 MiB / 4 s admission budget. It never scans transaction boxes.
 
 Totals describe the **latest indexed blocks**, not an assumed complete 24-hour window. Mining timestamps can be out of order and block intervals vary. Charts place only sampled blocks into 24 hourly or 36 ten-minute buckets ending at the tip timestamp; timestamps beyond that anchor or at/below the open lower edge are excluded from those charts, but remain in the block-scope totals. Empty buckets are not evidence that the rest of the chain had no activity.
 

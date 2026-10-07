@@ -1,9 +1,39 @@
 # Versioned workflow API contract and portable client
 
-`/openapi.json` is an OpenAPI 3.1.1 contract for 23 documented read operations,
+`/openapi.json` is an OpenAPI 3.1.1 contract for 26 documented read operations,
 including the read-only group-balances POST. It explicitly covers a subset of the
 server API, not every operational or legacy endpoint. Contract version 1.0.0 is
 independent of chain height, database schema and release version.
+
+The subset includes bounded mining/header observations (`mining`) and compact
+address rent evidence (`addressRentExposure`, requiring `view: "exposure"`). Mining
+ranges are inclusive and limited to 20,160 headers, with an optional canonical end
+block pin. Rent context distinguishes scan completeness from full chain coverage.
+Mempool connections are optional for compatibility with older API deployments and
+cover only returned transactions. Preserve these fields when interpreting results.
+
+`rentSchedule` covers the next 24 hours, 7, 30 or 90 days in ascending maturity
+height and box order. Mode and token-ID filters apply before the item cap. Strict
+continuations bind these filters and the current canonical tip. Dates are estimates
+from the indexed header timestamp and a 120-second block target; a stale tip does
+not establish an upcoming wall-clock deadline. Item pages examine at most 2,000
+candidates. First-page hourly batches scan independently of the result cap, with
+50,000-candidate, 16 MiB and deadline/work bounds; `batch_complete` and
+`batch_stop_reason` disclose cutoffs. Continuations return `batches: null`; retain
+the first-page overview only with its original anchor. `full_history` independently
+discloses index coverage. Amounts are exact decimal strings, including token sums.
+Full-claim candidates use the positive signed wrapping consensus fee and include
+the equality case. Known EIP-27 re-emission-token constraints exclude boxes from
+collectible and full-claim classifications; their collectible amount is zero.
+Candidate status does not prove that a claim transaction
+would validate; tokens in recreated boxes must remain preserved.
+
+Transaction status optionally includes `pending.details` from the same cached node
+observation. It exposes input IDs, read-only data-input IDs and output values,
+scripts and raw token amounts without waiting for inclusion. Each list is bounded
+to 32 entries, scripts to 2 KiB, and the entire projection to 32 KiB. Truncation and
+unknown token coverage are explicit. Input balances, signatures and registers are
+not resolved; `complete` describes only the projection. Older servers may omit it.
 
 The generator at `frontend/scripts/api-contract.mjs` builds response schemas and
 portable TypeScript declarations from the explorer's wire types. Request paths and

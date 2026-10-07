@@ -86,14 +86,9 @@
 </script>
 
 <section class="transaction-flow" aria-label="Transaction box flow">
-	<header class="flow-intro">
-		<div>
-			<p class="flow-kicker">Follow the boxes</p>
-			<h3>
-				{#if spatial}Follow every <span>movement.</span>{:else}One transaction. Every side.{/if}
-			</h3>
-		</div>
-		<p>Select an address to inspect its net change. Lines show transaction topology, not value.</p>
+	<header class="flow-guide">
+		<h3>Inputs and outputs</h3>
+		<p>Select an address for net changes. Lines show connections, not transferred amounts.</p>
 	</header>
 
 	<div class="flow-stage" bind:this={stage}>
@@ -346,15 +341,16 @@
 	.net-token-group {
 		min-width: 0;
 	}
-	.flow-intro {
+	.flow-guide {
 		display: flex;
 		justify-content: space-between;
-		align-items: end;
-		gap: 20px;
-		margin-bottom: 24px;
+		align-items: center;
+		gap: 8px 20px;
+		flex-wrap: wrap;
+		margin-bottom: 10px;
 	}
-	.flow-intro > p {
-		max-width: 34ch;
+	.flow-guide > p {
+		max-width: 64ch;
 		font-size: 12px;
 		color: var(--fg-muted);
 	}
@@ -367,10 +363,10 @@
 	h3 {
 		font-family: var(--font-display, var(--font-sans));
 		font-weight: var(--weight-display, 700);
-		font-size: clamp(24px, 3vw, 34px);
+		font-size: 17px;
 		letter-spacing: -0.035em;
 		line-height: 1.12;
-		margin-top: 6px;
+		margin: 0;
 	}
 	.flow-stage {
 		position: relative;
@@ -731,17 +727,23 @@
 		.spatial-beams {
 			display: none;
 		}
-		.flow-intro {
+		.flow-guide {
 			display: block;
 		}
-		.flow-intro > p {
+		.flow-guide > p {
 			max-width: none;
-			margin-top: 12px;
+			margin-top: 4px;
 		}
-		.flow-stage {
+		:global(:root[data-density][data-appearance]) .flow-stage {
 			grid-template-columns: minmax(0, 1fr);
-			padding: 16px;
-			gap: 26px;
+			padding: 10px;
+			gap: 16px;
+		}
+		.side-heading {
+			margin-bottom: 8px;
+		}
+		.box-amount {
+			margin-top: 8px;
 		}
 		.inputs,
 		.outputs,

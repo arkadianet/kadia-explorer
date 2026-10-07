@@ -1,6 +1,6 @@
 # API playground
 
-`/developers` is a curated, read-only request builder for 19 existing `/v1` endpoints.
+`/developers` is a curated, read-only request builder for 23 existing `/v1` endpoints.
 It is a practical starting point, not a claim to document every API parameter. The
 catalog lives in `frontend/src/lib/developer/playground.ts` alongside field validation.
 No new backend endpoint, authentication service or third-party proxy is introduced.

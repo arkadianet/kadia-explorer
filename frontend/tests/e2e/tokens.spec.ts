@@ -132,15 +132,21 @@ test('a token id resolves through the API to the token page', async ({ page }) =
 });
 
 test('an address page names the tokens it holds and scales their amounts', async ({ page }) => {
-	await page.goto(`/address/${MOCK_ADDRESS}`);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`/address/${MOCK_ADDRESS}#tokens`);
 
-	const holdings = page
-		.locator('section.panel')
-		.filter({ has: page.getByRole('heading', { name: /^Tokens \(/ }) });
+	const tab = page.getByRole('tab', { name: /^Tokens/ });
+	await expect(tab).toHaveAttribute('aria-selected', 'true');
+	await expect(tab).toBeInViewport({ ratio: 1 });
+	const holdings = page.getByRole('tabpanel');
 	const named = holdings.getByRole('link', { name: SYNTHETIC_TOKEN.name });
 	await expect(named).toBeVisible();
 	await expect(named).toHaveAttribute('href', `/token/${SYNTHETIC_TOKEN.id}`);
 	await expect(holdings.getByText('1,234.56', { exact: true })).toBeVisible();
+	await page.reload();
+	await expect(tab).toHaveAttribute('aria-selected', 'true');
+	await expect(tab).toBeInViewport({ ratio: 1 });
+	await expect(named).toBeVisible();
 });
 
 test('the home page top-tokens card lists five tokens', async ({ page }) => {

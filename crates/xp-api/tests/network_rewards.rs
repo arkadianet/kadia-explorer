@@ -103,6 +103,7 @@ async fn network_summary_has_same_reader_totals_explicit_scope_and_small_payload
     assert_eq!(result["from_height"], 1865999);
     assert_eq!(result["partial_from"], 1865999);
     assert_eq!(result["recent_blocks"][0]["id"], result["anchor_id"]);
+    assert_eq!(result["recent_blocks"].as_array().unwrap().len(), 4);
     assert_eq!(result["blocks_per_hour"].as_array().unwrap().len(), 24);
     assert!(serde_json::to_vec(&result).unwrap().len() < 6000);
 }
@@ -152,7 +153,12 @@ async fn network_summary_scans_only_the_latest_720_headers() {
     assert_eq!(result["block_count"], 720);
     assert_eq!(result["to_height"], 1866724);
     assert_eq!(result["from_height"], 1866005);
-    assert_eq!(result["recent_blocks"].as_array().unwrap().len(), 6);
+    let preview = result["recent_blocks"].as_array().unwrap();
+    assert_eq!(preview.len(), 10);
+    assert_eq!(preview[0]["id"], result["anchor_id"]);
+    for (index, block) in preview.iter().enumerate() {
+        assert_eq!(block["height"], 1_866_724 - index as u32);
+    }
     assert_eq!(
         result["blocks_per_hour"]
             .as_array()

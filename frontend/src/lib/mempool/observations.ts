@@ -10,6 +10,29 @@ export interface PendingTransaction {
 	size: number | null;
 	fee: string | null;
 }
+export interface PendingConnection {
+	producer_id: string;
+	consumer_id: string;
+	box_id: string;
+	kind: 'spend' | 'read';
+}
+export interface SharedPendingInput {
+	box_id: string;
+	transaction_count: number;
+	transaction_ids: string[];
+	truncated: boolean;
+}
+export interface PendingConnections {
+	scope: 'returned_snapshot_only';
+	output_count: number;
+	identified_output_count: number;
+	edge_count: number;
+	edges_truncated: boolean;
+	edges: PendingConnection[];
+	shared_input_count: number;
+	shared_inputs_truncated: boolean;
+	shared_inputs: SharedPendingInput[];
+}
 export interface MempoolSnapshot {
 	scope: 'configured_node_mempool';
 	source: 'configured_primary_node';
@@ -20,6 +43,8 @@ export interface MempoolSnapshot {
 	limit_reached: boolean;
 	observed_count: number;
 	items: PendingTransaction[];
+	/** Absent on older API versions; absence is not evidence of zero connections. */
+	connections?: PendingConnections;
 }
 export interface MempoolProblem {
 	code: string;
@@ -86,7 +111,108 @@ export function validateSnapshot(value: unknown): MempoolSnapshot {
 			return invalid();
 		seen.add(item.id);
 	}
+	if (data.connections !== undefined) validateConnections(data.connections, data.items);
 	return data;
+}
+
+function validateConnections(value: PendingConnections, items: PendingTransaction[]) {
+	const rows = new Map(items.map((item) => [item.id, item]));
+	const outputs = items.reduce((sum, item) => sum + item.output_count, 0);
+	const inputs = items.reduce((sum, item) => sum + item.input_count, 0);
+	const references = inputs + items.reduce((sum, item) => sum + item.data_input_count, 0);
+	if (
+		!value ||
+		value.scope !== 'returned_snapshot_only' ||
+		value.output_count !== outputs ||
+		!integer(value.identified_output_count, 0, outputs) ||
+		!integer(value.edge_count, 0, Math.min(10_000, references)) ||
+		!Array.isArray(value.edges) ||
+		value.edges.length > 256 ||
+		value.edges.length > value.edge_count ||
+		value.edges_truncated !== value.edges.length < value.edge_count ||
+		!integer(value.shared_input_count, 0, Math.min(5_000, Math.floor(inputs / 2))) ||
+		!Array.isArray(value.shared_inputs) ||
+		value.shared_inputs.length > 16 ||
+		value.shared_inputs.length > value.shared_input_count
+	)
+		return invalid();
+	const edgeKeys = new Set<string>();
+	const producers = new Map<string, string>();
+	const outputIds = new Map<string, Set<string>>();
+	const consumerCounts = new Map<string, number>();
+	for (const edge of value.edges) {
+		if (
+			!edge ||
+			!rows.has(edge.producer_id) ||
+			!rows.has(edge.consumer_id) ||
+			edge.producer_id === edge.consumer_id ||
+			typeof edge.box_id !== 'string' ||
+			!ID.test(edge.box_id) ||
+			(edge.kind !== 'spend' && edge.kind !== 'read')
+		)
+			return invalid();
+		const key = `${edge.producer_id}:${edge.consumer_id}:${edge.box_id}:${edge.kind}`;
+		if (
+			edgeKeys.has(key) ||
+			(producers.has(edge.box_id) && producers.get(edge.box_id) !== edge.producer_id)
+		)
+			return invalid();
+		edgeKeys.add(key);
+		producers.set(edge.box_id, edge.producer_id);
+		const produced = outputIds.get(edge.producer_id) ?? new Set<string>();
+		produced.add(edge.box_id);
+		outputIds.set(edge.producer_id, produced);
+		if (produced.size > rows.get(edge.producer_id)!.output_count) return invalid();
+		const consumerKey = `${edge.consumer_id}:${edge.kind}`;
+		const count = (consumerCounts.get(consumerKey) ?? 0) + 1;
+		consumerCounts.set(consumerKey, count);
+		const row = rows.get(edge.consumer_id)!;
+		if (count > (edge.kind === 'spend' ? row.input_count : row.data_input_count)) return invalid();
+	}
+	if (producers.size > value.identified_output_count) return invalid();
+	const boxes = new Set<string>();
+	let memberships = 0;
+	for (const group of value.shared_inputs) {
+		if (
+			!group ||
+			typeof group.box_id !== 'string' ||
+			!ID.test(group.box_id) ||
+			boxes.has(group.box_id) ||
+			!integer(group.transaction_count, 2, items.length) ||
+			!Array.isArray(group.transaction_ids) ||
+			group.transaction_ids.length < 2 ||
+			group.transaction_ids.length > group.transaction_count ||
+			group.truncated !== group.transaction_ids.length < group.transaction_count ||
+			new Set(group.transaction_ids).size !== group.transaction_ids.length ||
+			group.transaction_ids.some((id) => !rows.has(id))
+		)
+			return invalid();
+		boxes.add(group.box_id);
+		memberships += group.transaction_ids.length;
+		if (memberships > 256) return invalid();
+	}
+	if (
+		value.shared_inputs_truncated !==
+		(value.shared_inputs.length < value.shared_input_count ||
+			value.shared_inputs.some((group) => group.truncated))
+	)
+		return invalid();
+}
+
+export function parseMempoolFocus(value: string | null): string | null {
+	return value !== null && ID.test(value) ? value : null;
+}
+
+/** Select only already returned references. This function never resolves missing boxes. */
+export function connectionsFor(snapshot: MempoolSnapshot, id: string) {
+	return {
+		transaction: snapshot.items.find((item) => item.id === id) ?? null,
+		incoming: snapshot.connections?.edges.filter((edge) => edge.consumer_id === id) ?? [],
+		outgoing: snapshot.connections?.edges.filter((edge) => edge.producer_id === id) ?? [],
+		shared:
+			snapshot.connections?.shared_inputs.filter((group) => group.transaction_ids.includes(id)) ??
+			[]
+	};
 }
 
 export function filterPending(items: PendingTransaction[], query: string): PendingTransaction[] {

@@ -46,7 +46,7 @@ test('developer resources are downloadable and the contract preserves amount str
 	const response = await request.get('/openapi.json');
 	expect(response.ok()).toBe(true);
 	const contract = await response.json();
-	expect(Object.keys(contract.paths)).toHaveLength(23);
+	expect(Object.keys(contract.paths)).toHaveLength(26);
 	expect(contract.components.schemas.TokenDto.properties.amount.type).toBe('string');
 	for (const asset of [
 		'kadia-client.js',

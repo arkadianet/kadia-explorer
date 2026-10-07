@@ -247,6 +247,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         )
         .route("/v1/network/summary", get(handlers::network::summary))
         .route("/v1/mempool", get(handlers::mempool::snapshot))
+        .route("/v1/mining", get(handlers::mining::overview))
         .route(
             "/v1/network/history",
             get(handlers::network_history::history),
@@ -275,6 +276,7 @@ pub fn router(state: AppState, cfg: &ApiConfig) -> Router {
         .route("/v1/supply", get(handlers::supply::supply))
         .route("/v1/rent/upcoming", get(handlers::rent::upcoming))
         .route("/v1/rent/eligible", get(handlers::rent::eligible))
+        .route("/v1/rent/schedule", get(handlers::rent::schedule))
         .route("/v1/search", get(handlers::search::search))
         .layer(axum::middleware::from_fn(completeness))
         // 5 s ceiling per request: every handler is a bounded store read, so anything

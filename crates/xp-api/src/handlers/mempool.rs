@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -18,6 +18,9 @@ use xp_source::{BlockSource, SourceError};
 const LIMIT: usize = 100;
 const MAX_BODY: usize = 2 * 1024 * 1024;
 const MAX_WORK: usize = 10_000;
+const MAX_EDGES: usize = 256;
+const MAX_SHARED_GROUPS: usize = 16;
+const MAX_SHARED_MEMBERS: usize = 256;
 const TTL: Duration = Duration::from_secs(5);
 const ERROR_TTL: Duration = Duration::from_secs(2);
 
@@ -41,6 +44,33 @@ pub struct Snapshot {
     limit_reached: bool,
     observed_count: usize,
     items: Vec<Item>,
+    connections: Connections,
+}
+#[derive(Clone, Debug, Serialize)]
+struct Edge {
+    producer_id: String,
+    consumer_id: String,
+    box_id: String,
+    kind: &'static str,
+}
+#[derive(Clone, Debug, Serialize)]
+struct SharedInput {
+    box_id: String,
+    transaction_count: usize,
+    transaction_ids: Vec<String>,
+    truncated: bool,
+}
+#[derive(Clone, Debug, Serialize)]
+struct Connections {
+    scope: &'static str,
+    output_count: usize,
+    identified_output_count: usize,
+    edge_count: usize,
+    edges_truncated: bool,
+    edges: Vec<Edge>,
+    shared_input_count: usize,
+    shared_inputs_truncated: bool,
+    shared_inputs: Vec<SharedInput>,
 }
 #[derive(Debug)]
 struct Cached {
@@ -126,6 +156,11 @@ struct Input {
 }
 #[derive(Deserialize)]
 struct Output {
+    #[serde(rename = "boxId")]
+    id: Option<String>,
+    #[serde(rename = "transactionId")]
+    transaction_id: Option<String>,
+    index: Option<usize>,
     value: u64,
     #[serde(rename = "ergoTree")]
     tree: String,
@@ -158,7 +193,10 @@ fn parse(raw: &str) -> Result<Snapshot, &'static str> {
     let mut ids = HashSet::new();
     let mut work = 0usize;
     let mut items = Vec::new();
-    for tx in transactions {
+    let mut producers = BTreeMap::new();
+    let mut spenders: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut output_count = 0;
+    for tx in &transactions {
         work = work
             .checked_add(1 + tx.inputs.len() + tx.data_inputs.len() + tx.outputs.len())
             .filter(|n| *n <= MAX_WORK)
@@ -179,6 +217,7 @@ fn parse(raw: &str) -> Result<Snapshot, &'static str> {
             if !valid_id(&input.id) || !inputs.insert(&input.id) {
                 return Err(invalid);
             }
+            spenders.entry(&input.id).or_default().insert(&tx.id);
         }
         let mut data_inputs = HashSet::new();
         for input in &tx.data_inputs {
@@ -187,14 +226,25 @@ fn parse(raw: &str) -> Result<Snapshot, &'static str> {
             }
         }
         let mut fee = 0u128;
-        for output in &tx.outputs {
+        output_count += tx.outputs.len();
+        for (index, output) in tx.outputs.iter().enumerate() {
             if output.value > i64::MAX as u64
                 || output.tree.is_empty()
                 || output.tree.len() > 16_384
                 || output.tree.len() % 2 != 0
                 || !output.tree.bytes().all(|b| b.is_ascii_hexdigit())
+                || output
+                    .transaction_id
+                    .as_ref()
+                    .is_some_and(|id| id != &tx.id)
+                || output.index.is_some_and(|supplied| supplied != index)
             {
                 return Err(invalid);
+            }
+            if let Some(id) = &output.id {
+                if !valid_id(id) || producers.insert(id.as_str(), tx.id.as_str()).is_some() {
+                    return Err(invalid);
+                }
             }
             if output.tree.eq_ignore_ascii_case(xp_store::FEE_TREE_HEX) {
                 fee += u128::from(output.value);
@@ -202,7 +252,7 @@ fn parse(raw: &str) -> Result<Snapshot, &'static str> {
         }
         if items.len() < LIMIT {
             items.push(Item {
-                id: tx.id,
+                id: tx.id.clone(),
                 input_count: tx.inputs.len(),
                 data_input_count: tx.data_inputs.len(),
                 output_count: tx.outputs.len(),
@@ -211,6 +261,69 @@ fn parse(raw: &str) -> Result<Snapshot, &'static str> {
             });
         }
     }
+    // Build references only after every producer is known: node order is not
+    // topological. The same snapshot is the entire scope; no extra lookups occur.
+    let mut references = BTreeSet::new();
+    for tx in &transactions {
+        for (inputs, kind) in [(&tx.inputs, "spend"), (&tx.data_inputs, "read")] {
+            for input in inputs {
+                if let Some(producer) = producers.get(input.id.as_str()) {
+                    if *producer == tx.id {
+                        return Err(invalid);
+                    }
+                    references.insert((*producer, tx.id.as_str(), input.id.as_str(), kind));
+                }
+            }
+        }
+    }
+    let edge_count = references.len();
+    let edges: Vec<_> = references
+        .into_iter()
+        .take(MAX_EDGES)
+        .map(|(producer, consumer, box_id, kind)| Edge {
+            producer_id: producer.into(),
+            consumer_id: consumer.into(),
+            box_id: box_id.into(),
+            kind,
+        })
+        .collect();
+    let shared: Vec<_> = spenders
+        .into_iter()
+        .filter(|(_, ids)| ids.len() > 1)
+        .collect();
+    let shared_input_count = shared.len();
+    let mut members_left = MAX_SHARED_MEMBERS;
+    let mut shared_inputs = Vec::new();
+    for (box_id, ids) in shared.into_iter().take(MAX_SHARED_GROUPS) {
+        if members_left < 2 {
+            break;
+        }
+        let transaction_count = ids.len();
+        let transaction_ids: Vec<String> = ids
+            .into_iter()
+            .take(members_left)
+            .map(str::to_owned)
+            .collect();
+        members_left -= transaction_ids.len();
+        shared_inputs.push(SharedInput {
+            box_id: box_id.into(),
+            truncated: transaction_ids.len() < transaction_count,
+            transaction_count,
+            transaction_ids,
+        });
+    }
+    let connections = Connections {
+        scope: "returned_snapshot_only",
+        output_count,
+        identified_output_count: producers.len(),
+        edge_count,
+        edges_truncated: edges.len() < edge_count,
+        edges,
+        shared_input_count,
+        shared_inputs_truncated: shared_inputs.len() < shared_input_count
+            || shared_inputs.iter().any(|group| group.truncated),
+        shared_inputs,
+    };
     let checked_at_ms = now_ms();
     Ok(Snapshot {
         scope: "configured_node_mempool",
@@ -222,6 +335,7 @@ fn parse(raw: &str) -> Result<Snapshot, &'static str> {
         limit_reached,
         observed_count: items.len(),
         items,
+        connections,
     })
 }
 #[derive(Deserialize)]
@@ -270,6 +384,128 @@ pub async fn snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{json, Value};
+
+    fn id(n: u32) -> String {
+        format!("{n:064x}")
+    }
+    fn tx(n: u32, inputs: &[u32], reads: &[u32], outputs: &[u32]) -> Value {
+        json!({
+            "id": id(n),
+            "inputs": inputs.iter().map(|n| json!({"boxId":id(*n)})).collect::<Vec<_>>(),
+            "dataInputs": reads.iter().map(|n| json!({"boxId":id(*n)})).collect::<Vec<_>>(),
+            "outputs": outputs.iter().enumerate().map(|(index, output)| json!({
+                "boxId":id(*output), "transactionId":id(n), "index":index,
+                "value":1000000, "ergoTree":"00"
+            })).collect::<Vec<_>>()
+        })
+    }
+    fn snapshot(rows: Vec<Value>) -> Snapshot {
+        parse(&serde_json::to_string(&rows).unwrap()).unwrap()
+    }
+    #[test]
+    fn references_are_snapshot_local_and_independent_of_node_order() {
+        let child = tx(2, &[101], &[102], &[103]);
+        let parent = tx(1, &[900], &[], &[101, 102]);
+        let sibling = tx(3, &[900], &[102], &[104]);
+        let first = snapshot(vec![child.clone(), parent.clone(), sibling.clone()]);
+        let reordered = snapshot(vec![sibling, parent, child]);
+        let connections = serde_json::to_value(&first.connections).unwrap();
+        assert_eq!(
+            connections,
+            serde_json::to_value(&reordered.connections).unwrap()
+        );
+        assert_eq!(connections["edge_count"], 3);
+        assert_eq!(connections["output_count"], 4);
+        assert_eq!(connections["identified_output_count"], 4);
+        assert_eq!(connections["edges"][0]["producer_id"], id(1));
+        assert_eq!(connections["edges"][0]["consumer_id"], id(2));
+        assert_eq!(connections["edges"][0]["kind"], "spend");
+        assert_eq!(connections["edges"][1]["kind"], "read");
+        assert_eq!(connections["shared_input_count"], 1);
+        assert_eq!(connections["shared_inputs"][0]["box_id"], id(900));
+        assert_eq!(
+            connections["shared_inputs"][0]["transaction_ids"],
+            json!([id(1), id(3)])
+        );
+        assert_eq!(
+            first.items[0].id,
+            id(2),
+            "summary order remains the node's order"
+        );
+    }
+    #[test]
+    fn missing_output_ids_reduce_coverage_and_unmatched_inputs_are_not_classified() {
+        let mut parent = tx(1, &[900], &[], &[101, 102]);
+        parent["outputs"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("boxId");
+        let result = snapshot(vec![tx(2, &[101, 999], &[], &[103]), parent]);
+        assert_eq!(result.connections.output_count, 3);
+        assert_eq!(result.connections.identified_output_count, 2);
+        assert_eq!(result.connections.edge_count, 0);
+        assert_eq!(result.connections.shared_input_count, 0);
+    }
+    #[test]
+    fn ambiguous_producers_and_contradictory_identity_are_rejected() {
+        let original = tx(1, &[900], &[], &[101, 102]);
+        for (field, value) in [
+            ("boxId", json!("invalid")),
+            ("transactionId", json!(id(2))),
+            ("index", json!(1)),
+        ] {
+            let mut bad = original.clone();
+            bad["outputs"][0][field] = value;
+            assert!(parse(&json!([bad]).to_string()).is_err(), "{field}");
+        }
+        let duplicate = tx(2, &[901], &[], &[101]);
+        assert!(parse(&json!([original.clone(), duplicate]).to_string()).is_err());
+        let mut duplicate_within = original;
+        duplicate_within["outputs"][1]["boxId"] = json!(id(101));
+        assert!(parse(&json!([duplicate_within]).to_string()).is_err());
+        assert!(parse(&json!([tx(1, &[101], &[], &[101])]).to_string()).is_err());
+    }
+    #[test]
+    fn connection_lists_have_independent_caps_without_losing_exact_scope_counts() {
+        let mut rows = vec![tx(1, &[999], &[], &[101, 102, 103, 104])];
+        let inputs: Vec<_> = [101, 102, 103, 104].into_iter().chain(500..520).collect();
+        for n in 2..100 {
+            rows.push(tx(n, &inputs, &[], &[1000 + n]));
+        }
+        let result = snapshot(rows);
+        assert_eq!(result.connections.edge_count, 392);
+        assert_eq!(result.connections.edges.len(), MAX_EDGES);
+        assert!(result.connections.edges_truncated);
+        assert_eq!(result.connections.shared_input_count, 24);
+        assert!(result.connections.shared_inputs.len() <= MAX_SHARED_GROUPS);
+        assert_eq!(
+            result
+                .connections
+                .shared_inputs
+                .iter()
+                .map(|g| g.transaction_ids.len())
+                .sum::<usize>(),
+            MAX_SHARED_MEMBERS
+        );
+        assert!(result.connections.shared_inputs.last().unwrap().truncated);
+        assert!(result.connections.shared_inputs_truncated);
+        assert!(serde_json::to_vec(&result).unwrap().len() < 256 * 1024);
+    }
+    #[test]
+    fn recorded_block_transaction_identities_can_be_read_without_inclusion_claims() {
+        let block: Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/receipts/storage-rent-block.json"
+        ))
+        .unwrap();
+        let result = parse(&block["blockTransactions"]["transactions"].to_string()).unwrap();
+        assert_eq!(
+            result.connections.output_count,
+            result.connections.identified_output_count
+        );
+        assert_eq!(result.scope, "configured_node_mempool");
+        assert_eq!(result.items[1].fee.as_deref(), Some("1100000"));
+    }
     #[test]
     fn shared_work_limit_rejects_many_individually_valid_transactions() {
         let inputs = (0u32..100)

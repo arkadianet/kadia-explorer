@@ -23,6 +23,17 @@ const op = (path, response, parameters = {}, required = [], extra = {}) => ({
 export const operations = {
 	status: op('/status', 'StatusDto'),
 	mempool: op('/mempool', 'MempoolSnapshot'),
+	mining: op(
+		'/mining',
+		'MiningOverview',
+		{
+			from_height: { ...height, minimum: 1 },
+			to_height: { ...height, minimum: 1 },
+			top: { type: 'integer', minimum: 1, maximum: 50 },
+			end_block_id: id
+		},
+		['from_height', 'to_height']
+	),
 	network: op('/network/summary', 'NetworkSummary'),
 	networkHistory: op(
 		'/network/history',
@@ -58,6 +69,29 @@ export const operations = {
 	),
 	box: op('/boxes/{id}', 'BoxDto', pathId, ['id']),
 	address: op('/addresses/{addr}', 'AddressDto', pathAddress, ['addr']),
+	addressRentExposure: op(
+		'/addresses/{addr}/rent',
+		'RentExposure',
+		{
+			...pathAddress,
+			view: { type: 'string', enum: ['exposure'] }
+		},
+		['addr', 'view']
+	),
+	rentSchedule: op(
+		'/rent/schedule',
+		'RentSchedulePageDto',
+		{
+			window: { type: 'string', enum: ['24h', '7d', '30d', '90d'] },
+			mode: { type: 'string', enum: ['all', 'collectible', 'full_claim'] },
+			token_id: id,
+			limit: { type: 'integer', minimum: 1, maximum: 100 },
+			cursor: text,
+			snapshot: text
+		},
+		[],
+		{ paged: true, strictOnly: true }
+	),
 	addressActivity: op(
 		'/addresses/{addr}/activity',
 		'AddressActivityPageDto',
@@ -146,5 +180,7 @@ export const sourceFiles = [
 	'src/lib/addresses/groups.ts',
 	'src/lib/addresses/history.ts',
 	'src/lib/network/history.ts',
-	'src/lib/mempool/observations.ts'
+	'src/lib/mempool/observations.ts',
+	'src/lib/mining/overview.ts',
+	'src/lib/rent/exposure.ts'
 ];

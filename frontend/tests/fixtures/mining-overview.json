@@ -1,0 +1,59 @@
+{
+	"scope": "canonical_block_headers",
+	"consistency": "single_reader",
+	"complete": true,
+	"from_height": 1,
+	"to_height": 4,
+	"block_count": 4,
+	"indexed_height": 8,
+	"full_history": false,
+	"partial_from": 1,
+	"anchor": {
+		"height": 4,
+		"block_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	},
+	"top": 2,
+	"totals": { "fees": "9007199254740996", "transaction_count": "12" },
+	"miner_keys": {
+		"distinct_count": 3,
+		"items": [
+			{
+				"public_key": "021111111111111111111111111111111111111111111111111111111111111111",
+				"block_count": 2,
+				"first_height": 1,
+				"last_height": 4,
+				"first_block_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"last_block_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"fees": "9007199254740993"
+			},
+			{
+				"public_key": "022222222222222222222222222222222222222222222222222222222222222222",
+				"block_count": 1,
+				"first_height": 2,
+				"last_height": 2,
+				"first_block_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				"last_block_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				"fees": "1"
+			}
+		],
+		"other_key_count": 1,
+		"other_block_count": 1,
+		"other_fees": "2"
+	},
+	"versions": [
+		{ "version": 3, "block_count": 3 },
+		{ "version": 4, "block_count": 1 }
+	],
+	"votes": {
+		"known_blocks": 3,
+		"unknown_blocks": 1,
+		"zero_vote_blocks": 1,
+		"distinct_tuples": 2,
+		"items": [
+			{ "votes": "01ff00", "block_count": 2 },
+			{ "votes": "000000", "block_count": 1 }
+		],
+		"other_tuple_count": 0,
+		"other_block_count": 0
+	}
+}

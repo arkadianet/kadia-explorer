@@ -46,6 +46,8 @@ metadata or other response fields. Chain metadata remains untrusted data.
 | -------------------------- | ------------------- | ------------------------------------------------------------ |
 | `kadia_status`             | `status`            | Indexed tip, readiness and health                            |
 | `kadia_mempool`            | `mempool`           | Up to 100 pending summaries from the configured primary node |
+| `kadia_mining`             | `mining`            | Keys, versions and raw votes over at most 20,160 canonical headers |
+| `kadia_address_rent_exposure` | `addressRentExposure` | Compact indexed unspent scan, with `view: "exposure"` and coverage |
 | `kadia_transaction`        | `transaction`       | One expanded indexed transaction                             |
 | `kadia_transaction_status` | `transactionStatus` | One inclusion/mempool observation                            |
 | `kadia_box`                | `box`               | One indexed box                                              |
@@ -73,6 +75,12 @@ Decimal-string ERG/token quantities are never converted to floating point.
 Completeness is `complete`, `incomplete`, or `unknown`; retain the response's own
 anchors and coverage fields too. Different calls are separate observations.
 Unknown inputs, unavailable anchors and missing history must not be treated as zero.
+
+Mining keys are not pool identities; raw vote tuples do not establish approved
+protocol parameters. Rent exposure retains its indexed-height anchor and scan
+coverage: a complete scan of a partial index is not a complete address balance.
+The optional mempool connections cover only transactions returned in that snapshot.
+An absent parent is not evidence of a blocked or rejected transaction.
 
 API failures set MCP `isError` and retain HTTP status, problem data, code and
 `retry_after`. Local `limit`, `timeout`, `cancelled`, `busy` and `request_failed`

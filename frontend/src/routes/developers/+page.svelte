@@ -171,7 +171,7 @@
 			<p class="eyebrow">01 / The contract</p>
 			<h2>OpenAPI 1.0</h2>
 			<p>
-				A versioned OpenAPI 3.1.1 document covering the 23 operations supported by the portable
+				A versioned OpenAPI 3.1.1 document covering the 26 operations supported by the portable
 				client. Exact wire types, parameters and error behavior.
 			</p>
 			<a href="/openapi.json" download="kadia-openapi.json">Download OpenAPI ↗</a>
@@ -207,7 +207,7 @@
 				target="_blank"
 				rel="noreferrer">Set up the read-only MCP adapter ↗</a
 			>
-			<small>Ten tools for an API you configure, with exact values and coverage metadata.</small>
+			<small>Twelve tools for an API you configure, with exact values and coverage metadata.</small>
 		</article>
 	</section>
 	<div class="workbench">

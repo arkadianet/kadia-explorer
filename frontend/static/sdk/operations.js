@@ -12,6 +12,32 @@ export const operations = {
 		parameters: {},
 		required: []
 	},
+	mining: {
+		path: '/mining',
+		response: 'MiningOverview',
+		parameters: {
+			from_height: {
+				type: 'integer',
+				minimum: 1,
+				maximum: 4294967295
+			},
+			to_height: {
+				type: 'integer',
+				minimum: 1,
+				maximum: 4294967295
+			},
+			top: {
+				type: 'integer',
+				minimum: 1,
+				maximum: 50
+			},
+			end_block_id: {
+				type: 'string',
+				pattern: '^[a-fA-F0-9]{64}$'
+			}
+		},
+		required: ['from_height', 'to_height']
+	},
 	network: {
 		path: '/network/summary',
 		response: 'NetworkSummary',
@@ -233,6 +259,56 @@ export const operations = {
 			}
 		},
 		required: ['addr']
+	},
+	addressRentExposure: {
+		path: '/addresses/{addr}/rent',
+		response: 'RentExposure',
+		parameters: {
+			addr: {
+				type: 'string',
+				minLength: 1,
+				maxLength: 4096
+			},
+			view: {
+				type: 'string',
+				enum: ['exposure']
+			}
+		},
+		required: ['addr', 'view']
+	},
+	rentSchedule: {
+		path: '/rent/schedule',
+		response: 'RentSchedulePageDto',
+		parameters: {
+			window: {
+				type: 'string',
+				enum: ['24h', '7d', '30d', '90d']
+			},
+			mode: {
+				type: 'string',
+				enum: ['all', 'collectible', 'full_claim']
+			},
+			token_id: {
+				type: 'string',
+				pattern: '^[a-fA-F0-9]{64}$'
+			},
+			limit: {
+				type: 'integer',
+				minimum: 1,
+				maximum: 100
+			},
+			cursor: {
+				type: 'string',
+				maxLength: 4096
+			},
+			snapshot: {
+				type: 'string',
+				maxLength: 4096
+			}
+		},
+		required: [],
+		paged: true,
+		strictOnly: true
 	},
 	addressActivity: {
 		path: '/addresses/{addr}/activity',

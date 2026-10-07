@@ -7,6 +7,7 @@ use serde::Serialize;
 use xp_store::rows::HeaderRow;
 
 const BLOCKS: usize = 720;
+const PREVIEW_BLOCKS: usize = 10;
 const HOUR: u64 = 3_600_000;
 
 #[derive(Serialize)]
@@ -68,7 +69,7 @@ fn aggregate(rows: &[(u32, HeaderRow)], partial_from: Option<u32>) -> NetworkSum
         partial_from,
         recent_blocks: rows
             .iter()
-            .take(6)
+            .take(PREVIEW_BLOCKS)
             .map(|(height, h)| block_dto(*height, h))
             .collect(),
         blocks_per_hour: blocks,

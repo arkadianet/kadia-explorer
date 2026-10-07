@@ -5,8 +5,9 @@
 	import '$lib/styles/aurora.css';
 	import '$lib/styles/atelier.css';
 	import '$lib/styles/prism.css';
+	import '$lib/styles/density.css';
 	import { page } from '$app/state';
-	import { appearance, theme } from '$lib/theme/theme.svelte';
+	import { appearance, density, theme } from '$lib/theme/theme.svelte';
 	import { status } from '$lib/status/status.svelte';
 	import { savedAddresses, SAVED_ADDRESSES_KEY } from '$lib/addresses/saved.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -55,6 +56,7 @@
 		{ href: '/blocks', label: 'Blocks', icon: 'blocks', primary: true },
 		{ href: '/txs', label: 'Transactions', icon: 'txs', primary: true },
 		{ href: '/mempool', label: 'Mempool', icon: 'clock' },
+		{ href: '/mining', label: 'Mining', icon: 'blocks' },
 		{ href: '/richlist', label: 'Rich list', icon: 'richlist' },
 		{ href: '/tokens', label: 'Tokens', icon: 'token' },
 		{
@@ -112,6 +114,7 @@
 	onMount(() => {
 		theme.init();
 		appearance.init();
+		density.init();
 		savedAddresses.load();
 		const syncSaved = (event: StorageEvent) => {
 			if (event.key === SAVED_ADDRESSES_KEY || event.key === null) savedAddresses.load();
@@ -135,7 +138,7 @@
 <div class="shell">
 	<aside class="rail">
 		<div class="rail-in">
-			<a class="brand" href="/">
+			<a class="brand" href="/" aria-label="Kadia Ergo Explorer">
 				<span class="mark" aria-hidden="true">Σ</span>
 				<span class="wordmark">
 					<span class="name">Kadia</span>
@@ -300,6 +303,7 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
 		min-height: 100vh;
+		--topbar-h: 60px;
 	}
 
 	/* ------------------------------------------------------------------------- the rail */
@@ -780,6 +784,42 @@
 	/* Under 900 px the dark column becomes a dark strip: brand and chain height only, with
 	   navigation moved to the thumb at the bottom of the screen. */
 	@media (max-width: 899px) {
+		.shell {
+			--topbar-h: 56px;
+		}
+		:global(:root[data-density][data-appearance]) .rail-in {
+			min-height: 44px;
+			padding-block: 0;
+		}
+		:global(:root[data-density][data-appearance]) .rail .brand {
+			min-height: 44px;
+			padding-inline: 0;
+			gap: 8px;
+		}
+		:global(:root[data-density][data-appearance]) .rail .mark {
+			width: 26px;
+			height: 26px;
+			font-size: 16px;
+		}
+		:global(:root[data-density][data-appearance]) .rail .name {
+			font-size: 20px;
+		}
+		:global(:root[data-density][data-appearance]) .rail .sub {
+			display: none;
+		}
+		:global(:root[data-density][data-appearance]) .rail .chain {
+			min-height: 44px;
+			padding: 0;
+		}
+		:global(:root[data-density][data-appearance]) .topbar {
+			height: var(--topbar-h);
+			gap: 6px;
+		}
+		.theme-toggle,
+		.topbar :global(.appearance-trigger) {
+			min-width: 44px;
+			min-height: 44px;
+		}
 		.rail-in {
 			flex-direction: row;
 			align-items: center;

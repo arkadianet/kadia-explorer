@@ -71,7 +71,7 @@ function payload(result) {
   return data;
 }
 
-test("real stdio discovery exposes only ten read-only, bounded tools and preserves exact data/coverage", async (t) => {
+test("real stdio discovery exposes only twelve read-only, bounded tools and preserves exact data/coverage", async (t) => {
   const data = {
     amount: "9223372036854775807",
     token_name: "Untrusted metadata text",
@@ -81,7 +81,7 @@ test("real stdio discovery exposes only ten read-only, bounded tools and preserv
     json(res, data, 200, { "x-explorer-completeness": "incomplete" }),
   );
   const listed = await run.client.listTools();
-  assert.equal(listed.tools.length, 10);
+  assert.equal(listed.tools.length, 12);
   for (const tool of listed.tools) {
     assert.equal(tool.annotations.readOnlyHint, true);
     assert.equal(tool.annotations.destructiveHint, false);
@@ -108,6 +108,8 @@ test("real stdio discovery exposes only ten read-only, bounded tools and preserv
   assert.equal(run.requests[0].headers.cookie, undefined);
   for (const [name, path, args] of [
     ["kadia_mempool", "/v1/mempool", {}],
+    ["kadia_mining", "/v1/mining?from_height=1&to_height=12&top=3", { from_height: 1, to_height: 12, top: 3 }],
+    ["kadia_address_rent_exposure", "/v1/addresses/9abc/rent?view=exposure", { addr: "9abc", view: "exposure" }],
     ["kadia_transaction", `/v1/txs/${id}`, { id }],
     ["kadia_transaction_status", `/v1/txs/${id}/status`, { id }],
     ["kadia_box", `/v1/boxes/${id}`, { id }],
@@ -129,6 +131,11 @@ test("invalid tools, methods, oversized arguments and unknown options never reac
     ["kadia_box", { id: "bad" }],
     ["kadia_status", { url: "https://example.invalid" }],
     ["kadia_status", { method: "DELETE" }],
+    ["kadia_mining", { from_height: 2, to_height: 1 }],
+    ["kadia_mining", { from_height: 1, to_height: 20161 }],
+    ["kadia_mining", { from_height: 1, to_height: 12, top: 51 }],
+    ["kadia_address_rent_exposure", { addr: "9abc" }],
+    ["kadia_address_rent_exposure", { addr: "9abc", view: "legacy" }],
     ["kadia_group_balances", { addresses: Array(21).fill("9abc") }],
     ["kadia_address", { addr: "a".repeat(4097) }],
     ["kadia_address", { addr: "é".repeat(3000) }],

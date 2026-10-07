@@ -3,22 +3,20 @@
 	import { page } from '$app/state';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHead from '$lib/components/PageHead.svelte';
-	import Facts from '$lib/components/Facts.svelte';
-	import Fact from '$lib/components/Fact.svelte';
 	import Table from '$lib/components/Table.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import InfiniteList from '$lib/components/InfiniteList.svelte';
 	import Hash from '$lib/components/Hash.svelte';
 	import Amount from '$lib/components/Amount.svelte';
 	import Age from '$lib/components/Age.svelte';
-	import Badge from '$lib/components/Badge.svelte';
 	import RentBadge from '$lib/components/RentBadge.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-	import ErrorState from '$lib/components/ErrorState.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
 	import SaveAddress from '$lib/components/SaveAddress.svelte';
 	import AddressActivity from '$lib/components/AddressActivity.svelte';
 	import AddressHistory from '$lib/components/AddressHistory.svelte';
+	import AddressRentExposure from '$lib/components/AddressRentExposure.svelte';
+	import { savedAddresses } from '$lib/addresses/saved.svelte';
 	import { api } from '$lib/api/endpoints';
 	import { createPager, type Pager } from '$lib/pager/pager.svelte';
 	import { status } from '$lib/status/status.svelte';
@@ -29,21 +27,24 @@
 
 	const PAGE_SIZE = 50;
 
-	const TABS = [
-		{ id: 'activity', label: 'Activity' },
-		{ id: 'history', label: 'Historical snapshot' },
-		{ id: 'txs', label: 'Transactions' },
-		{ id: 'unspent', label: 'Unspent boxes' },
-		{ id: 'boxes', label: 'All boxes' },
-		{ id: 'rent', label: 'Rent' }
-	];
-	const TAB_IDS = TABS.map((t) => t.id);
-
 	let { data }: { data: PageData } = $props();
 
 	const addr = $derived(data.addr);
 	const info = $derived(data.info);
 	const tip = $derived(status.current?.indexed ?? null);
+	const savedIdentity = $derived(
+		savedAddresses.items.find((item) => item.address === info?.address)
+	);
+	const TABS = $derived([
+		{ id: 'activity', label: 'Activity' },
+		{ id: 'tokens', label: 'Tokens', count: info?.balance.tokens.length ?? 0 },
+		{ id: 'history', label: 'Historical snapshot' },
+		{ id: 'txs', label: 'Transactions' },
+		{ id: 'unspent', label: 'Unspent boxes' },
+		{ id: 'boxes', label: 'All boxes' },
+		{ id: 'rent', label: 'Rent' }
+	]);
+	const TAB_IDS = $derived(TABS.map((t) => t.id));
 
 	/** Active tab, driven by the URL hash so a tab is linkable and survives reload. */
 	const active = $derived.by(() => {
@@ -62,33 +63,6 @@
 	let unspentPager = $state<Pager<BoxDto> | null>(null);
 	let boxPager = $state<Pager<BoxDto> | null>(null);
 
-	let rentItems = $state<BoxDto[] | null>(null);
-	let rentTruncated = $state(false);
-	let rentLoading = $state(false);
-	let rentError = $state<unknown>(null);
-
-	// Request generation counter, as on /rent: navigating to another address (or flipping back
-	// to the Rent tab) can leave an earlier request in flight, and without this guard its late
-	// reply would overwrite the current address's rows.
-	let rentGen = 0;
-
-	async function loadRent() {
-		const my = ++rentGen;
-		rentLoading = true;
-		rentError = null;
-		try {
-			const res = await api.addressRent(addr);
-			if (my !== rentGen) return;
-			rentItems = [...res.items].sort((a, b) => a.rent.maturity_height - b.rent.maturity_height);
-			rentTruncated = res.truncated;
-		} catch (e) {
-			if (my !== rentGen) return;
-			rentError = e;
-		} finally {
-			if (my === rentGen) rentLoading = false;
-		}
-	}
-
 	// Navigating from one address to another reuses this component, so the lazily-created
 	// per-tab state has to be dropped explicitly or the new address shows the old one's rows.
 	// Plain `let` (not `$state`) so reading it here does not make this effect depend on it.
@@ -100,12 +74,6 @@
 		txPager = null;
 		unspentPager = null;
 		boxPager = null;
-		// Invalidate any rent request still in flight for the previous address.
-		rentGen++;
-		rentItems = null;
-		rentTruncated = false;
-		rentLoading = false;
-		rentError = null;
 	});
 
 	$effect(() => {
@@ -128,8 +96,6 @@
 			);
 			boxPager = p;
 			void p.loadMore();
-		} else if (active === 'rent' && rentItems === null && !rentLoading && rentError === null) {
-			void loadRent();
 		}
 	});
 
@@ -151,62 +117,86 @@
 	</div>
 	<Panel title="Historical snapshot"><AddressHistory address={addr} /></Panel>
 {:else}
-	<div class="head">
-		<PageHead title="Address" id={info.address}>
-			{#snippet aside()}
-				<span class="balance"><Amount nano={info.balance.nano} maxFrac={9} /></span>
-			{/snippet}
-		</PageHead>
-		<SaveAddress address={info.address} />
-
-		<Facts>
-			<Fact label="Boxes"><span class="mono">{info.box_count}</span></Fact>
-			<Fact label="Tokens"><span class="mono">{info.balance.tokens.length}</span></Fact>
-			<Fact label="First seen">
-				<a class="mono" href={`/blocks/${info.first_seen}`}>{info.first_seen}</a>
-			</Fact>
-			<Fact label="Last seen">
-				<a class="mono" href={`/blocks/${info.last_seen}`}>{info.last_seen}</a>
-			</Fact>
-		</Facts>
+	<div class="address-head">
+		<header class="address-masthead">
+			<div class="address-title">
+				<h1>Address</h1>
+				<span class="address-balance" title={`${info.balance.nano} nanoERG`}
+					>{formatErg(info.balance.nano, { maxFrac: 9 })}<small>ERG</small></span
+				>
+			</div>
+			<div class="address-tools"><SaveAddress address={info.address} compact /></div>
+			<div class="address-id">
+				<Hash value={info.address} head={info.address.length} tail={0} />
+			</div>
+			{#if savedIdentity?.label || savedIdentity?.group}<p class="address-labels">
+					{#if savedIdentity.label}<span>Local label <bdi>{savedIdentity.label}</bdi></span>{/if}
+					{#if savedIdentity.group}<span>Group <bdi>{savedIdentity.group}</bdi></span>{/if}
+				</p>{/if}
+		</header>
+		<dl class="address-facts">
+			<div>
+				<dt>Boxes</dt>
+				<dd>{info.box_count}</dd>
+			</div>
+			<div>
+				<dt>Tokens</dt>
+				<dd>{info.balance.tokens.length}</dd>
+			</div>
+			<div>
+				<dt>First seen</dt>
+				<dd><a href={`/blocks/${info.first_seen}`}>{info.first_seen}</a></dd>
+			</div>
+			<div>
+				<dt>Last seen</dt>
+				<dd><a href={`/blocks/${info.last_seen}`}>{info.last_seen}</a></dd>
+			</div>
+		</dl>
 	</div>
 
-	{#if info.balance.tokens.length > 0}
-		<Panel title={`Tokens (${info.balance.tokens.length})`}>
-			<Table>
-				{#snippet head()}
-					<tr>
-						<th>Token</th>
-						<th class="num">Amount</th>
-					</tr>
-				{/snippet}
-				{#each info.balance.tokens as token (token.id)}
-					<tr>
-						<td>
-							<!-- A minted name is prose and keeps the body face; a token minted without one
+	{#snippet holdings()}
+		{#if info.balance.tokens.length > 0}
+			<div class="holdings-table">
+				<Table>
+					{#snippet head()}
+						<tr>
+							<th>Token</th>
+							<th class="num">Amount</th>
+						</tr>
+					{/snippet}
+					{#each info.balance.tokens as token (token.id)}
+						<tr>
+							<td>
+								<!-- A minted name is prose and keeps the body face; a token minted without one
 							     falls back to its truncated id in mono. Either way the cell links to the
 							     token's own page. -->
-							{#if token.name}
-								<a class="token-name" href={`/token/${token.id}`} title={token.id}>{token.name}</a>
-							{:else}
-								<a class="mono" href={`/token/${token.id}`} title={token.id}
-									>{truncateMiddle(token.id)}</a
-								>
-							{/if}
-						</td>
-						<td class="num mono">{formatTokenAmount(token.amount, token.decimals)}</td>
-					</tr>
-				{/each}
-			</Table>
-		</Panel>
-	{/if}
+								{#if token.name}
+									<a class="token-name" href={`/token/${token.id}`} title={token.id}>{token.name}</a
+									>
+								{:else}
+									<a class="mono" href={`/token/${token.id}`} title={token.id}
+										>{truncateMiddle(token.id)}</a
+									>
+								{/if}
+							</td>
+							<td class="num mono">{formatTokenAmount(token.amount, token.decimals)}</td>
+						</tr>
+					{/each}
+				</Table>
+			</div>
+		{:else}<EmptyState message="No token balances in this indexed address snapshot." />{/if}
+	{/snippet}
 
 	<Panel>
-		<Tabs tabs={TABS} {active} onchange={selectTab} label="Address sections" />
+		<div class="address-section-tabs">
+			<Tabs tabs={TABS} {active} onchange={selectTab} label="Address sections" />
+		</div>
 
 		<div role="tabpanel" id={`panel-${active}`} tabindex="0" aria-labelledby={`tab-${active}`}>
 			{#if active === 'activity'}
 				<AddressActivity address={addr} />
+			{:else if active === 'tokens'}
+				{@render holdings()}
 			{:else if active === 'history'}
 				<AddressHistory address={addr} />
 			{:else if active === 'txs'}
@@ -330,49 +320,8 @@
 				{:else}
 					<Skeleton />
 				{/if}
-			{:else if rentLoading && rentItems === null}
-				<Skeleton />
-			{:else if rentError}
-				<ErrorState error={rentError} retry={() => void loadRent()} />
-			{:else if rentItems && rentItems.length > 0}
-				{#if rentTruncated}
-					<p class="notice">
-						Showing a partial sample of this address’s rent-bearing boxes, sorted by maturity among
-						those scanned; boxes not shown may mature sooner.
-					</p>
-				{/if}
-				<Table dense>
-					{#snippet head()}
-						<tr>
-							<th>Id</th>
-							<th class="num">Value</th>
-							<th class="num">Due rent</th>
-							<th class="num">Maturity height</th>
-							<th>Matures</th>
-						</tr>
-					{/snippet}
-					{#each rentItems as box (box.id)}
-						<tr>
-							<td><Hash value={box.id} href={`/box/${box.id}`} copy={false} /></td>
-							<td class="num"><Amount nano={box.value} maxFrac={9} /></td>
-							<td class="num"><Amount nano={box.rent.due_nano} maxFrac={9} /></td>
-							<td class="num mono">{box.rent.maturity_height}</td>
-							<td>
-								{#if box.rent.claimable_at_tip}
-									<Badge tone="danger">claimable</Badge>
-								{:else if tip !== null}
-									in {box.rent.maturity_height - tip} blocks
-								{:else}
-									<span class="muted">—</span>
-								{/if}
-							</td>
-						</tr>
-					{/each}
-				</Table>
-			{:else if rentItems}
-				<EmptyState message="No box at this address carries storage rent." />
 			{:else}
-				<Skeleton />
+				<AddressRentExposure address={addr} />
 			{/if}
 		</div>
 	</Panel>
@@ -384,13 +333,206 @@
 		flex-direction: column;
 		gap: var(--space-4);
 	}
-	/* The one big number on the page: what this address is worth right now. */
-	.balance :global(.amount) {
-		font-size: var(--fs-key);
-		font-weight: 600;
+	.address-head {
+		display: flex;
+		flex-direction: column;
+		gap: 0;
+		min-width: 0;
 	}
-	.balance :global(.unit) {
-		font-size: var(--fs-data);
+	:global(
+		:root[data-density][data-appearance] .content[data-page='address'] > .panel > .panel-body
+	) {
+		padding: var(--density-panel, 16px);
+	}
+	:global(:root[data-density][data-appearance] .content[data-page='address'])
+		.address-section-tabs
+		:global(.tabs) {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		gap: 0 16px;
+		margin-bottom: 0;
+	}
+	.address-section-tabs :global(.tab) {
+		flex-shrink: 0;
+		white-space: nowrap;
+	}
+	.address-masthead {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 6px 16px;
+		align-items: center;
+		padding: var(--density-panel, 16px);
+		border: var(--rule);
+		border-top: 3px solid var(--accent-ink);
+		border-radius: var(--radius-card);
+		background: var(--surface-solid);
+		min-width: 0;
+	}
+	.address-title {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.address-title h1 {
+		font-family: var(--font-display, var(--font-sans));
+		font-size: var(--density-title, 32px);
+		line-height: 1.05;
+		letter-spacing: -0.04em;
+		margin: 0;
+	}
+	.address-balance {
+		font: 600 clamp(21px, 2.5vw, 32px)/1.15 var(--font-number, var(--font-mono));
+		letter-spacing: -0.035em;
+		overflow-wrap: anywhere;
+		min-width: 0;
+	}
+	.address-balance small {
+		font: 500 12px var(--font-sans);
+		margin-inline-start: 6px;
+		letter-spacing: 0;
+		color: var(--fg-muted);
+	}
+	.address-id {
+		grid-column: 1/-1;
+		margin-top: 0;
+		font-size: 12px;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.address-id :global(.hash) {
+		display: inline;
+	}
+	.address-tools {
+		min-width: 0;
+	}
+	.address-labels {
+		grid-column: 1/-1;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 16px;
+		margin: 0;
+		font-size: 12px;
+		color: var(--fg-muted);
+		overflow-wrap: anywhere;
+	}
+	.address-labels bdi {
+		color: var(--fg);
+		font-weight: 650;
+		margin-left: 6px;
+	}
+	.address-facts {
+		margin: 0;
+		padding: 0 var(--density-panel, 16px);
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0 20px;
+		border-bottom: var(--rule);
+	}
+	.address-facts > div {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-height: 36px;
+	}
+	.address-facts dt {
+		color: var(--fg-muted);
+		font-size: 11px;
+		margin: 0;
+	}
+	.address-facts dd {
+		font: 500 13px/1.3 var(--font-mono);
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+	.holdings-table {
+		padding: 0;
+		margin-top: 8px;
+	}
+	:global([data-appearance='prism']) .address-head {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+	}
+	:global([data-appearance='prism']) .address-masthead {
+		grid-column: 1/-1;
+	}
+	:global([data-appearance='prism']) .address-facts {
+		grid-column: 1/-1;
+	}
+	:global([data-appearance='atelier']) .address-masthead {
+		background: transparent;
+		border: 0;
+		border-block: 3px double var(--hairline);
+		border-radius: 0;
+		padding-inline: 0;
+	}
+	:global([data-appearance='aurora']) .address-masthead {
+		border-top-width: 1px;
+		border-inline-start: 3px solid var(--accent-ink);
+	}
+	:global([data-appearance='aurora']) .address-title h1 {
+		font-weight: 400;
+	}
+	@media (min-width: 900px) {
+		:global([data-appearance='atelier']) .address-head {
+			display: grid;
+			grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+			gap: var(--density-gap, 16px);
+			align-items: center;
+		}
+		:global([data-appearance='atelier']) .address-facts {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+			border: 0;
+			border-inline-start: 3px double var(--hairline);
+		}
+	}
+	@media (max-width: 700px) {
+		.address-masthead {
+			padding: 10px 12px;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 4px 8px;
+		}
+		.address-title {
+			gap: 6px 12px;
+		}
+		.address-title h1 {
+			font-size: 24px;
+		}
+		.address-balance {
+			font-size: 21px;
+		}
+		.address-facts {
+			padding: 0;
+			gap: 0 10px;
+			justify-content: space-between;
+		}
+		.address-facts > div {
+			gap: 4px;
+			min-height: 44px;
+		}
+		.address-facts dd {
+			font-size: 11px;
+		}
+		.address-facts a {
+			display: inline-flex;
+			align-items: center;
+			min-height: 44px;
+		}
+		:global([data-appearance='prism']) .address-head {
+			display: flex;
+			align-items: stretch;
+		}
+		.address-tools :global(.save-trigger) {
+			min-height: 44px;
+			padding-inline: 10px;
+		}
+		.address-tools {
+			grid-column: 2;
+			grid-row: 1;
+		}
 	}
 	.muted {
 		color: var(--fg-muted);
@@ -403,11 +545,5 @@
 	/* A minted name is prose; only ids keep the mono face. */
 	.token-name {
 		font-weight: 500;
-	}
-	.notice {
-		padding-bottom: var(--space-3);
-		color: var(--warn-ink);
-		font-size: var(--fs-data);
-		max-width: 72ch;
 	}
 </style>

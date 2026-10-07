@@ -3,7 +3,7 @@
 	"info": {
 		"title": "Kadia explorer workflow API",
 		"version": "1.0.0",
-		"description": "Versioned documentation for the 23 operations supported by the portable SDK. Other server routes are outside this contract subset. Amounts and difficulty remain decimal strings; heights/counts are numbers. Exact historical address queries require full retained history; network history requires the entire requested range to be retained. Contract version is distinct from chain height and software release. Compatible fields may be added; unknown enum values should be surfaced rather than guessed."
+		"description": "Versioned documentation for the 26 operations supported by the portable SDK. Other server routes are outside this contract subset. Amounts and difficulty remain decimal strings; heights/counts are numbers. Exact historical address queries require full retained history; network history requires the entire requested range to be retained. Contract version is distinct from chain height and software release. Compatible fields may be added; unknown enum values should be surfaced rather than guessed."
 	},
 	"servers": [
 		{
@@ -88,6 +88,102 @@
 							"application/json": {
 								"schema": {
 									"$ref": "#/components/schemas/MempoolSnapshot"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/mining": {
+			"get": {
+				"operationId": "mining",
+				"summary": "mining",
+				"parameters": [
+					{
+						"name": "from_height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "to_height",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 4294967295
+						}
+					},
+					{
+						"name": "top",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 50
+						}
+					},
+					{
+						"name": "end_block_id",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/MiningOverview"
 								}
 							}
 						}
@@ -1379,6 +1475,204 @@
 				}
 			}
 		},
+		"/addresses/{addr}/rent": {
+			"get": {
+				"operationId": "addressRentExposure",
+				"summary": "address rent exposure",
+				"parameters": [
+					{
+						"name": "addr",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "view",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"enum": ["exposure"]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RentExposure"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rent/schedule": {
+			"get": {
+				"operationId": "rentSchedule",
+				"summary": "rent schedule",
+				"parameters": [
+					{
+						"name": "window",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["24h", "7d", "30d", "90d"]
+						}
+					},
+					{
+						"name": "mode",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"enum": ["all", "collectible", "full_claim"]
+						}
+					},
+					{
+						"name": "token_id",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-fA-F0-9]{64}$"
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "snapshot",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 4096
+						}
+					},
+					{
+						"name": "consistency",
+						"in": "query",
+						"schema": {
+							"type": "string",
+							"enum": ["strict"],
+							"default": "strict"
+						},
+						"description": "The SDK always requests strict consistency and carries cursor and snapshot together."
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Observation. Read its source, completeness, timestamps and snapshot fields. Mempool entries are pending on one configured node; they are not indexed confirmation, ownership or network-wide acceptance claims.",
+						"headers": {
+							"x-explorer-completeness": {
+								"schema": {
+									"type": "string",
+									"enum": ["complete", "incomplete"]
+								},
+								"description": "Coverage of the store read. Omitted for source-only/status responses."
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RentSchedulePageDto"
+								}
+							}
+						}
+					},
+					"default": {
+						"description": "HTTP failures include invalid input (400), missing data (404), timeout (408), changed snapshot (409), body limit (413), read budget (422), throttling (429), unavailable history/source (503), or integrity failure (500). Framework errors may have no JSON body. The SDK preserves HTTP status and does not automatically retry.",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"type": "string"
+										}
+									},
+									"required": ["title", "status", "detail"]
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/addresses/{addr}/activity": {
 			"get": {
 				"operationId": "addressActivity",
@@ -2347,6 +2641,9 @@
 						"items": {
 							"$ref": "#/components/schemas/PendingTransaction"
 						}
+					},
+					"connections": {
+						"$ref": "#/components/schemas/PendingConnections"
 					}
 				},
 				"required": [
@@ -2398,6 +2695,317 @@
 					}
 				},
 				"required": ["id", "input_count", "data_input_count", "output_count", "size", "fee"]
+			},
+			"PendingConnections": {
+				"type": "object",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"const": "returned_snapshot_only"
+					},
+					"output_count": {
+						"type": "number"
+					},
+					"identified_output_count": {
+						"type": "number"
+					},
+					"edge_count": {
+						"type": "number"
+					},
+					"edges_truncated": {
+						"type": "boolean"
+					},
+					"edges": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/PendingConnection"
+						}
+					},
+					"shared_input_count": {
+						"type": "number"
+					},
+					"shared_inputs_truncated": {
+						"type": "boolean"
+					},
+					"shared_inputs": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/SharedPendingInput"
+						}
+					}
+				},
+				"required": [
+					"scope",
+					"output_count",
+					"identified_output_count",
+					"edge_count",
+					"edges_truncated",
+					"edges",
+					"shared_input_count",
+					"shared_inputs_truncated",
+					"shared_inputs"
+				]
+			},
+			"PendingConnection": {
+				"type": "object",
+				"properties": {
+					"producer_id": {
+						"type": "string"
+					},
+					"consumer_id": {
+						"type": "string"
+					},
+					"box_id": {
+						"type": "string"
+					},
+					"kind": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "spend"
+							},
+							{
+								"type": "string",
+								"const": "read"
+							}
+						]
+					}
+				},
+				"required": ["producer_id", "consumer_id", "box_id", "kind"]
+			},
+			"SharedPendingInput": {
+				"type": "object",
+				"properties": {
+					"box_id": {
+						"type": "string"
+					},
+					"transaction_count": {
+						"type": "number"
+					},
+					"transaction_ids": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"truncated": {
+						"type": "boolean"
+					}
+				},
+				"required": ["box_id", "transaction_count", "transaction_ids", "truncated"]
+			},
+			"MiningOverview": {
+				"type": "object",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"const": "canonical_block_headers"
+					},
+					"consistency": {
+						"type": "string",
+						"const": "single_reader"
+					},
+					"complete": {
+						"type": "boolean",
+						"const": true
+					},
+					"from_height": {
+						"type": "number"
+					},
+					"to_height": {
+						"type": "number"
+					},
+					"block_count": {
+						"type": "number"
+					},
+					"indexed_height": {
+						"type": "number"
+					},
+					"full_history": {
+						"type": "boolean"
+					},
+					"partial_from": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"anchor": {
+						"type": "object",
+						"properties": {
+							"height": {
+								"type": "number"
+							},
+							"block_id": {
+								"type": "string"
+							}
+						},
+						"required": ["height", "block_id"]
+					},
+					"top": {
+						"type": "number"
+					},
+					"totals": {
+						"type": "object",
+						"properties": {
+							"fees": {
+								"type": "string"
+							},
+							"transaction_count": {
+								"type": "string"
+							}
+						},
+						"required": ["fees", "transaction_count"]
+					},
+					"miner_keys": {
+						"type": "object",
+						"properties": {
+							"distinct_count": {
+								"type": "number"
+							},
+							"items": {
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/MiningKey"
+								}
+							},
+							"other_key_count": {
+								"type": "number"
+							},
+							"other_block_count": {
+								"type": "number"
+							},
+							"other_fees": {
+								"type": "string"
+							}
+						},
+						"required": [
+							"distinct_count",
+							"items",
+							"other_key_count",
+							"other_block_count",
+							"other_fees"
+						]
+					},
+					"versions": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"version": {
+									"type": "number"
+								},
+								"block_count": {
+									"type": "number"
+								}
+							},
+							"required": ["version", "block_count"]
+						}
+					},
+					"votes": {
+						"type": "object",
+						"properties": {
+							"known_blocks": {
+								"type": "number"
+							},
+							"unknown_blocks": {
+								"type": "number"
+							},
+							"zero_vote_blocks": {
+								"type": "number"
+							},
+							"distinct_tuples": {
+								"type": "number"
+							},
+							"items": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"properties": {
+										"votes": {
+											"type": "string"
+										},
+										"block_count": {
+											"type": "number"
+										}
+									},
+									"required": ["votes", "block_count"]
+								}
+							},
+							"other_tuple_count": {
+								"type": "number"
+							},
+							"other_block_count": {
+								"type": "number"
+							}
+						},
+						"required": [
+							"known_blocks",
+							"unknown_blocks",
+							"zero_vote_blocks",
+							"distinct_tuples",
+							"items",
+							"other_tuple_count",
+							"other_block_count"
+						]
+					}
+				},
+				"required": [
+					"scope",
+					"consistency",
+					"complete",
+					"from_height",
+					"to_height",
+					"block_count",
+					"indexed_height",
+					"full_history",
+					"partial_from",
+					"anchor",
+					"top",
+					"totals",
+					"miner_keys",
+					"versions",
+					"votes"
+				]
+			},
+			"MiningKey": {
+				"type": "object",
+				"properties": {
+					"public_key": {
+						"type": "string"
+					},
+					"block_count": {
+						"type": "number"
+					},
+					"first_height": {
+						"type": "number"
+					},
+					"last_height": {
+						"type": "number"
+					},
+					"first_block_id": {
+						"type": "string"
+					},
+					"last_block_id": {
+						"type": "string"
+					},
+					"fees": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"public_key",
+					"block_count",
+					"first_height",
+					"last_height",
+					"first_block_id",
+					"last_block_id",
+					"fees"
+				]
 			},
 			"NetworkSummary": {
 				"type": "object",
@@ -3354,6 +3962,9 @@
 												"type": "null"
 											}
 										]
+									},
+									"details": {
+										"$ref": "#/components/schemas/PendingTxDetails"
 									}
 								},
 								"required": ["input_count", "output_count", "data_input_count", "size", "fee"]
@@ -3401,6 +4012,129 @@
 					"conflicts",
 					"history_scope",
 					"retention_seconds"
+				]
+			},
+			"PendingTxDetails": {
+				"type": "object",
+				"properties": {
+					"inputs": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"data_inputs": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"outputs": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"index": {
+									"type": "number"
+								},
+								"id": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"value": {
+									"type": "string"
+								},
+								"ergo_tree": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"address": {
+									"anyOf": [
+										{
+											"type": "string"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"tokens": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"properties": {
+											"id": {
+												"type": "string"
+											},
+											"amount": {
+												"type": "string"
+											}
+										},
+										"required": ["id", "amount"]
+									}
+								},
+								"token_count": {
+									"anyOf": [
+										{
+											"type": "number"
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"tokens_truncated": {
+									"type": "boolean"
+								},
+								"ergo_tree_truncated": {
+									"type": "boolean"
+								}
+							},
+							"required": [
+								"index",
+								"id",
+								"value",
+								"ergo_tree",
+								"tokens",
+								"token_count",
+								"tokens_truncated",
+								"ergo_tree_truncated"
+							]
+						}
+					},
+					"inputs_truncated": {
+						"type": "boolean"
+					},
+					"data_inputs_truncated": {
+						"type": "boolean"
+					},
+					"outputs_truncated": {
+						"type": "boolean"
+					},
+					"complete": {
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"inputs",
+					"data_inputs",
+					"outputs",
+					"inputs_truncated",
+					"data_inputs_truncated",
+					"outputs_truncated",
+					"complete"
 				]
 			},
 			"TxEvidence": {
@@ -3548,6 +4282,524 @@
 					}
 				},
 				"required": ["nano", "tokens"]
+			},
+			"RentExposure": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/RentExposureBox"
+						}
+					},
+					"truncated": {
+						"type": "boolean"
+					},
+					"context": {
+						"type": "object",
+						"properties": {
+							"scope": {
+								"type": "string",
+								"const": "indexed_unspent_boxes"
+							},
+							"address": {
+								"type": "string"
+							},
+							"tree_hash": {
+								"type": "string"
+							},
+							"indexed_height": {
+								"anyOf": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"full_history": {
+								"type": "boolean"
+							},
+							"partial_from": {
+								"anyOf": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"scanned_count": {
+								"type": "number"
+							},
+							"scan_limit": {
+								"type": "number"
+							},
+							"scan_complete": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"scope",
+							"address",
+							"tree_hash",
+							"indexed_height",
+							"anchor",
+							"full_history",
+							"partial_from",
+							"scanned_count",
+							"scan_limit",
+							"scan_complete"
+						]
+					}
+				},
+				"required": ["items", "truncated", "context"]
+			},
+			"RentExposureBox": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"value": {
+						"type": "string"
+					},
+					"creation_height": {
+						"type": "number"
+					},
+					"size": {
+						"type": "number"
+					},
+					"token_count": {
+						"type": "number"
+					},
+					"rent": {
+						"type": "object",
+						"properties": {
+							"maturity_height": {
+								"type": "number"
+							},
+							"due_nano": {
+								"type": "string"
+							},
+							"claimable_at_tip": {
+								"type": "boolean"
+							},
+							"consensus_fee_nano": {
+								"type": "string"
+							},
+							"collectible": {
+								"type": "boolean"
+							}
+						},
+						"required": [
+							"maturity_height",
+							"due_nano",
+							"claimable_at_tip",
+							"consensus_fee_nano",
+							"collectible"
+						]
+					}
+				},
+				"required": ["id", "value", "creation_height", "size", "token_count", "rent"]
+			},
+			"RentSchedulePageDto": {
+				"allOf": [
+					{
+						"type": "object",
+						"properties": {
+							"items": {
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/RentScheduleItemDto"
+								}
+							},
+							"next_cursor": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"next_snapshot": {
+								"anyOf": [
+									{
+										"type": "string"
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"consistency": {
+								"anyOf": [
+									{
+										"type": "string",
+										"const": "strict"
+									},
+									{
+										"type": "string",
+										"const": "best_effort"
+									}
+								]
+							},
+							"anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"observed_anchor": {
+								"anyOf": [
+									{
+										"type": "object",
+										"properties": {
+											"height": {
+												"type": "number"
+											},
+											"block_id": {
+												"type": "string"
+											}
+										},
+										"required": ["height", "block_id"]
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["items", "next_cursor"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"schedule_context": {
+								"$ref": "#/components/schemas/RentScheduleContextDto"
+							},
+							"batches": {
+								"anyOf": [
+									{
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/RentScheduleBatchDto"
+										}
+									},
+									{
+										"type": "null"
+									}
+								]
+							}
+						},
+						"required": ["schedule_context", "batches"]
+					}
+				]
+			},
+			"RentScheduleContextDto": {
+				"type": "object",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"const": "indexed_unspent_rent_window"
+					},
+					"anchor_timestamp_ms": {
+						"type": "number"
+					},
+					"from_height": {
+						"type": "number"
+					},
+					"to_height": {
+						"type": "number"
+					},
+					"target_block_seconds": {
+						"type": "number"
+					},
+					"window": {
+						"$ref": "#/components/schemas/RentScheduleWindow"
+					},
+					"mode": {
+						"$ref": "#/components/schemas/RentScheduleMode"
+					},
+					"token_id": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"full_history": {
+						"type": "boolean"
+					},
+					"partial_from": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"scanned": {
+						"type": "number"
+					},
+					"scan_limit": {
+						"type": "number"
+					},
+					"scan_limit_reached": {
+						"type": "boolean"
+					},
+					"complete": {
+						"type": "boolean"
+					},
+					"batch_scanned": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"batch_scan_limit": {
+						"type": "number"
+					},
+					"batch_complete": {
+						"anyOf": [
+							{
+								"type": "boolean"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"batch_stop_reason": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "candidate_limit"
+							},
+							{
+								"type": "string",
+								"const": "decode_limit"
+							},
+							{
+								"type": "string",
+								"const": "work_limit"
+							},
+							{
+								"type": "string",
+								"const": "deadline"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"rent_factor": {
+						"type": "number"
+					},
+					"fee_arithmetic": {
+						"type": "string",
+						"const": "wrapping_i32"
+					}
+				},
+				"required": [
+					"scope",
+					"anchor_timestamp_ms",
+					"from_height",
+					"to_height",
+					"target_block_seconds",
+					"window",
+					"mode",
+					"token_id",
+					"full_history",
+					"partial_from",
+					"scanned",
+					"scan_limit",
+					"scan_limit_reached",
+					"complete",
+					"batch_scanned",
+					"batch_scan_limit",
+					"batch_complete",
+					"batch_stop_reason",
+					"rent_factor",
+					"fee_arithmetic"
+				]
+			},
+			"RentScheduleWindow": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "24h"
+					},
+					{
+						"type": "string",
+						"const": "7d"
+					},
+					{
+						"type": "string",
+						"const": "30d"
+					},
+					{
+						"type": "string",
+						"const": "90d"
+					}
+				]
+			},
+			"RentScheduleMode": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "all"
+					},
+					{
+						"type": "string",
+						"const": "collectible"
+					},
+					{
+						"type": "string",
+						"const": "full_claim"
+					}
+				]
+			},
+			"RentScheduleBatchDto": {
+				"type": "object",
+				"properties": {
+					"estimated_hour_start_ms": {
+						"type": "number"
+					},
+					"box_count": {
+						"type": "number"
+					},
+					"collectible_due_nano": {
+						"type": "string"
+					},
+					"full_claim_count": {
+						"type": "number"
+					},
+					"full_claim_value_nano": {
+						"type": "string"
+					},
+					"selected_token_full_claim_amount": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"estimated_hour_start_ms",
+					"box_count",
+					"collectible_due_nano",
+					"full_claim_count",
+					"full_claim_value_nano",
+					"selected_token_full_claim_amount"
+				]
+			},
+			"RentScheduleItemDto": {
+				"type": "object",
+				"properties": {
+					"box_id": {
+						"type": "string"
+					},
+					"tx_id": {
+						"type": "string"
+					},
+					"creation_height": {
+						"type": "number"
+					},
+					"maturity_height": {
+						"type": "number"
+					},
+					"estimated_maturity_ms": {
+						"type": "number"
+					},
+					"value": {
+						"type": "string"
+					},
+					"consensus_fee_nano": {
+						"type": "string"
+					},
+					"collectible_due_nano": {
+						"type": "string"
+					},
+					"collectible": {
+						"type": "boolean"
+					},
+					"full_claim": {
+						"type": "boolean"
+					},
+					"protocol_constrained": {
+						"type": "boolean"
+					},
+					"tokens": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/TokenDto"
+						}
+					}
+				},
+				"required": [
+					"box_id",
+					"tx_id",
+					"creation_height",
+					"maturity_height",
+					"estimated_maturity_ms",
+					"value",
+					"consensus_fee_nano",
+					"collectible_due_nano",
+					"collectible",
+					"full_claim",
+					"protocol_constrained",
+					"tokens"
+				]
 			},
 			"AddressActivityPageDto": {
 				"allOf": [

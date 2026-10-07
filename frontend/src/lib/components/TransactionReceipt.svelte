@@ -112,7 +112,6 @@
 	{/if}
 	<div class="receipt-heading">
 		<div>
-			<p class="eyebrow">Transaction receipt</p>
 			<h2>{kind.label === 'Transaction' ? 'Transaction activity' : kind.label}</h2>
 		</div>
 		<span class="confirmation"
@@ -385,7 +384,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 16px;
+		gap: 8px 16px;
 		flex-wrap: wrap;
 	}
 	.eyebrow {
@@ -402,7 +401,7 @@
 		font-family: var(--font-display, var(--font-sans));
 		font-weight: var(--weight-display, 800);
 		letter-spacing: -1px;
-		margin-top: 6px;
+		margin-top: 0;
 	}
 	h3 {
 		font-size: var(--fs-title);
@@ -653,6 +652,17 @@
 		overflow-wrap: anywhere;
 	}
 	@media (max-width: 600px) {
+		:global(:root[data-density][data-appearance]) .receipt-section > :global(.tabs) {
+			flex-wrap: nowrap;
+			gap: 12px;
+			overflow-x: auto;
+			min-width: 0;
+		}
+		.receipt-section > :global(.tabs .tab) {
+			flex: none;
+			white-space: nowrap;
+			min-height: 44px;
+		}
 		.receipt {
 			padding: 20px;
 		}
