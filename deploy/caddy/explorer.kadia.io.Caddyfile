@@ -87,3 +87,6 @@ node.kadia.io {
 		respond 403
 	}
 }
+
+# Extra sites, one file each (added for dex.kadia.io).
+import /etc/caddy/sites/*.caddy
