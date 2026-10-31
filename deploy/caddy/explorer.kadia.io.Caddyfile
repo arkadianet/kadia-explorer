@@ -17,6 +17,13 @@ explorer.kadia.io {
 		reverse_proxy 127.0.0.1:18090
 	}
 
+	# Testnet GraphQL for Nautilus (ergo-graphql compatible, read-only except tx check/submit), answered from Kadia's
+	# testnet nodes by kadia-web's packages/explorer-gql on the home host, reached through the reverse tunnel.
+	# Nautilus: Settings -> GraphQL server -> https://explorer.kadia.io/graphql/testnet/
+	handle_path /graphql/testnet/* {
+		reverse_proxy 127.0.0.1:18796
+	}
+
 	handle {
 		root * /var/www/explorer
 
